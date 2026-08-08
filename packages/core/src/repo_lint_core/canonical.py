@@ -1,0 +1,61 @@
+"""Canonicalization and semantic fingerprint helpers."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import posixpath
+import unicodedata
+from dataclasses import replace
+
+from .errors import ConfigurationError
+from .models import Diagnostic, Manifest
+
+
+def canonical_path(value: str) -> str:
+    """Return a safe, normalized repository-relative POSIX path."""
+    if not value or "\\" in value or "\x00" in value:
+        raise ConfigurationError(f"invalid repository-relative path: {value!r}")
+    normalized_unicode = unicodedata.normalize("NFC", value)
+    if normalized_unicode != value:
+        raise ConfigurationError(f"path must be NFC-normalized: {value!r}")
+    normalized = posixpath.normpath(value)
+    if value.startswith("/") or normalized in {".", ".."} or normalized.startswith("../"):
+        raise ConfigurationError(f"path escapes repository root: {value!r}")
+    return normalized
+
+
+def canonical_json(value: object) -> str:
+    """Encode canonical JSON without machine-specific formatting."""
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
+def semantic_fingerprint(diagnostic: Diagnostic) -> str:
+    """Hash semantic identity, excluding text, line numbers, and absolute paths."""
+    parts = (
+        "finding-v1",
+        diagnostic.rule_id,
+        str(diagnostic.rule_version),
+        diagnostic.component_id,
+        diagnostic.subject_kind,
+        diagnostic.manifest_anchor,
+        diagnostic.observed,
+        diagnostic.expected,
+    )
+    payload = b"".join(len(part.encode()).to_bytes(4, "big") + part.encode() for part in parts)
+    return hashlib.sha256(payload).hexdigest()
+
+
+def with_fingerprint(diagnostic: Diagnostic) -> Diagnostic:
+    """Return a diagnostic carrying its semantic fingerprint."""
+    return replace(diagnostic, fingerprint=semantic_fingerprint(diagnostic))
+
+
+def scope_digest(manifest: Manifest) -> str:
+    """Digest policy applicability, not mutable repository inventory."""
+    payload = {
+        "repository_id": manifest.repository_id,
+        "policy_id": manifest.policy_id,
+        "policy_version": manifest.policy_version,
+    }
+    return hashlib.sha256(canonical_json(payload).encode()).hexdigest()

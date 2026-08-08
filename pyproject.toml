@@ -1,0 +1,58 @@
+[project]
+name = "sarj-repo-lint"
+version = "0.1.0"
+description = "Deterministic repository architecture and migration linter"
+requires-python = ">=3.12"
+dependencies = [
+  "repo-lint-core",
+  "repo-lint-policy-sarj",
+]
+
+[project.scripts]
+repo-lint = "repo_lint_cli:main"
+sarj-repo-lint = "repo_lint_cli:main"
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+repo-lint-core = { workspace = true }
+repo-lint-policy-sarj = { workspace = true }
+
+[tool.uv.workspace]
+members = ["packages/core", "packages/policy-sarj"]
+
+[dependency-groups]
+dev = [
+  "basedpyright>=1.31.0",
+  "jsonschema>=4.25.0",
+  "pytest>=8.4.0",
+  "ruff>=0.12.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/repo_lint_cli"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests", "packages/core/tests", "packages/policy-sarj/tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "PERF", "PL", "RUF", "S", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["PLR2004", "S101"]
+
+[tool.basedpyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src", "packages/core/src", "packages/policy-sarj/src", "tests"]
+extraPaths = ["packages/core/src", "packages/policy-sarj/src"]

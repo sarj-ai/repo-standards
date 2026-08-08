@@ -1,0 +1,5 @@
+* @sarj-ai/voice-eng
+/.github/ @sarj-ai/voice-eng
+/packages/core/ @sarj-ai/voice-eng
+/packages/policy-sarj/ @sarj-ai/voice-eng
+/docs/ @sarj-ai/voice-eng
