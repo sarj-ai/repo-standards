@@ -1,8 +1,9 @@
 # sarj-repo-lint
 
 `sarj-repo-lint` is a deterministic, read-only repository architecture linter. It validates
-declared component ownership, physical layout, typed dependency direction, migration mappings,
-and exact legacy-debt baselines without importing or executing repository code.
+declared component ownership and target topology, typed dependency direction, migration mappings,
+and exact legacy-debt baselines without importing or executing repository code. `inspect` verifies
+tracked Git-tree inventory; manifest `check` does not yet prove every declared component path exists.
 
 The repository intentionally separates:
 
@@ -19,8 +20,9 @@ Requires Python 3.12+ and uv.
 
 ```bash
 uv sync --frozen
-uv run repo-lint check /path/to/repository --policy sarj --mode report
-uv run repo-lint list-rules --policy sarj
+uv run repo-lint inspect /path/to/repository
+uv run repo-lint report /path/to/repository --policy sarj
+uv run repo-lint rules --policy sarj
 uv run repo-lint explain sarj/graph/cross-product-import --policy sarj
 uv run repo-lint schema
 ```
@@ -28,14 +30,14 @@ uv run repo-lint schema
 Machine consumers should use canonical JSON:
 
 ```bash
-uv run repo-lint check /path/to/repository \
+uv run repo-lint report /path/to/repository \
   --policy sarj \
-  --mode report \
   --format json
 ```
 
-JSON is the authoritative interface. Standard output contains exactly one JSON value; operational
-errors are represented as `completion: "incomplete"`, `conclusion: "inconclusive"`, and exit 2.
+JSON is the authoritative `report`/`check` interface. Standard output contains exactly one JSON value;
+operational errors are represented as `completion: "incomplete"`,
+`conclusion: "inconclusive"`, and exit 2. `inspect` has its own versioned inventory envelope.
 
 ## Modes
 
@@ -63,7 +65,7 @@ policy_version = 1
 id = "platform.agent"
 kind = "application"
 product = "platform"
-path = "products/platform/components/agent"
+path = "applications/platform/agent"
 owner = "@example/platform"
 
 [[components.dependencies]]
@@ -75,16 +77,17 @@ id = "platform.request-signing"
 kind = "product-library"
 product = "platform"
 capability = "request-signing"
-path = "products/platform/libraries/python/request-signing"
+path = "libraries/python/platform/request-signing"
 owner = "@example/platform"
 ```
 
 The manifest is strict: unknown keys, unknown component/edge kinds, duplicate IDs, unsafe paths,
-missing targets, and mismatched policy versions make analysis incomplete. Legacy paths are allowed
-only through `legacy = true`; intentional moves use an explicit `[[migration_paths]]` record.
+missing targets, and mismatched policy versions make analysis incomplete. `legacy = true` is
+inventory metadata only and never suppresses a rule; reviewed legacy debt lives in the exact
+baseline. Intentional moves use an explicit `[[migration_paths]]` record.
 
-Exceptions are exact `(rule_id, component_id)` pairs with owner, issue, reason, creation date, and
-a maximum 90-day ISO expiry.
+Exceptions are exact `(rule_id, component_id, manifest_anchor, fingerprint)` occurrences with
+owner, issue, reason, creation date, and a maximum 90-day ISO expiry.
 When exceptions exist, callers must pass `--as-of YYYY-MM-DD` so results never depend silently on
 the machine clock.
 
@@ -95,7 +98,6 @@ counts:
 {
   "schema_version": 1,
   "repository_id": "example-repository",
-  "source_sha": "0000000000000000000000000000000000000000",
   "policy": "sarj",
   "policy_version": 1,
   "scope_digest": "<digest from a report>",
@@ -120,15 +122,19 @@ workflow file with proof that a deployment, approval, artifact promotion, rollba
 policy actually worked.
 
 See [architecture.md](docs/architecture.md), [diagnostics.md](docs/diagnostics.md), and
-[rule-evaluation.md](docs/rule-evaluation.md).
+[rule-evaluation.md](docs/rule-evaluation.md). The private fleet calibration is summarized in
+[corpus-calibration.md](docs/corpus-calibration.md), and the reviewed future interface is captured
+in [api-roadmap.md](docs/api-roadmap.md).
+The proposed reusable-code, repository-layout, Actions, Cloud Build, and deployment conventions are
+in [repository-policy.md](docs/repository-policy.md).
 
 ## Development
 
 ```bash
 uv sync
 uv run pytest
-uv run ruff check .
-uv run basedpyright
+uvx --isolated --python 3.14 --from sarj-standards==1.2.0 \
+  sarj-standards check --trust-repository-code
 ```
 
 No license is granted while this remains a private evaluation prototype.

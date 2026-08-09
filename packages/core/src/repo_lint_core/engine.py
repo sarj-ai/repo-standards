@@ -10,115 +10,174 @@ from .errors import ConfigurationError
 from .models import (
     AnalysisReport,
     Baseline,
+    Component,
+    ComponentId,
     Diagnostic,
     ExceptionUse,
     Manifest,
     Mode,
     Policy,
     Remediation,
+    RuleId,
 )
 
 
-def _core_diagnostics(manifest: Manifest) -> tuple[Diagnostic, ...]:
-    diagnostics: list[Diagnostic] = []
+def core_diagnostics(manifest: Manifest) -> tuple[Diagnostic, ...]:
     by_id = {item.component_id: item for item in manifest.components}
-    ordered = sorted(manifest.components, key=lambda item: (item.path, item.component_id))
-    for index, component in enumerate(ordered):
-        for other in ordered[index + 1 :]:
-            if other.path.startswith(f"{component.path}/"):
-                diagnostics.append(  # noqa: PERF401 - nested pairwise overlap check
-                    Diagnostic(
-                        rule_id="core/layout/non-overlapping-root",
-                        rule_version=1,
-                        severity="error",
-                        evidence_level="verified",
-                        component_id=other.component_id,
-                        subject_kind="component-root",
-                        observed=f"{component.path} contains {other.path}",
-                        expected="component roots must be disjoint",
-                        message=f"component root overlaps {component.component_id}",
-                        path=other.path,
-                        manifest_anchor=f"components.{other.component_id}.path",
-                        remediation=Remediation(
-                            summary="Give each component one disjoint ownership root.",
-                            steps=(
-                                "Choose which component owns the overlapping files.",
-                                "Move the other component to a disjoint root or merge "
-                                "the declarations.",
-                            ),
-                            validation=("Run repo-lint check again.",),
-                        ),
-                    )
-                )
-        for dependency in component.dependencies:
-            if dependency.target not in by_id:
-                raise ConfigurationError(
-                    f"component {component.component_id} references unknown target "
-                    f"{dependency.target}"
-                )
-    migration_components: set[str] = set()
-    for migration in manifest.migration_paths:
-        if migration.component_id not in by_id:
-            raise ConfigurationError(
-                f"migration path references unknown component {migration.component_id}"
-            )
-        if migration.component_id in migration_components:
-            raise ConfigurationError(
-                f"component {migration.component_id} has multiple migration path declarations"
-            )
-        migration_components.add(migration.component_id)
-        if migration.new_path != by_id[migration.component_id].path:
-            raise ConfigurationError(
-                f"migration target for {migration.component_id} must equal its declared "
-                "component path"
-            )
+    diagnostics = list(_overlap_diagnostics(manifest))
+    _validate_dependencies(manifest, by_id)
+    _validate_migrations(manifest, by_id)
     return tuple(diagnostics)
 
 
-def _apply_exceptions(
+def _overlap_diagnostics(manifest: Manifest) -> tuple[Diagnostic, ...]:
+    diagnostics: list[Diagnostic] = []
+    ordered = sorted(
+        manifest.components, key=lambda item: (item.path.casefold(), item.path, item.component_id)
+    )
+    ownership_stack: list[Component] = []
+    for component in ordered:
+        while ownership_stack and not (
+            component.path.casefold() == ownership_stack[-1].path.casefold()
+            or component.path.casefold().startswith(f"{ownership_stack[-1].path.casefold()}/")
+        ):
+            ownership_stack.pop()
+        if ownership_stack:
+            owner = ownership_stack[-1]
+            diagnostics.append(
+                Diagnostic(
+                    rule_id=RuleId("core/layout/non-overlapping-root"),
+                    rule_version=1,
+                    severity="error",
+                    evidence_level="verified",
+                    component_id=component.component_id,
+                    subject_kind="component-root",
+                    observed=f"{owner.path} contains {component.path}",
+                    expected="component roots must be disjoint",
+                    message=f"component root overlaps {owner.component_id}",
+                    path=component.path,
+                    manifest_anchor=f"components.{component.component_id}.path",
+                    remediation=Remediation(
+                        summary="Give each component one disjoint ownership root.",
+                        steps=(
+                            "Choose which component owns the overlapping files.",
+                            (
+                                "Move the other component to a disjoint root or merge "
+                                "the declarations."
+                            ),
+                        ),
+                        validation=("Run repo-lint check again.",),
+                    ),
+                )
+            )
+        ownership_stack.append(component)
+    return tuple(diagnostics)
+
+
+def _validate_dependencies(manifest: Manifest, by_id: dict[ComponentId, Component]) -> None:
+    for component in manifest.components:
+        for dependency in component.dependencies:
+            if dependency.target not in by_id:
+                ConfigurationError.fail(
+                    f"component {component.component_id} references unknown target "
+                    f"{dependency.target}"
+                )
+
+
+def _validate_migrations(manifest: Manifest, by_id: dict[ComponentId, Component]) -> None:
+    migration_components: set[ComponentId] = set()
+    migration_sources: set[str] = set()
+    migration_targets: dict[str, ComponentId] = {}
+    for migration in manifest.migration_paths:
+        if migration.component_id not in by_id:
+            ConfigurationError.fail(
+                f"migration path references unknown component {migration.component_id}"
+            )
+        if migration.component_id in migration_components:
+            ConfigurationError.fail(
+                f"component {migration.component_id} has multiple migration path declarations"
+            )
+        migration_components.add(migration.component_id)
+        if migration.old_path == migration.new_path:
+            ConfigurationError.fail(
+                f"migration path for {migration.component_id} must change the component path"
+            )
+        if migration.old_path in migration_sources:
+            ConfigurationError.fail(
+                f"migration source path is declared more than once: {migration.old_path}"
+            )
+        migration_sources.add(migration.old_path)
+        if migration.new_path != by_id[migration.component_id].path:
+            ConfigurationError.fail(
+                f"migration target for {migration.component_id} must equal its declared "
+                "component path"
+            )
+        migration_targets[migration.new_path] = migration.component_id
+    for migration in manifest.migration_paths:
+        occupying_component = migration_targets.get(migration.old_path)
+        if occupying_component is not None and occupying_component != migration.component_id:
+            ConfigurationError.fail(
+                f"migration paths form a swap or cycle at {migration.old_path}; "
+                "use a disjoint staging path and explicit sequencing"
+            )
+
+
+def apply_exceptions(
     diagnostics: tuple[Diagnostic, ...], manifest: Manifest, as_of: date | None
 ) -> tuple[Diagnostic, ...]:
     if manifest.exceptions and as_of is None:
-        raise ConfigurationError("--as-of YYYY-MM-DD is required when exceptions are declared")
-    exceptions = {(item.rule_id, item.component_id): item for item in manifest.exceptions}
+        ConfigurationError.fail("--as-of YYYY-MM-DD is required when exceptions are declared")
+    exceptions = {
+        (item.rule_id, item.component_id, item.manifest_anchor, item.fingerprint): item
+        for item in manifest.exceptions
+    }
     if len(exceptions) != len(manifest.exceptions):
-        raise ConfigurationError("duplicate exception scope")
+        ConfigurationError.fail("duplicate exception scope")
     result: list[Diagnostic] = []
-    matched: set[tuple[str, str]] = set()
+    matched: set[tuple[str, str, str, str]] = set()
     for diagnostic in diagnostics:
-        key = (diagnostic.rule_id, diagnostic.component_id)
+        key = (
+            diagnostic.rule_id,
+            diagnostic.component_id,
+            diagnostic.manifest_anchor,
+            diagnostic.fingerprint,
+        )
         exception = exceptions.get(key)
         if exception is None:
             result.append(diagnostic)
             continue
         matched.add(key)
         if as_of is None:
-            raise ConfigurationError("exception analysis date is missing")
+            ConfigurationError.fail("exception analysis date is missing")
         if date.fromisoformat(exception.created_on) > as_of:
-            raise ConfigurationError(
+            ConfigurationError.fail(
                 f"exception for {diagnostic.rule_id}:{diagnostic.component_id} is future-dated"
             )
         if date.fromisoformat(exception.expires_on) < as_of:
-            result.append(diagnostic)
-            result.append(
-                Diagnostic(
-                    rule_id="core/exception/expired",
-                    rule_version=1,
-                    severity="error",
-                    evidence_level="declared",
-                    component_id=diagnostic.component_id,
-                    subject_kind="exception",
-                    observed=exception.expires_on,
-                    expected=f"expiry on or after {as_of.isoformat()}",
-                    message=f"exception for {diagnostic.rule_id} has expired",
-                    path=diagnostic.path,
-                    manifest_anchor=f"exceptions.{diagnostic.rule_id}.{diagnostic.component_id}",
-                    remediation=Remediation(
-                        summary="Resolve the finding or renew the narrow exception through review.",
-                        steps=("Fix the underlying finding or update its reviewed exception.",),
-                        validation=("Run repo-lint check with the same --as-of date.",),
+            result.extend(
+                (
+                    diagnostic,
+                    Diagnostic(
+                        rule_id=RuleId("core/exception/expired"),
+                        rule_version=1,
+                        severity="error",
+                        evidence_level="declared",
+                        component_id=diagnostic.component_id,
+                        subject_kind="exception",
+                        observed=exception.expires_on,
+                        expected=f"expiry on or after {as_of.isoformat()}",
+                        message=f"exception for {diagnostic.rule_id} has expired",
+                        path=diagnostic.path,
+                        manifest_anchor=f"exceptions.{diagnostic.rule_id}.{diagnostic.component_id}",
+                        remediation=Remediation(
+                            summary=(
+                                "Resolve the finding or renew the narrow exception through review."
+                            ),
+                            steps=("Fix the underlying finding or update its reviewed exception.",),
+                            validation=("Run repo-lint check with the same --as-of date.",),
+                        ),
+                        prerequisites=(diagnostic.rule_id,),
                     ),
-                    prerequisites=(diagnostic.rule_id,),
                 )
             )
         else:
@@ -137,8 +196,11 @@ def _apply_exceptions(
             )
     unused = sorted(set(exceptions) - matched)
     if unused:
-        scopes = ", ".join(f"{rule}:{component}" for rule, component in unused)
-        raise ConfigurationError(f"exceptions do not match current findings: {scopes}")
+        scopes = ", ".join(
+            f"{rule}:{component}:{anchor}:{fingerprint}"
+            for rule, component, anchor, fingerprint in unused
+        )
+        ConfigurationError.fail(f"exceptions do not match current findings: {scopes}")
     return tuple(result)
 
 
@@ -151,12 +213,20 @@ def analyze(
 ) -> AnalysisReport:
     """Evaluate a parsed manifest without repository-code execution."""
     if manifest.policy_id != policy.policy_id or manifest.policy_version != policy.policy_version:
-        raise ConfigurationError(
+        ConfigurationError.fail(
             f"manifest selects {manifest.policy_id}@{manifest.policy_version}; "
             f"installed policy is {policy.policy_id}@{policy.policy_version}"
         )
-    findings = _core_diagnostics(manifest) + policy.evaluate(manifest)
-    findings = _apply_exceptions(findings, manifest, as_of)
+    findings = tuple(
+        with_fingerprint(item) for item in core_diagnostics(manifest) + policy.evaluate(manifest)
+    )
+    fingerprints = [item.fingerprint for item in findings]
+    if len(fingerprints) != len(set(fingerprints)):
+        ConfigurationError.fail(
+            "analysis emitted duplicate semantic fingerprints; diagnostics must identify "
+            "distinct occurrences"
+        )
+    findings = apply_exceptions(findings, manifest, as_of)
     diagnostics = tuple(
         with_fingerprint(item)
         for item in sorted(
@@ -190,11 +260,11 @@ def analyze(
 def check_baseline(report: AnalysisReport, baseline: Baseline) -> tuple[Diagnostic, ...]:
     """Return exact new/stale debt diagnostics for ratchet mode."""
     if baseline.repository_id != report.repository_id:
-        raise ConfigurationError("baseline repository_id does not match the manifest")
+        ConfigurationError.fail("baseline repository_id does not match the manifest")
     if baseline.policy_id != report.policy_id or baseline.policy_version != report.policy_version:
-        raise ConfigurationError("baseline policy does not match the selected policy")
+        ConfigurationError.fail("baseline policy does not match the selected policy")
     if baseline.scope_digest != report.scope_digest:
-        raise ConfigurationError("baseline scope does not match the current manifest")
+        ConfigurationError.fail("baseline scope does not match the current manifest")
     current = {
         item.fingerprint: item
         for item in report.diagnostics
@@ -206,11 +276,11 @@ def check_baseline(report: AnalysisReport, baseline: Baseline) -> tuple[Diagnost
     stale_diagnostics = tuple(
         with_fingerprint(
             Diagnostic(
-                rule_id="core/baseline/stale-entry",
+                rule_id=RuleId("core/baseline/stale-entry"),
                 rule_version=1,
                 severity="error",
                 evidence_level="declared",
-                component_id="repository",
+                component_id=ComponentId("repository"),
                 subject_kind="baseline-entry",
                 observed=fingerprint,
                 expected="remove resolved debt from the baseline",

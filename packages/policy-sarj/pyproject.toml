@@ -2,11 +2,15 @@
 name = "repo-lint-policy-sarj"
 version = "0.1.0"
 description = "Sarj repository architecture policy for repo-lint"
+readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["repo-lint-core"]
+dependencies = ["repo-lint-core==0.1.0"]
+
+[project.entry-points."repo_lint.policies.v1"]
+sarj = "repo_lint_policy_sarj:SarjPolicy"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

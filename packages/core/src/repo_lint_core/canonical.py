@@ -2,26 +2,34 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import json
 import posixpath
+from typing import TYPE_CHECKING
 import unicodedata
-from dataclasses import replace
 
 from .errors import ConfigurationError
-from .models import Diagnostic, Manifest
+
+
+if TYPE_CHECKING:
+    from .models import Diagnostic, Manifest
 
 
 def canonical_path(value: str) -> str:
     """Return a safe, normalized repository-relative POSIX path."""
-    if not value or "\\" in value or "\x00" in value:
-        raise ConfigurationError(f"invalid repository-relative path: {value!r}")
+    if (
+        not value
+        or "\\" in value
+        or any(unicodedata.category(char).startswith("C") for char in value)
+    ):
+        ConfigurationError.fail(f"invalid repository-relative path: {value!r}")
     normalized_unicode = unicodedata.normalize("NFC", value)
     if normalized_unicode != value:
-        raise ConfigurationError(f"path must be NFC-normalized: {value!r}")
+        ConfigurationError.fail(f"path must be NFC-normalized: {value!r}")
     normalized = posixpath.normpath(value)
     if value.startswith("/") or normalized in {".", ".."} or normalized.startswith("../"):
-        raise ConfigurationError(f"path escapes repository root: {value!r}")
+        ConfigurationError.fail(f"path escapes repository root: {value!r}")
     return normalized
 
 
@@ -33,7 +41,7 @@ def canonical_json(value: object) -> str:
 def semantic_fingerprint(diagnostic: Diagnostic) -> str:
     """Hash semantic identity, excluding text, line numbers, and absolute paths."""
     parts = (
-        "finding-v1",
+        "finding-v3",
         diagnostic.rule_id,
         str(diagnostic.rule_version),
         diagnostic.component_id,

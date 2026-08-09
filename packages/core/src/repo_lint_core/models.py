@@ -3,18 +3,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from enum import StrEnum
+from typing import ClassVar, Literal, NewType, Protocol, runtime_checkable
+
+
+RepositoryId = NewType("RepositoryId", str)
+PolicyId = NewType("PolicyId", str)
+ComponentId = NewType("ComponentId", str)
+RuleId = NewType("RuleId", str)
+
 
 Severity = Literal["warning", "error"]
 EvidenceLevel = Literal["verified", "declared", "external", "unknown"]
-Mode = Literal["report", "ratchet", "strict"]
+
+
+class Mode(StrEnum):
+    """Analysis enforcement modes."""
+
+    REPORT = "report"
+    RATCHET = "ratchet"
+    STRICT = "strict"
 
 
 @dataclass(frozen=True, slots=True)
 class Dependency:
     """A typed, declared relation between two stable components."""
 
-    target: str
+    target: ComponentId
     kind: str
 
 
@@ -22,7 +37,7 @@ class Dependency:
 class Component:
     """A stable repository component declared by the repository owner."""
 
-    component_id: str
+    component_id: ComponentId
     kind: str
     path: str
     owner: str
@@ -36,7 +51,7 @@ class Component:
 class MigrationPath:
     """An explicit path relocation used to preserve diagnostic identity."""
 
-    component_id: str
+    component_id: ComponentId
     old_path: str
     new_path: str
 
@@ -45,8 +60,10 @@ class MigrationPath:
 class ExceptionRecord:
     """A narrow, time-bounded policy exception."""
 
-    rule_id: str
-    component_id: str
+    rule_id: RuleId
+    component_id: ComponentId
+    manifest_anchor: str
+    fingerprint: str
     owner: str
     reason: str
     issue: str
@@ -58,8 +75,8 @@ class ExceptionRecord:
 class Manifest:
     """Strict repository declaration consumed by the engine."""
 
-    repository_id: str
-    policy_id: str
+    repository_id: RepositoryId
+    policy_id: PolicyId
     policy_version: int
     components: tuple[Component, ...]
     migration_paths: tuple[MigrationPath, ...] = ()
@@ -90,14 +107,25 @@ class ExceptionUse:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionIssue:
+    """One stable machine-actionable reason analysis could not complete."""
+
+    code: str
+    phase: str
+    message: str
+    retryable: bool
+    remediation: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Diagnostic:
     """One deterministic policy finding."""
 
-    rule_id: str
+    rule_id: RuleId
     rule_version: int
     severity: Severity
     evidence_level: EvidenceLevel
-    component_id: str
+    component_id: ComponentId
     subject_kind: str
     observed: str
     expected: str
@@ -115,7 +143,7 @@ class Diagnostic:
 class Rule:
     """Discoverable rule documentation."""
 
-    rule_id: str
+    rule_id: RuleId
     version: int
     severity: Severity
     summary: str
@@ -124,11 +152,12 @@ class Rule:
     good_example: str
 
 
+@runtime_checkable
 class Policy(Protocol):
     """Non-executable interface implemented by installed policy packages."""
 
-    policy_id: str
-    policy_version: int
+    policy_id: ClassVar[PolicyId]
+    policy_version: ClassVar[int]
 
     def rules(self) -> tuple[Rule, ...]:
         """Return every immutable rule definition in the policy."""
@@ -143,9 +172,8 @@ class Policy(Protocol):
 class Baseline:
     """Exact reviewed legacy debt."""
 
-    repository_id: str
-    source_sha: str
-    policy_id: str
+    repository_id: RepositoryId
+    policy_id: PolicyId
     policy_version: int
     scope_digest: str
     fingerprints: tuple[str, ...]
@@ -156,12 +184,12 @@ class AnalysisReport:
     """Canonical result with completion separate from policy conclusion."""
 
     mode: Mode
-    repository_id: str
-    policy_id: str
+    repository_id: RepositoryId
+    policy_id: PolicyId
     policy_version: int
     scope_digest: str
     completion: Literal["complete", "incomplete"]
     conclusion: Literal["passed", "findings", "inconclusive"]
     diagnostics: tuple[Diagnostic, ...] = ()
-    execution_issues: tuple[str, ...] = ()
+    execution_issues: tuple[ExecutionIssue, ...] = ()
     summary: dict[str, int] = field(default_factory=dict)

@@ -1,0 +1,12 @@
+repos:
+  - repo: local
+    hooks:
+      - id: sarj-standards-check
+        name: sarj standards -- staged checks
+        entry: uvx --isolated --python 3.14 --from sarj-standards==1.2.0 sarj-standards check --staged --trust-repository-code --
+        language: system
+        always_run: true
+        pass_filenames: true
+        require_serial: true
+        files: '(?i)(\.py|\.[cm]?[jt]s|\.[jt]sx|\.sql|\.tf|\.tfvars|\.hcl|\.ya?ml|\.toml|\.jsonc|\.mdx?|\.(?:bash|cfg|conf|env|ini|properties|sh|tftpl|zsh)|(?:^|/)\.env(?:\..*)?$|(?:^|/)requirements(?:/.*|[^/]*\.(?:txt|in))$|(?:^|/)(?:Dockerfile(?:\..*)?|Gnumakefile|Justfile|Makefile|package\.json|pyrightconfig\.json))$'
+        stages: [pre-commit]

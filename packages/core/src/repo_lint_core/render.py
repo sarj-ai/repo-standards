@@ -2,26 +2,59 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict
+import json
+from typing import TYPE_CHECKING
 
 from .canonical import canonical_json
-from .models import AnalysisReport, Diagnostic, Rule
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from .models import AnalysisReport, Diagnostic, Rule
+
 
 OUTPUT_SCHEMA_VERSION = 1
 
 
-def diagnostic_dict(diagnostic: Diagnostic) -> dict[str, object]:
+def diagnostic_dict(diagnostic: Diagnostic) -> Mapping[str, object]:
     """Return the stable wire representation of a diagnostic."""
-    value = asdict(diagnostic)
-    value["remediation"]["steps"] = list(diagnostic.remediation.steps)  # type: ignore[index]
-    value["remediation"]["validation"] = list(diagnostic.remediation.validation)  # type: ignore[index]
-    value["remediation"]["rollback"] = list(diagnostic.remediation.rollback)  # type: ignore[index]
-    value["prerequisites"] = list(diagnostic.prerequisites)
-    return value
+    exception = asdict(diagnostic.exception) if diagnostic.exception is not None else None
+    remediation = {
+        "summary": diagnostic.remediation.summary,
+        "steps": list(diagnostic.remediation.steps),
+        "validation": list(diagnostic.remediation.validation),
+        "rollback": list(diagnostic.remediation.rollback),
+        "suggested_manifest": diagnostic.remediation.suggested_manifest,
+        "auto_applicable": diagnostic.remediation.auto_applicable,
+    }
+    return {
+        "rule_id": diagnostic.rule_id,
+        "rule_version": diagnostic.rule_version,
+        "severity": diagnostic.severity,
+        "evidence_level": diagnostic.evidence_level,
+        "component_id": diagnostic.component_id,
+        "subject_kind": diagnostic.subject_kind,
+        "observed": diagnostic.observed,
+        "expected": diagnostic.expected,
+        "message": diagnostic.message,
+        "path": diagnostic.path,
+        "manifest_anchor": diagnostic.manifest_anchor,
+        "location": {
+            "path": diagnostic.path,
+            "manifest_anchor": diagnostic.manifest_anchor,
+            "start": {"line": 1, "column": 1},
+        },
+        "remediation": remediation,
+        "prerequisites": list(diagnostic.prerequisites),
+        "disposition": diagnostic.disposition,
+        "exception": exception,
+        "fingerprint": diagnostic.fingerprint,
+    }
 
 
-def report_dict(report: AnalysisReport) -> dict[str, object]:
+def report_dict(report: AnalysisReport) -> Mapping[str, object]:
     """Return canonical JSON-compatible report data."""
     return {
         "schema_version": OUTPUT_SCHEMA_VERSION,
@@ -32,7 +65,7 @@ def report_dict(report: AnalysisReport) -> dict[str, object]:
         "policy": {"id": report.policy_id, "version": report.policy_version},
         "scope_digest": report.scope_digest,
         "summary": dict(sorted(report.summary.items())),
-        "execution_issues": list(report.execution_issues),
+        "execution_issues": [asdict(item) for item in report.execution_issues],
         "diagnostics": [diagnostic_dict(item) for item in report.diagnostics],
     }
 
@@ -47,11 +80,15 @@ def render_json(report: AnalysisReport, *, pretty: bool = False) -> str:
 def render_text(report: AnalysisReport) -> str:
     """Render concise editor-compatible diagnostics."""
     lines = [
+        f"repo-lint: analysis incomplete: {issue.code}: {issue.message}"
+        for issue in report.execution_issues
+    ]
+    lines.extend(
         f"{item.path}:1:1: {item.rule_id} {item.message} "
         f"[observed={item.observed!r}; expected={item.expected!r}]"
         f" [disposition={item.disposition}]"
         for item in report.diagnostics
-    ]
+    )
     lines.append(
         f"repo-lint: {report.conclusion}; {report.summary.get('errors', 0)} errors, "
         f"{report.summary.get('warnings', 0)} warnings"
@@ -65,7 +102,7 @@ def render_rules(rules: tuple[Rule, ...]) -> str:
     return canonical_json({"schema_version": 1, "rules": payload}) + "\n"
 
 
-def output_schema() -> dict[str, object]:
+def output_schema() -> Mapping[str, object]:
     """Return the minimal stable report JSON Schema."""
     remediation = {
         "type": "object",
@@ -114,6 +151,7 @@ def output_schema() -> dict[str, object]:
             "message",
             "path",
             "manifest_anchor",
+            "location",
             "remediation",
             "prerequisites",
             "disposition",
@@ -132,6 +170,24 @@ def output_schema() -> dict[str, object]:
             "message": {"type": "string"},
             "path": {"type": "string"},
             "manifest_anchor": {"type": "string"},
+            "location": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["path", "manifest_anchor", "start"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "manifest_anchor": {"type": "string"},
+                    "start": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["line", "column"],
+                        "properties": {
+                            "line": {"type": "integer", "minimum": 1},
+                            "column": {"type": "integer", "minimum": 1},
+                        },
+                    },
+                },
+            },
             "remediation": remediation,
             "prerequisites": {"type": "array", "items": {"type": "string"}},
             "disposition": {"enum": ["active", "excepted"]},
@@ -170,7 +226,21 @@ def output_schema() -> dict[str, object]:
             },
             "scope_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
             "summary": {"type": "object", "additionalProperties": {"type": "integer"}},
-            "execution_issues": {"type": "array", "items": {"type": "string"}},
+            "execution_issues": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["code", "phase", "message", "retryable", "remediation"],
+                    "properties": {
+                        "code": {"type": "string", "pattern": "^[a-z][a-z0-9.-]+$"},
+                        "phase": {"type": "string"},
+                        "message": {"type": "string"},
+                        "retryable": {"type": "boolean"},
+                        "remediation": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
             "diagnostics": {"type": "array", "items": diagnostic},
         },
     }

@@ -9,8 +9,9 @@ versions. Message improvements and physical moves therefore do not manufacture n
 component and semantic construct are unchanged.
 
 Baselines bind to a policy-scope digest rather than the mutable component inventory. Adding,
-removing, or moving components therefore remains analyzable: new semantic fingerprints are debt,
-resolved fingerprints are stale, and explicit migration mappings preserve intended move context.
+removing, or moving components therefore remains analyzable: new semantic fingerprints are debt
+and resolved fingerprints are stale. V1 validates migration mappings but does not yet attach their
+context or operational evidence to diagnostics.
 
 Remediation is deliberately non-executable. It includes ordered actions, validation expectations,
 rollback considerations, and an optional manifest fragment. V1 always emits

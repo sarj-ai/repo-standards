@@ -1,0 +1,30 @@
+# Managed by sarj-standards 1.2.0; regenerate with `sarj-standards show ci --output .github/workflows/standards.yml`.
+name: Standards
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standards-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  standards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: '**/uv.lock'
+      - name: Install Python dependencies
+        run: uv sync --locked
+      - name: Run standards
+        run: uvx --isolated --python 3.14 --from sarj-standards==1.2.0 sarj-standards check --trust-repository-code
