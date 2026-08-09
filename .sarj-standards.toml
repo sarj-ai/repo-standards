@@ -8,7 +8,7 @@ rule_profile = "all"
 disable = ["eslint"]
 
 [artifacts]
-durable = ["**/README.md", "docs/**", "**/docs/**", "architecture/**", "**/adr/**", ".github/**", "**/AGENTS.md", "**/CLAUDE.md"]
+durable = [".github/**"]
 
 [dest]
 python = "."

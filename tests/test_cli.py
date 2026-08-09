@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import re
 
 from jsonschema import validate
 import pytest
@@ -182,14 +181,6 @@ def test_neutral_core_contains_no_sarj_policy_vocabulary() -> None:
     assert "sarj" not in source
     assert "najm" not in source
     assert '"platform"' not in source
-
-
-def test_behavior_docs_do_not_use_ambiguous_stage_versions() -> None:
-    repository = Path(__file__).parents[1]
-    documentation = [repository / "README.md", *sorted((repository / "docs").glob("*.md"))]
-    forbidden = re.compile(r"\b(?:Stage 0|V1|V2)\b")
-    for path in documentation:
-        assert forbidden.search(path.read_text(encoding="utf-8")) is None, path
 
 
 def test_manifest_symlink_is_rejected(tmp_path: Path) -> None:

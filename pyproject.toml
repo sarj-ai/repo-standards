@@ -2,7 +2,6 @@
 name = "sarj-repo-lint"
 version = "0.1.0"
 description = "Deterministic repository architecture and migration linter"
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "repo-lint-core==0.1.0",
@@ -44,7 +43,7 @@ build-backend = "hatchling.build"
 packages = ["src/repo_lint_cli"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src/repo_lint_cli", "/README.md", "/pyproject.toml"]
+include = ["/src/repo_lint_cli", "/pyproject.toml"]
 
 [tool.pytest.ini_options]
 addopts = "-q --import-mode=importlib"
