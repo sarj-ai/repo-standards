@@ -35,7 +35,16 @@ def canonical_path(value: str) -> str:
 
 def canonical_json(value: object) -> str:
     """Encode canonical JSON without machine-specific formatting."""
-    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    try:
+        return json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError):
+        ConfigurationError.fail("value cannot be encoded as canonical JSON")
 
 
 def semantic_fingerprint(diagnostic: Diagnostic) -> str:
@@ -47,16 +56,42 @@ def semantic_fingerprint(diagnostic: Diagnostic) -> str:
         diagnostic.component_id,
         diagnostic.subject_kind,
         diagnostic.manifest_anchor,
-        diagnostic.observed,
-        diagnostic.expected,
+        _semantic_value(
+            diagnostic.observed if diagnostic.observed_value is None else diagnostic.observed_value
+        ),
+        _semantic_value(
+            diagnostic.expected if diagnostic.expected_value is None else diagnostic.expected_value
+        ),
     )
     payload = b"".join(len(part.encode()).to_bytes(4, "big") + part.encode() for part in parts)
     return hashlib.sha256(payload).hexdigest()
 
 
+def semantic_finding_key(diagnostic: Diagnostic) -> str:
+    """Hash stable finding identity independently of its observed state."""
+    parts = (
+        "finding-key-v1",
+        diagnostic.rule_id,
+        diagnostic.component_id,
+        diagnostic.subject_kind,
+        diagnostic.manifest_anchor,
+    )
+    payload = b"".join(len(part.encode()).to_bytes(4, "big") + part.encode() for part in parts)
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _semantic_value(value: object) -> str:
+    """Preserve v3 string fingerprints while canonicalizing structured JSON values."""
+    return value if isinstance(value, str) else canonical_json(value)
+
+
 def with_fingerprint(diagnostic: Diagnostic) -> Diagnostic:
     """Return a diagnostic carrying its semantic fingerprint."""
-    return replace(diagnostic, fingerprint=semantic_fingerprint(diagnostic))
+    return replace(
+        diagnostic,
+        fingerprint=semantic_fingerprint(diagnostic),
+        finding_key=semantic_finding_key(diagnostic),
+    )
 
 
 def scope_digest(manifest: Manifest) -> str:

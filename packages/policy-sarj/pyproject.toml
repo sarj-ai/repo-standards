@@ -1,9 +1,9 @@
 [project]
 name = "repo-lint-policy-sarj"
-version = "0.1.0"
+version = "0.2.1"
 description = "Sarj repository architecture policy for repo-lint"
 requires-python = ">=3.12"
-dependencies = ["repo-lint-core==0.1.0"]
+dependencies = ["repo-lint-core==0.2.0"]
 
 [project.entry-points."repo_lint.policies.v1"]
 sarj = "repo_lint_policy_sarj:SarjPolicy"

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local Git fixture only
 
 from jsonschema import validate
 import pytest
@@ -15,10 +17,42 @@ from repo_lint_cli.main import app
 runner = CliRunner()
 
 
+def _git(repository: Path, *arguments: str) -> None:
+    executable = shutil.which("git")
+    assert executable is not None
+    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Git fixture only
+        [executable, "-C", str(repository), *arguments],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+
+
+def _commit_fixture(repository: Path) -> None:
+    _git(repository, "init", "--quiet")
+    _commit_changes(repository)
+
+
+def _commit_changes(repository: Path) -> None:
+    _git(repository, "add", ".")
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "fixture",
+    )
+
+
 def _manifest(root: Path, text: str) -> None:
     policy_directory = root / ".repo-lint"
     policy_directory.mkdir()
     (policy_directory / "repository.toml").write_text(text, encoding="utf-8")
+    _commit_fixture(root)
 
 
 def _json_object(value: str) -> dict[str, object]:
@@ -52,7 +86,7 @@ GOOD_MANIFEST = """
 schema_version = 1
 repository_id = "example-repository"
 policy = "sarj"
-policy_version = 2
+policy_version = 3
 
 [[components]]
 id = "platform.agent"
@@ -69,7 +103,20 @@ def test_report_json_is_one_deterministic_value(tmp_path: Path) -> None:
     second = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
     assert first.exit_code == second.exit_code == 0
     assert first.stdout == second.stdout
-    assert _json_object(first.stdout)["conclusion"] == "passed"
+    report = _json_object(first.stdout)
+    assert report["conclusion"] == "passed"
+    assert report["command"] == "report"
+    assert _object(report["baseline"])["status"] == "not-requested"
+    assert _object(report["ratchet"])["status"] == "not-requested"
+    assert _object(report["tool"])["version"] != "0.1.0-dev"
+
+    (tmp_path / ".repo-lint" / "repository.toml").write_text(
+        GOOD_MANIFEST.replace("applications/platform/agent", "python/agent"),
+        encoding="utf-8",
+    )
+    dirty = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    assert dirty.exit_code == 0
+    assert dirty.stdout == first.stdout
 
 
 def test_report_findings_are_nonblocking(tmp_path: Path) -> None:
@@ -165,6 +212,7 @@ def test_incomplete_report_and_anchor_locations_validate_against_schema(tmp_path
         GOOD_MANIFEST.replace("applications/platform/agent", "python/agent"),
         encoding="utf-8",
     )
+    _commit_changes(tmp_path)
     findings = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
     diagnostic = _object_list(_json_object(findings.stdout)["diagnostics"])[0]
     location = _object(diagnostic["location"])
@@ -189,6 +237,7 @@ def test_manifest_symlink_is_rejected(tmp_path: Path) -> None:
     policy_directory = tmp_path / ".repo-lint"
     policy_directory.mkdir()
     Path(policy_directory / "repository.toml").symlink_to(outside)
+    _commit_fixture(tmp_path)
     result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
     report = _json_object(result.stdout)
     assert result.exit_code == 2
@@ -218,6 +267,31 @@ def test_inspect_bootstraps_without_a_repository_manifest() -> None:
     summary = _object(inspection["summary"])
     assert isinstance(summary["tracked_files"], int)
     assert summary["tracked_files"] > 0
+    assert _object(inspection["page"])["limit"] == 100
+
+
+def test_inspect_supports_bounded_filtered_pages() -> None:
+    repository = Path(__file__).parents[1]
+    result = runner.invoke(
+        app,
+        ["inspect", str(repository), "--kind", "project", "--limit", "1"],
+    )
+    assert result.exit_code == 0
+    payload = _json_object(result.stdout)
+    page = _object(payload["page"])
+    returned = page["returned"]
+    assert isinstance(returned, int)
+    assert returned <= 1
+    assert all(item["kind"] == "project" for item in _object_list(payload["items"]))
+
+
+def test_invalid_page_is_a_structured_failure() -> None:
+    result = runner.invoke(app, ["rules", "--limit", "501"])
+    payload = _json_object(result.stdout)
+    assert result.exit_code == 2
+    assert payload["completion"] == "incomplete"
+    issue = _object_list(payload["execution_issues"])[0]
+    assert issue["code"] == "request.invalid"
 
 
 def test_capabilities_are_machine_discoverable() -> None:
@@ -228,6 +302,67 @@ def test_capabilities_are_machine_discoverable() -> None:
     safety = _object(capabilities["safety"])
     assert safety["repository_code_execution"] is False
     assert safety["mutation"] is False
+    assert _object(capabilities["tool"])["version"]
+    assert capabilities["execution_issues"] == []
+
+
+def test_rules_are_filterable_and_paginated() -> None:
+    result = runner.invoke(
+        app,
+        ["rules", "--rule-prefix", "core/", "--severity", "error", "--limit", "2"],
+    )
+    assert result.exit_code == 0
+    payload = _json_object(result.stdout)
+    rules = _object_list(payload["rules"])
+    assert len(rules) == 2
+    assert all(str(item["rule_id"]).startswith("core/") for item in rules)
+    assert all(item["severity"] == "error" for item in rules)
+    assert _object(payload["page"])["next_cursor"] == "2"
+
+
+def test_ratchet_report_has_explicit_verified_baseline_status(tmp_path: Path) -> None:
+    _manifest(tmp_path, GOOD_MANIFEST)
+    initial = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
+    report = _json_object(initial.stdout)
+    policy = _object(report["policy"])
+    baseline: dict[str, object] = {
+        "schema_version": 1,
+        "repository_id": report["repository_id"],
+        "policy": policy["id"],
+        "policy_version": policy["version"],
+        "scope_digest": report["scope_digest"],
+        "fingerprints": list[str](),
+    }
+    (tmp_path / ".repo-lint" / "baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
+    _commit_changes(tmp_path)
+    checked = runner.invoke(
+        app,
+        ["check", str(tmp_path), "--mode", "ratchet", "--format", "json"],
+    )
+    payload = _json_object(checked.stdout)
+    assert checked.exit_code == 0
+    assert _object(payload["baseline"])["status"] == "verified"
+    assert _object(payload["ratchet"])["status"] == "clean"
+
+    (tmp_path / ".repo-lint" / "baseline.json").write_text("not-json", encoding="utf-8")
+    dirty = runner.invoke(
+        app,
+        ["check", str(tmp_path), "--mode", "ratchet", "--format", "json"],
+    )
+    assert dirty.exit_code == 0
+    assert _object(_json_object(dirty.stdout)["ratchet"])["status"] == "clean"
+
+
+def test_ratchet_rejects_missing_baseline_explicitly(tmp_path: Path) -> None:
+    _manifest(tmp_path, GOOD_MANIFEST)
+    checked = runner.invoke(
+        app,
+        ["check", str(tmp_path), "--mode", "ratchet", "--format", "json"],
+    )
+    payload = _json_object(checked.stdout)
+    assert checked.exit_code == 2
+    assert _object(payload["baseline"])["status"] == "rejected"
+    assert _object(payload["ratchet"])["status"] == "not-evaluated"
 
 
 def test_unknown_policy_is_structured_incomplete(tmp_path: Path) -> None:
@@ -254,3 +389,170 @@ def test_unknown_policy_is_structured_for_rule_commands(arguments: tuple[str, ..
     assert result.exit_code == 2
     payload = _json_object(result.stdout)
     assert payload["completion"] == "incomplete"
+    assert _object_list(payload["execution_issues"])
+
+
+def test_unknown_rule_and_schema_are_structured() -> None:
+    for arguments, code in (
+        (("explain", "not/a-rule"), "rule.unknown"),
+        (("schema", "missing"), "schema.unknown"),
+    ):
+        result = runner.invoke(app, list(arguments))
+        payload = _json_object(result.stdout)
+        assert result.exit_code == 2
+        assert _object_list(payload["execution_issues"])[0]["code"] == code
+
+
+def test_public_corpus_is_six_immutable_not_downloaded_sources() -> None:
+    manifest_path = Path(__file__).parents[1] / "corpus" / "public-oss-v1.json"
+    corpus = _json_object(manifest_path.read_text(encoding="utf-8"))
+    sources = _object_list(corpus["sources"])
+    assert len(sources) == 6
+    assert len({item["profile"] for item in sources}) == 6
+    assert all(len(str(item["commit"])) == 40 for item in sources)
+    assert all(len(str(item["tree"])) == 40 for item in sources)
+    assert all(_object(item["snapshot"])["status"] == "not-downloaded" for item in sources)
+
+
+def test_rest_check_is_zero_config_and_reads_only_committed_bytes(tmp_path: Path) -> None:
+    spec = tmp_path / "openapi.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.2",
+                "info": {"title": "Example", "version": "1"},
+                "paths": {"/items": {"get": {"responses": {"204": {}}}}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    _commit_fixture(tmp_path)
+    first = runner.invoke(app, ["rest", "check", str(tmp_path)])
+    assert first.exit_code == 0
+    payload = _json_object(first.stdout)
+    assert payload["application_code_executed"] is False
+    assert payload["completion"] == "complete"
+    assert _object(payload["summary"])["errors"] == 0
+
+    spec.write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.2",
+                "info": {"title": "Dirty", "version": "1"},
+                "paths": {
+                    "/items": {
+                        "get": {
+                            "responses": {
+                                "204": {
+                                    "content": {"application/json": {"schema": {"type": "object"}}}
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    repeated = runner.invoke(app, ["rest", "check", str(tmp_path)])
+    assert repeated.exit_code == 0
+    assert repeated.stdout == first.stdout
+
+    schema_result = runner.invoke(app, ["schema", "openapi-analysis"])
+    assert schema_result.exit_code == 0
+    validate(instance=payload, schema=_json_object(schema_result.stdout))
+
+
+def test_rest_strict_blocks_objective_http_contradiction(tmp_path: Path) -> None:
+    (tmp_path / "openapi.json").write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.2",
+                "info": {"title": "Example", "version": "1"},
+                "paths": {
+                    "/items": {
+                        "get": {
+                            "responses": {
+                                "204": {
+                                    "content": {"application/json": {"schema": {"type": "object"}}}
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    _commit_fixture(tmp_path)
+    strict = runner.invoke(app, ["rest", "check", str(tmp_path)])
+    report = runner.invoke(app, ["rest", "check", str(tmp_path), "--enforcement", "report"])
+    assert strict.exit_code == 1
+    assert report.exit_code == 0
+    diagnostic = _object_list(_json_object(strict.stdout)["diagnostics"])[0]
+    assert diagnostic["rule_id"] == "rest/http/forbidden-content"
+
+
+def test_rest_check_reads_only_exact_local_reference_closure(tmp_path: Path) -> None:
+    api = tmp_path / "api"
+    api.mkdir()
+    (api / "openapi.json").write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.2",
+                "info": {"title": "Example", "version": "1"},
+                "paths": {
+                    "/items": {
+                        "get": {
+                            "responses": {
+                                "200": {
+                                    "description": "ok",
+                                    "content": {
+                                        "application/json": {
+                                            "schema": {"$ref": "../schemas.json#/$defs/Item"}
+                                        }
+                                    },
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "schemas.json").write_text(
+        json.dumps({"$defs": {"Item": {"type": "object"}}}), encoding="utf-8"
+    )
+    (api / "unrelated.json").write_text("not-json", encoding="utf-8")
+    _commit_fixture(tmp_path)
+    checked = runner.invoke(app, ["rest", "check", str(tmp_path)])
+    assert checked.exit_code == 0
+    assert _json_object(checked.stdout)["completion"] == "complete"
+
+
+def test_rest_discover_requires_explicit_selection_when_ambiguous(tmp_path: Path) -> None:
+    for directory in (tmp_path / "a", tmp_path / "b"):
+        directory.mkdir()
+        (directory / "openapi.json").write_text(
+            '{"openapi":"3.1.2","info":{"title":"x","version":"1"},"paths":{}}',
+            encoding="utf-8",
+        )
+    _commit_fixture(tmp_path)
+    discovered = runner.invoke(app, ["rest", "discover", str(tmp_path)])
+    checked = runner.invoke(app, ["rest", "check", str(tmp_path)])
+    assert discovered.exit_code == 0
+    assert len(_object_list(_json_object(discovered.stdout)["candidates"])) == 2
+    assert checked.exit_code == 2
+    incomplete = _json_object(checked.stdout)
+    assert incomplete["completion"] == "incomplete"
+    schema = _json_object(runner.invoke(app, ["schema", "openapi-analysis"]).stdout)
+    validate(instance=incomplete, schema=schema)
+
+
+def test_rest_catalog_and_capability_handshake_are_offline() -> None:
+    rules_result = runner.invoke(app, ["rest", "rules"])
+    explanation = runner.invoke(app, ["rest", "explain", "rest/http/forbidden-content"])
+    assert rules_result.exit_code == explanation.exit_code == 0
+    assert len(_object_list(_json_object(rules_result.stdout)["rules"])) == 10
+    assert _object(_json_object(explanation.stdout)["rule"])["problem"]

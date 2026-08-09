@@ -9,7 +9,9 @@ resolution-markers = [
 [manifest]
 members = [
     "repo-lint-core",
+    "repo-lint-openapi",
     "repo-lint-policy-sarj",
+    "repo-lint-rest",
     "sarj-repo-lint",
 ]
 
@@ -200,12 +202,17 @@ wheels = [
 
 [[package]]
 name = "repo-lint-core"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/core" }
 
 [[package]]
-name = "repo-lint-policy-sarj"
+name = "repo-lint-openapi"
 version = "0.1.0"
+source = { editable = "packages/openapi" }
+
+[[package]]
+name = "repo-lint-policy-sarj"
+version = "0.2.1"
 source = { editable = "packages/policy-sarj" }
 dependencies = [
     { name = "repo-lint-core" },
@@ -213,6 +220,21 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "repo-lint-core", editable = "packages/core" }]
+
+[[package]]
+name = "repo-lint-rest"
+version = "0.1.0"
+source = { editable = "packages/rest" }
+dependencies = [
+    { name = "repo-lint-core" },
+    { name = "repo-lint-openapi" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "repo-lint-core", editable = "packages/core" },
+    { name = "repo-lint-openapi", editable = "packages/openapi" },
+]
 
 [[package]]
 name = "rich"
@@ -381,11 +403,13 @@ wheels = [
 
 [[package]]
 name = "sarj-repo-lint"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "repo-lint-core" },
+    { name = "repo-lint-openapi" },
     { name = "repo-lint-policy-sarj" },
+    { name = "repo-lint-rest" },
     { name = "typer" },
 ]
 
@@ -401,7 +425,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "repo-lint-core", editable = "packages/core" },
+    { name = "repo-lint-openapi", editable = "packages/openapi" },
     { name = "repo-lint-policy-sarj", editable = "packages/policy-sarj" },
+    { name = "repo-lint-rest", editable = "packages/rest" },
     { name = "typer", specifier = ">=0.15.0,<1" },
 ]
 

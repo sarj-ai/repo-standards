@@ -14,12 +14,23 @@ from repo_lint_core.models import (
     PolicyId,
     RepositoryId,
 )
-from repo_lint_policy_sarj import SarjPolicy
+from repo_lint_policy_sarj import (
+    POLICY_SPEC,
+    RULE_GOVERNANCE,
+    RuleClassification,
+    RuleMaturity,
+    SarjPolicy,
+)
 
 
 def _analyze(*components: Component) -> AnalysisReport:
     return analyze(
-        Manifest(RepositoryId("example-repository"), PolicyId("sarj"), 2, components),
+        Manifest(
+            RepositoryId("example-repository"),
+            PolicyId("sarj"),
+            SarjPolicy.policy_version,
+            components,
+        ),
         SarjPolicy(),
         mode=Mode("report"),
     )
@@ -91,9 +102,7 @@ def test_invalid_application_path_does_not_cascade_into_role_warning() -> None:
             product="platform",
         )
     )
-    assert [item.rule_id for item in report.diagnostics] == [
-        "sarj/layout/component-path"
-    ]
+    assert [item.rule_id for item in report.diagnostics] == ["sarj/layout/component-path"]
 
 
 def test_product_component_id_must_match_declared_product() -> None:
@@ -106,9 +115,7 @@ def test_product_component_id_must_match_declared_product() -> None:
             product="platform",
         )
     )
-    assert [item.rule_id for item in report.diagnostics] == [
-        "sarj/naming/component-id"
-    ]
+    assert [item.rule_id for item in report.diagnostics] == ["sarj/naming/component-id"]
 
 
 def test_library_capability_must_be_one_kebab_case_token() -> None:
@@ -122,9 +129,7 @@ def test_library_capability_must_be_one_kebab_case_token() -> None:
             capability="request.signing",
         )
     )
-    assert [item.rule_id for item in report.diagnostics] == [
-        "sarj/naming/capability-token"
-    ]
+    assert [item.rule_id for item in report.diagnostics] == ["sarj/naming/capability-token"]
 
 
 @pytest.mark.parametrize(
@@ -259,9 +264,7 @@ def test_library_capability_must_be_one_kebab_case_token() -> None:
 )
 def test_component_kind_fields_are_exact_without_cascades(component: Component) -> None:
     report = _analyze(component)
-    assert [item.rule_id for item in report.diagnostics] == [
-        "sarj/schema/component-fields"
-    ]
+    assert [item.rule_id for item in report.diagnostics] == ["sarj/schema/component-fields"]
     assert report.diagnostics[0].severity == "error"
 
 
@@ -489,9 +492,7 @@ def test_noncanonical_component_layouts_are_rejected(component: Component) -> No
 )
 def test_operational_layout_targets_are_advisory(component: Component) -> None:
     report = _analyze(component)
-    assert [item.rule_id for item in report.diagnostics] == [
-        "sarj/layout/operational-path"
-    ]
+    assert [item.rule_id for item in report.diagnostics] == ["sarj/layout/operational-path"]
     assert report.diagnostics[0].severity == "warning"
 
 
@@ -505,9 +506,7 @@ def test_product_contract_cannot_use_shared_path() -> None:
             product="platform",
         )
     )
-    assert [item.rule_id for item in report.diagnostics] == [
-        "sarj/layout/component-path"
-    ]
+    assert [item.rule_id for item in report.diagnostics] == ["sarj/layout/component-path"]
 
 
 def test_application_source_import_is_rejected_but_runtime_call_is_allowed() -> None:
@@ -623,3 +622,291 @@ def test_library_importing_application_is_rejected() -> None:
     assert [item.rule_id for item in _analyze(library, application).diagnostics] == [
         "sarj/graph/library-imports-application"
     ]
+
+
+def test_policy_spec_is_closed_and_governance_covers_every_rule() -> None:
+    assert POLICY_SPEC.profile_id == "sarj/consolidation"
+    assert POLICY_SPEC.products == ("najm", "platform", "vb")
+    assert POLICY_SPEC.profile.product_registry_mode == "closed"
+    assert POLICY_SPEC.profile.repository_overrides is False
+    assert POLICY_SPEC.profile.target_repository_plugins is False
+    assert POLICY_SPEC.policy_version == SarjPolicy.policy_version == 3
+    assert {item.rule_id for item in RULE_GOVERNANCE} == {
+        item.rule_id for item in SarjPolicy.rules()
+    }
+    assert all(item.evidence == "declared" for item in RULE_GOVERNANCE)
+    assert all(item.upstream for item in RULE_GOVERNANCE)
+
+
+def test_warning_rules_are_explicitly_judgment_or_operational() -> None:
+    by_id = {item.rule_id: item for item in RULE_GOVERNANCE}
+    for rule in SarjPolicy.rules():
+        metadata = by_id[rule.rule_id]
+        if rule.severity == "warning":
+            assert metadata.maturity is RuleMaturity.WARNING
+            assert metadata.classification in {
+                RuleClassification.JUDGMENT,
+                RuleClassification.OPERATIONAL,
+            }
+        else:
+            assert metadata.maturity is RuleMaturity.STABLE_ERROR
+
+
+def test_public_expected_path_is_a_template_not_a_regex() -> None:
+    report = _analyze(
+        Component(
+            ComponentId("platform.signing"),
+            "product-library",
+            "python/signing",
+            "@example/platform",
+            product="platform",
+            capability="signing",
+        )
+    )
+    expected = report.diagnostics[0].expected
+    assert expected == "libraries/{python,typescript}/platform/signing"
+    assert "(?:" not in expected
+    assert "\\" not in expected
+
+
+def test_invalid_source_fields_precede_and_suppress_graph_rules() -> None:
+    source = Component(
+        ComponentId("platform.client"),
+        "product-library",
+        "libraries/python/platform/client",
+        "@example/platform",
+        product="platform",
+        dependencies=(Dependency(ComponentId("platform.api"), "source-import"),),
+    )
+    target = Component(
+        ComponentId("platform.api"),
+        "application",
+        "applications/platform/api",
+        "@example/platform",
+        product="platform",
+    )
+    assert [item.rule_id for item in _analyze(source, target).diagnostics] == [
+        "sarj/schema/component-fields"
+    ]
+
+
+def test_invalid_target_fields_precede_and_suppress_graph_rules() -> None:
+    source = Component(
+        ComponentId("platform.client"),
+        "product-library",
+        "libraries/python/platform/client",
+        "@example/platform",
+        product="platform",
+        capability="client",
+        dependencies=(Dependency(ComponentId("platform.api"), "source-import"),),
+    )
+    target = Component(
+        ComponentId("platform.api"),
+        "application",
+        "applications/platform/api",
+        "@example/platform",
+    )
+    assert [item.rule_id for item in _analyze(source, target).diagnostics] == [
+        "sarj/schema/component-fields"
+    ]
+
+
+def _edge_components(
+    source_kind: str,
+    target_kind: str,
+    *,
+    edge_kind: str = "package-dependency",
+) -> tuple[Component, Component]:
+    fixtures = {
+        "application": ("platform.app", "applications/platform/api", "platform", None),
+        "product-library": (
+            "platform.library",
+            "libraries/python/platform/library",
+            "platform",
+            "library",
+        ),
+        "shared-library": (
+            "shared.library",
+            "libraries/python/shared/library",
+            None,
+            "library",
+        ),
+        "foundation-service": (
+            "foundation.identity",
+            "foundation/components/identity",
+            None,
+            None,
+        ),
+        "contract": ("platform.contract", "contracts/platform/events", "platform", None),
+        "generated-client": (
+            "platform.generated",
+            "clients/generated/platform/generated/python",
+            "platform",
+            "generated",
+        ),
+        "migration-set": (
+            "platform.migrations",
+            "migrations/platform/primary",
+            "platform",
+            None,
+        ),
+        "tool": ("tool.release", "tools/ci/release", None, "release"),
+    }
+    source_id, source_path, source_product, source_capability = fixtures[source_kind]
+    target_id, target_path, target_product, target_capability = fixtures[target_kind]
+    if source_kind == target_kind:
+        if target_kind == "application":
+            target_id, target_path = "platform.target-api", "applications/platform/target-api"
+        elif target_kind == "product-library":
+            target_id = "platform.target-library"
+            target_path = "libraries/python/platform/target-library"
+            target_capability = "target-library"
+        elif target_kind == "contract":
+            target_id, target_path = "platform.target-contract", "contracts/platform/target-events"
+    source = Component(
+        ComponentId(source_id),
+        source_kind,
+        source_path,
+        "@example/platform",
+        product=source_product,
+        capability=source_capability,
+        dependencies=(Dependency(ComponentId(target_id), edge_kind),),
+    )
+    target = Component(
+        ComponentId(target_id),
+        target_kind,
+        target_path,
+        "@example/platform",
+        product=target_product,
+        capability=target_capability,
+    )
+    return source, target
+
+
+@pytest.mark.parametrize(
+    ("source_kind", "target_kind"),
+    [
+        pytest.param("application", "product-library", id="application-product-library"),
+        pytest.param("product-library", "shared-library", id="product-shared"),
+        pytest.param("contract", "contract", id="contract-contract"),
+        pytest.param("generated-client", "shared-library", id="generated-runtime"),
+        pytest.param("tool", "shared-library", id="tool-shared"),
+    ],
+)
+def test_closed_code_matrix_allows_only_reviewed_layers(source_kind: str, target_kind: str) -> None:
+    assert _analyze(*_edge_components(source_kind, target_kind)).diagnostics == ()
+
+
+@pytest.mark.parametrize(
+    ("source_kind", "target_kind", "rule_id"),
+    [
+        pytest.param(
+            "application",
+            "application",
+            "sarj/graph/application-imports-application",
+            id="application-application",
+        ),
+        pytest.param(
+            "contract",
+            "product-library",
+            "sarj/graph/contract-imports-implementation",
+            id="contract-implementation",
+        ),
+        pytest.param(
+            "product-library",
+            "application",
+            "sarj/graph/library-imports-application",
+            id="library-application",
+        ),
+        pytest.param(
+            "migration-set",
+            "contract",
+            "sarj/graph/disallowed-code-dependency",
+            id="closed-matrix",
+        ),
+    ],
+)
+def test_closed_code_matrix_emits_one_precedence_rule(
+    source_kind: str, target_kind: str, rule_id: str
+) -> None:
+    report = _analyze(*_edge_components(source_kind, target_kind))
+    assert [item.rule_id for item in report.diagnostics] == [rule_id]
+
+
+def test_typed_edge_endpoints_reject_invalid_runtime_call() -> None:
+    report = _analyze(*_edge_components("application", "product-library", edge_kind="runtime-call"))
+    assert [item.rule_id for item in report.diagnostics] == ["sarj/graph/edge-endpoints"]
+
+
+def test_typed_edge_endpoints_allow_application_runtime_call() -> None:
+    source, target = _edge_components("application", "application", edge_kind="runtime-call")
+    target = Component(
+        ComponentId("platform.target-api"),
+        target.kind,
+        "applications/platform/target-api",
+        target.owner,
+        product=target.product,
+    )
+    source = Component(
+        source.component_id,
+        source.kind,
+        source.path,
+        source.owner,
+        product=source.product,
+        dependencies=(Dependency(target.component_id, "runtime-call"),),
+    )
+    assert _analyze(source, target).diagnostics == ()
+
+
+def test_boundary_clean_cycle_is_one_warning() -> None:
+    first, second = _edge_components("product-library", "product-library")
+    second = Component(
+        second.component_id,
+        second.kind,
+        second.path,
+        second.owner,
+        product=second.product,
+        capability=second.capability,
+        dependencies=(Dependency(first.component_id, "package-dependency"),),
+    )
+    report = _analyze(first, second)
+    assert [item.rule_id for item in report.diagnostics] == ["sarj/graph/code-cycle"]
+    assert report.diagnostics[0].severity == "warning"
+
+
+def test_forbidden_edges_do_not_cascade_into_cycle_warning() -> None:
+    first, second = _edge_components("application", "application")
+    second = Component(
+        second.component_id,
+        second.kind,
+        second.path,
+        second.owner,
+        product=second.product,
+        dependencies=(Dependency(first.component_id, "package-dependency"),),
+    )
+    report = _analyze(first, second)
+    assert [item.rule_id for item in report.diagnostics] == [
+        "sarj/graph/application-imports-application",
+        "sarj/graph/application-imports-application",
+    ]
+
+
+def test_cycle_analysis_handles_graph_larger_than_python_recursion_limit() -> None:
+    count = 1_200
+    components = tuple(
+        Component(
+            ComponentId(f"platform.lib-{index}"),
+            "product-library",
+            f"libraries/python/platform/lib-{index}",
+            "@example/platform",
+            product="platform",
+            capability=f"lib-{index}",
+            dependencies=(
+                (Dependency(ComponentId(f"platform.lib-{index + 1}"), "package-dependency"),)
+                if index + 1 < count
+                else ()
+            ),
+        )
+        for index in range(count)
+    )
+    assert _analyze(*components).diagnostics == ()

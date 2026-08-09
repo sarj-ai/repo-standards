@@ -7,8 +7,8 @@ from datetime import date
 from typing import ClassVar
 
 import pytest
-from repo_lint_core.canonical import canonical_path, semantic_fingerprint
-from repo_lint_core.engine import analyze, check_baseline
+from repo_lint_core.canonical import canonical_json, canonical_path, semantic_fingerprint
+from repo_lint_core.engine import analyze, check_baseline, classify_baseline
 from repo_lint_core.errors import ConfigurationError
 from repo_lint_core.models import (
     Baseline,
@@ -20,6 +20,7 @@ from repo_lint_core.models import (
     MigrationPath,
     Mode,
     PolicyId,
+    RatchetClassification,
     Remediation,
     RepositoryId,
     Rule,
@@ -41,6 +42,11 @@ class EmptyPolicy:
     def evaluate(manifest: Manifest) -> tuple[Diagnostic, ...]:
         del manifest
         return ()
+
+
+def test_canonical_json_rejects_non_finite_numbers() -> None:
+    with pytest.raises(ConfigurationError, match="canonical JSON"):
+        canonical_json({"value": float("nan")})
 
 
 def _manifest(*components: Component) -> Manifest:
@@ -159,6 +165,12 @@ def test_ratchet_rejects_new_and_stale_findings() -> None:
         "core/layout/non-overlapping-root",
         "core/baseline/stale-entry",
     }
+    comparison = classify_baseline(report, baseline)
+    assert comparison.fingerprints(RatchetClassification.NEW) == (
+        report.diagnostics[0].fingerprint,
+    )
+    assert comparison.fingerprints(RatchetClassification.KNOWN) == ()
+    assert comparison.fingerprints(RatchetClassification.RESOLVED) == ("f" * 64,)
 
 
 def test_scope_digest_allows_inventory_changes_to_be_ratcheted() -> None:

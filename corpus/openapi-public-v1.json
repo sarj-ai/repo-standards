@@ -1,0 +1,260 @@
+{
+  "schema_version": 1,
+  "corpus_id": "openapi-public-v1",
+  "purpose": "Deterministic public-contract calibration for OpenAPI and HTTP policy rules.",
+  "selection": {
+    "rule": "Select exactly the six audit-9 source IDs; order lexicographically by source_id; use the seed only for deterministic sampling within selected documents.",
+    "seed": "sarj-repo-lint|openapi-public-v1|2026-08-09",
+    "selected_at": "2026-08-09",
+    "replacement_policy": "No substitution. A source, pin, role, or selected path may change only in a reviewed new corpus version."
+  },
+  "protocol": {
+    "no_substitution": {
+      "enabled": true,
+      "on_unavailable": "inconclusive",
+      "on_pin_mismatch": "reject",
+      "on_path_missing": "reject",
+      "replacement_requires": "reviewed-new-corpus-version"
+    },
+    "privacy": {
+      "source_class": "public-open-source-only",
+      "credentials_permitted": false,
+      "private_repository_identifiers_permitted": false,
+      "request_or_customer_data_permitted": false,
+      "reporting": "Source IDs and aggregate rule counts only; never mix this corpus with private results."
+    },
+    "acquisition": {
+      "checkout": "Fetch the exact commit, verify its root tree, and disable submodule recursion.",
+      "network_phase": "Dedicated acquisition only; analysis is offline.",
+      "license_gate": "Verify the declared SPDX expression against license files in the pinned tree before calibration.",
+      "content_gate": "Hash every selected file and resolved local-reference file before status may become downloaded-verified.",
+      "remote_references": "forbidden",
+      "symlinks_and_submodules": "do-not-follow"
+    },
+    "calibration": {
+      "mutation": false,
+      "execution_of_repository_code": false,
+      "selection_scope": "Selected artifacts and their explicitly bounded local-reference closure only.",
+      "repeat_count": 2,
+      "determinism_gate": "Canonical reports from both runs must be byte-identical.",
+      "classification_gate": "Pending or unverified artifact roles may not calibrate role-dependent rules.",
+      "promotion_gate": "Record per-rule applicable documents, findings, false positives, inconclusive inputs, tool version, policy version, and selected-content digests before changing severity."
+    }
+  },
+  "sources": [
+    {
+      "source_id": "cloudflare-api-schemas",
+      "repository": "https://github.com/cloudflare/api-schemas",
+      "default_branch": null,
+      "commit": "158cc31690d045a8297d0ae0748f5fc20fb9b992",
+      "tree": "28171960c0d7023d5fbe2ea530f8d481e28c1e07",
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "verification_status": "unverified-not-downloaded",
+        "evidence": []
+      },
+      "selected_artifacts": [
+        {
+          "path": "openapi.yaml",
+          "role": "entry-document",
+          "format": "openapi",
+          "classification_status": "verified-by-audit-pin-only"
+        },
+        {
+          "path": "common.yaml",
+          "role": "conditional-local-reference",
+          "format": "openapi-fragment",
+          "classification_status": "pending-reference-closure",
+          "selection_condition": "Include only if local $ref closure from openapi.yaml proves it reachable."
+        }
+      ],
+      "exclusions": [
+        {
+          "scope": "JSON sibling of openapi.yaml",
+          "reason": "Treat as a copy/equivalence candidate only; do not double-count without verified provenance."
+        }
+      ],
+      "applicability": {
+        "applies": ["OpenAPI document rules", "local-reference closure", "copy-equivalence checks"],
+        "not_applicable": ["rules requiring verified producer/build provenance"],
+        "notes": "common.yaml is conditional and the JSON sibling is not an independent calibration document."
+      },
+      "snapshot": {
+        "status": "not-downloaded",
+        "commit_tree_verified_locally": false,
+        "selected_content_sha256": null
+      }
+    },
+    {
+      "source_id": "digitalocean-openapi",
+      "repository": "https://github.com/digitalocean/openapi",
+      "default_branch": null,
+      "commit": "7c1300c479fed9c353cda9fc21cd968619552304",
+      "tree": "abd3449396e61aee1d7f61508771d22da31f729e",
+      "license": {
+        "spdx": "Apache-2.0",
+        "verification_status": "unverified-not-downloaded",
+        "evidence": []
+      },
+      "selected_artifacts": [
+        {
+          "path": "specification/DigitalOcean-public.v2.yaml",
+          "role": "published-bundle-candidate",
+          "format": "openapi",
+          "classification_status": "pending-build-graph-verification"
+        }
+      ],
+      "local_reference_closure": {
+        "entrypoint": "specification/DigitalOcean-public.v2.yaml",
+        "allowed_root": "specification/",
+        "status": "pending-download",
+        "outside_root": "reject"
+      },
+      "exclusions": [],
+      "applicability": {
+        "applies": ["OpenAPI document rules", "bounded local-reference closure"],
+        "not_applicable": ["source-vs-generated role rules until build-graph verification"],
+        "notes": "The published-bundle classification is deliberately pending verification against the pinned build graph."
+      },
+      "snapshot": {
+        "status": "not-downloaded",
+        "commit_tree_verified_locally": false,
+        "selected_content_sha256": null
+      }
+    },
+    {
+      "source_id": "github-rest-api-description",
+      "repository": "https://github.com/github/rest-api-description",
+      "default_branch": null,
+      "commit": "b26c240ded1c8b79cb0fb09dee4a21239061fa23",
+      "tree": "c6835b4cb82470482ccc9ed9c6be7a4a4a11ed4a",
+      "license": {
+        "spdx": "MIT",
+        "verification_status": "unverified-not-downloaded",
+        "evidence": []
+      },
+      "selected_artifacts": [
+        {
+          "path": "descriptions/api.github.com/api.github.com.2022-11-28.json",
+          "role": "bundled",
+          "format": "openapi",
+          "classification_status": "audit-verified"
+        }
+      ],
+      "exclusions": [
+        {
+          "scope": "derived dereferenced siblings",
+          "reason": "Derived copies are excluded to prevent duplicate calibration weight."
+        }
+      ],
+      "applicability": {
+        "applies": ["OpenAPI bundled-document rules", "HTTP operation rules"],
+        "not_applicable": ["source reference-graph completeness"],
+        "notes": "Only the exact dated bundled document is selected."
+      },
+      "snapshot": {
+        "status": "not-downloaded",
+        "commit_tree_verified_locally": false,
+        "selected_content_sha256": null
+      }
+    },
+    {
+      "source_id": "kubernetes",
+      "repository": "https://github.com/kubernetes/kubernetes",
+      "default_branch": null,
+      "commit": "94c136764292cc5fac976c0de6587daaea56410f",
+      "tree": "73f9f49cd05ee5ced253f407903d1056c53a60e7",
+      "license": {
+        "spdx": "Apache-2.0",
+        "verification_status": "unverified-not-downloaded",
+        "evidence": []
+      },
+      "selected_artifacts": [
+        {
+          "path": "api/openapi-spec/swagger.json",
+          "role": "generated-source-swagger2-control",
+          "format": "swagger-2.0",
+          "classification_status": "audit-verified"
+        }
+      ],
+      "exclusions": [],
+      "applicability": {
+        "applies": ["Swagger 2.0 control behavior", "format detection and applicability gating"],
+        "not_applicable": ["OpenAPI 3-only rules"],
+        "notes": "This negative control must prove that OpenAPI 3-only rules report not-applicable rather than findings."
+      },
+      "snapshot": {
+        "status": "not-downloaded",
+        "commit_tree_verified_locally": false,
+        "selected_content_sha256": null
+      }
+    },
+    {
+      "source_id": "openai-openapi",
+      "repository": "https://github.com/openai/openai-openapi",
+      "default_branch": null,
+      "commit": "c309ca176bc22c6075a0c2c2543f2ac4f307c447",
+      "tree": "be799e612b52c6831a389e01ae122925c5eb5f6a",
+      "license": {
+        "spdx": "MIT",
+        "verification_status": "unverified-not-downloaded",
+        "evidence": []
+      },
+      "selected_artifacts": [
+        {
+          "path": "openapi.yaml",
+          "role": "published-copy",
+          "format": "openapi",
+          "classification_status": "pending-producer-evidence"
+        }
+      ],
+      "exclusions": [],
+      "applicability": {
+        "applies": ["OpenAPI published-document rules", "HTTP operation rules"],
+        "not_applicable": ["generated-source rules until producer evidence is verified"],
+        "notes": "Keep the published-copy role unless later pinned producer evidence proves another classification."
+      },
+      "snapshot": {
+        "status": "not-downloaded",
+        "commit_tree_verified_locally": false,
+        "selected_content_sha256": null
+      }
+    },
+    {
+      "source_id": "stripe-openapi",
+      "repository": "https://github.com/stripe/openapi",
+      "default_branch": null,
+      "commit": "1a5e3da896287b2d093dae6058d2cac0395f62f7",
+      "tree": "67090806f1c8838bea6fd9bde6a07dcb0f92dc10",
+      "license": {
+        "spdx": "MIT",
+        "verification_status": "unverified-not-downloaded",
+        "evidence": []
+      },
+      "selected_artifacts": [
+        {
+          "path": "latest/openapi.spec3.json",
+          "role": "generated-source-public-ga",
+          "format": "openapi",
+          "classification_status": "audit-verified"
+        }
+      ],
+      "exclusions": [
+        {
+          "scope": "preview, SDK-specific, and legacy specifications",
+          "reason": "Only the public GA source is selected for this corpus version."
+        }
+      ],
+      "applicability": {
+        "applies": ["OpenAPI generated-source rules", "public GA HTTP operation rules"],
+        "not_applicable": ["preview, SDK-specific, and legacy contract rules"],
+        "notes": "The exact latest/openapi.spec3.json pin is the sole selected Stripe artifact."
+      },
+      "snapshot": {
+        "status": "not-downloaded",
+        "commit_tree_verified_locally": false,
+        "selected_content_sha256": null
+      }
+    }
+  ]
+}

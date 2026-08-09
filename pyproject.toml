@@ -1,11 +1,13 @@
 [project]
 name = "sarj-repo-lint"
-version = "0.1.0"
-description = "Deterministic repository architecture and migration linter"
+version = "0.3.0"
+description = "Deterministic repository architecture, migration, and API contract linter"
 requires-python = ">=3.12"
 dependencies = [
-  "repo-lint-core==0.1.0",
-  "repo-lint-policy-sarj==0.1.0",
+  "repo-lint-core==0.2.0",
+  "repo-lint-openapi==0.1.0",
+  "repo-lint-policy-sarj==0.2.1",
+  "repo-lint-rest==0.1.0",
   "typer>=0.15.0,<1",
 ]
 
@@ -22,10 +24,12 @@ package = true
 
 [tool.uv.sources]
 repo-lint-core = { workspace = true }
+repo-lint-openapi = { workspace = true }
 repo-lint-policy-sarj = { workspace = true }
+repo-lint-rest = { workspace = true }
 
 [tool.uv.workspace]
-members = ["packages/core", "packages/policy-sarj"]
+members = ["packages/core", "packages/openapi", "packages/policy-sarj", "packages/rest"]
 
 [dependency-groups]
 dev = [
@@ -47,7 +51,13 @@ include = ["/src/repo_lint_cli", "/pyproject.toml"]
 
 [tool.pytest.ini_options]
 addopts = "-q --import-mode=importlib"
-testpaths = ["tests", "packages/core/tests", "packages/policy-sarj/tests"]
+testpaths = [
+  "tests",
+  "packages/core/tests",
+  "packages/openapi/tests",
+  "packages/policy-sarj/tests",
+  "packages/rest/tests",
+]
 
 [tool.ruff]
 extend = ".ruff-strict.toml"
@@ -67,8 +77,17 @@ include = [
   "src",
   "packages/core/src",
   "packages/core/tests",
+  "packages/openapi/src",
+  "packages/openapi/tests",
   "packages/policy-sarj/src",
   "packages/policy-sarj/tests",
+  "packages/rest/src",
+  "packages/rest/tests",
   "tests",
 ]
-extraPaths = ["packages/core/src", "packages/policy-sarj/src"]
+extraPaths = [
+  "packages/core/src",
+  "packages/openapi/src",
+  "packages/policy-sarj/src",
+  "packages/rest/src",
+]

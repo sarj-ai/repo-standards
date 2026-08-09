@@ -37,15 +37,21 @@ _MAX_MIGRATIONS = 10_000
 _MAX_EXCEPTIONS = 1_000
 
 
-def _read_bounded(path: Path, kind: str) -> str:
+def _read_bounded(path: Path, kind: str) -> bytes:
     """Read one inert policy input with a hard allocation ceiling."""
     try:
         size = path.stat().st_size
         if size > _MAX_INPUT_BYTES:
             ConfigurationError.fail(f"{kind} exceeds {_MAX_INPUT_BYTES} bytes: {path.name}")
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
+        return path.read_bytes()
+    except OSError:
         ConfigurationError.fail(f"cannot read {kind}: {path.name}")
+
+
+def _bounded_content(content: bytes, kind: str) -> bytes:
+    if len(content) > _MAX_INPUT_BYTES:
+        ConfigurationError.fail(f"{kind} exceeds {_MAX_INPUT_BYTES} bytes")
+    return content
 
 
 def _mapping(value: object, context: str) -> dict[str, object]:
@@ -204,13 +210,15 @@ def parse_exception(value: object, index: int) -> ExceptionRecord:
     )
 
 
-def load_manifest(path: Path) -> Manifest:
-    """Load a strict TOML manifest without executing repository code."""
+def parse_manifest_bytes(content: bytes) -> Manifest:
+    """Parse bounded manifest bytes obtained from a trusted input selector."""
     try:
-        parsed_manifest: object = tomllib.loads(_read_bounded(path, "manifest"))
+        parsed_manifest: object = tomllib.loads(
+            _bounded_content(content, "manifest").decode("utf-8")
+        )
         data = _mapping(parsed_manifest, "manifest")
     except (OSError, RecursionError, UnicodeError, ValueError, tomllib.TOMLDecodeError):
-        ConfigurationError.fail(f"cannot read manifest: {path.name}")
+        ConfigurationError.fail("cannot read manifest")
     fields = {
         "schema_version",
         "repository_id",
@@ -254,15 +262,20 @@ def load_manifest(path: Path) -> Manifest:
     )
 
 
-def load_baseline(path: Path) -> Baseline:
-    """Load an exact, strict JSON debt baseline."""
+def load_manifest(path: Path) -> Manifest:
+    """Load a strict TOML manifest without executing repository code."""
+    return parse_manifest_bytes(_read_bounded(path, "manifest"))
+
+
+def parse_baseline_bytes(content: bytes) -> Baseline:
+    """Parse bounded baseline bytes obtained from a trusted input selector."""
     try:
         parsed_baseline: object = json.loads(  # pyright: ignore[reportAny]
-            _read_bounded(path, "baseline")
+            _bounded_content(content, "baseline").decode("utf-8")
         )
         data = _mapping(parsed_baseline, "baseline")
     except (OSError, RecursionError, UnicodeError, ValueError, json.JSONDecodeError):
-        ConfigurationError.fail(f"cannot read baseline: {path.name}")
+        ConfigurationError.fail("cannot read baseline")
     fields = {
         "schema_version",
         "repository_id",
@@ -292,3 +305,8 @@ def load_baseline(path: Path) -> Baseline:
         scope_digest=_string(data, "scope_digest", "baseline"),
         fingerprints=tuple(sorted(fingerprints)),
     )
+
+
+def load_baseline(path: Path) -> Baseline:
+    """Load an exact, strict JSON debt baseline."""
+    return parse_baseline_bytes(_read_bounded(path, "baseline"))

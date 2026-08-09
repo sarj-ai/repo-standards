@@ -17,6 +17,9 @@ from .models import (
     Manifest,
     Mode,
     Policy,
+    RatchetClassification,
+    RatchetComparison,
+    RatchetEntry,
     Remediation,
     RuleId,
 )
@@ -259,6 +262,19 @@ def analyze(
 
 def check_baseline(report: AnalysisReport, baseline: Baseline) -> tuple[Diagnostic, ...]:
     """Return exact new/stale debt diagnostics for ratchet mode."""
+    comparison = classify_baseline(report, baseline)
+    new = tuple(
+        item.diagnostic
+        for item in comparison.entries
+        if item.classification is RatchetClassification.NEW and item.diagnostic is not None
+    )
+    stale = comparison.fingerprints(RatchetClassification.RESOLVED)
+    stale_diagnostics = tuple(_stale_baseline_diagnostic(fingerprint) for fingerprint in stale)
+    return tuple(sorted(new + stale_diagnostics, key=lambda item: (item.rule_id, item.fingerprint)))
+
+
+def classify_baseline(report: AnalysisReport, baseline: Baseline) -> RatchetComparison:
+    """Classify every active error and baseline entry without losing known debt."""
     if baseline.repository_id != report.repository_id:
         ConfigurationError.fail("baseline repository_id does not match the manifest")
     if baseline.policy_id != report.policy_id or baseline.policy_version != report.policy_version:
@@ -271,32 +287,47 @@ def check_baseline(report: AnalysisReport, baseline: Baseline) -> tuple[Diagnost
         if item.severity == "error" and item.disposition == "active"
     }
     known = set(baseline.fingerprints)
-    new = tuple(current[item] for item in sorted(set(current) - known))
-    stale = sorted(known - set(current))
-    stale_diagnostics = tuple(
-        with_fingerprint(
-            Diagnostic(
-                rule_id=RuleId("core/baseline/stale-entry"),
-                rule_version=1,
-                severity="error",
-                evidence_level="declared",
-                component_id=ComponentId("repository"),
-                subject_kind="baseline-entry",
-                observed=fingerprint,
-                expected="remove resolved debt from the baseline",
-                message="baseline retains a finding that no longer exists",
-                path=".repo-lint/baseline.json",
-                manifest_anchor=f"fingerprints.{fingerprint}",
-                remediation=Remediation(
-                    summary="Delete the resolved fingerprint in the same change.",
-                    steps=("Remove this exact fingerprint from the reviewed baseline.",),
-                    validation=("Run repo-lint check --mode ratchet again.",),
-                ),
-            )
+    entries = [
+        RatchetEntry(
+            fingerprint=fingerprint,
+            classification=(
+                RatchetClassification.KNOWN if fingerprint in known else RatchetClassification.NEW
+            ),
+            diagnostic=current[fingerprint],
         )
-        for fingerprint in stale
+        for fingerprint in sorted(current)
+    ]
+    entries.extend(
+        RatchetEntry(
+            fingerprint=fingerprint,
+            classification=RatchetClassification.RESOLVED,
+        )
+        for fingerprint in sorted(known - set(current))
     )
-    return tuple(sorted(new + stale_diagnostics, key=lambda item: (item.rule_id, item.fingerprint)))
+    return RatchetComparison(entries=tuple(entries))
+
+
+def _stale_baseline_diagnostic(fingerprint: str) -> Diagnostic:
+    return with_fingerprint(
+        Diagnostic(
+            rule_id=RuleId("core/baseline/stale-entry"),
+            rule_version=1,
+            severity="error",
+            evidence_level="declared",
+            component_id=ComponentId("repository"),
+            subject_kind="baseline-entry",
+            observed=fingerprint,
+            expected="remove resolved debt from the baseline",
+            message="baseline retains a finding that no longer exists",
+            path=".repo-lint/baseline.json",
+            manifest_anchor=f"fingerprints.{fingerprint}",
+            remediation=Remediation(
+                summary="Delete the resolved fingerprint in the same change.",
+                steps=("Remove this exact fingerprint from the reviewed baseline.",),
+                validation=("Run repo-lint check --mode ratchet again.",),
+            ),
+        )
+    )
 
 
 def with_ratchet_diagnostics(

@@ -12,7 +12,15 @@ from .canonical import canonical_json
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .models import AnalysisReport, Diagnostic, Rule
+    from .models import (
+        AnalysisReport,
+        Diagnostic,
+        InputProvenance,
+        RatchetComparison,
+        RelatedLocation,
+        Rule,
+        SourceLocation,
+    )
 
 
 OUTPUT_SCHEMA_VERSION = 1
@@ -26,33 +34,95 @@ def diagnostic_dict(diagnostic: Diagnostic) -> Mapping[str, object]:
         "steps": list(diagnostic.remediation.steps),
         "validation": list(diagnostic.remediation.validation),
     }
-    return {
+    location = _source_location_dict(diagnostic.location)
+    if location is None:
+        location = {
+            "path": diagnostic.path,
+            "manifest_anchor": diagnostic.manifest_anchor,
+        }
+    else:
+        location["manifest_anchor"] = diagnostic.manifest_anchor
+    payload: dict[str, object] = {
         "rule_id": diagnostic.rule_id,
         "rule_version": diagnostic.rule_version,
         "severity": diagnostic.severity,
         "evidence_level": diagnostic.evidence_level,
         "component_id": diagnostic.component_id,
         "subject_kind": diagnostic.subject_kind,
-        "observed": diagnostic.observed,
-        "expected": diagnostic.expected,
+        "observed": (
+            diagnostic.observed if diagnostic.observed_value is None else diagnostic.observed_value
+        ),
+        "expected": (
+            diagnostic.expected if diagnostic.expected_value is None else diagnostic.expected_value
+        ),
         "message": diagnostic.message,
         "path": diagnostic.path,
         "manifest_anchor": diagnostic.manifest_anchor,
-        "location": {
-            "path": diagnostic.path,
-            "manifest_anchor": diagnostic.manifest_anchor,
-        },
+        "location": location,
         "remediation": remediation,
         "prerequisites": list(diagnostic.prerequisites),
         "disposition": diagnostic.disposition,
         "exception": exception,
         "fingerprint": diagnostic.fingerprint,
     }
+    if diagnostic.finding_key:
+        payload["finding_key"] = diagnostic.finding_key
+    if diagnostic.related_locations:
+        payload["related_locations"] = [
+            _related_location_dict(item) for item in diagnostic.related_locations
+        ]
+    return payload
+
+
+def _source_location_dict(location: SourceLocation | None) -> dict[str, object] | None:
+    if location is None:
+        return None
+    payload: dict[str, object] = {"path": location.path}
+    if location.line is not None:
+        payload["line"] = location.line
+    if location.column is not None:
+        payload["column"] = location.column
+    if location.end_line is not None:
+        payload["end_line"] = location.end_line
+    if location.end_column is not None:
+        payload["end_column"] = location.end_column
+    if location.pointer is not None:
+        payload["pointer"] = location.pointer
+    return payload
+
+
+def _related_location_dict(location: RelatedLocation) -> Mapping[str, object]:
+    return {
+        "location": _source_location_dict(location.location),
+        "message": location.message,
+        "relationship": location.relationship,
+    }
+
+
+def input_provenance_dict(provenance: InputProvenance) -> Mapping[str, object]:
+    """Return stable JSON-compatible source provenance."""
+    return asdict(provenance)
+
+
+def ratchet_dict(comparison: RatchetComparison) -> Mapping[str, object]:
+    """Return every baseline classification, including resolved entries."""
+    return {
+        "entries": [
+            {
+                "fingerprint": item.fingerprint,
+                "classification": item.classification,
+                "diagnostic": (
+                    diagnostic_dict(item.diagnostic) if item.diagnostic is not None else None
+                ),
+            }
+            for item in comparison.entries
+        ]
+    }
 
 
 def report_dict(report: AnalysisReport) -> Mapping[str, object]:
     """Return canonical JSON-compatible report data."""
-    return {
+    payload: dict[str, object] = {
         "schema_version": OUTPUT_SCHEMA_VERSION,
         "completion": report.completion,
         "conclusion": report.conclusion,
@@ -64,6 +134,11 @@ def report_dict(report: AnalysisReport) -> Mapping[str, object]:
         "execution_issues": [asdict(item) for item in report.execution_issues],
         "diagnostics": [diagnostic_dict(item) for item in report.diagnostics],
     }
+    if report.input_provenance is not None:
+        payload["input_provenance"] = input_provenance_dict(report.input_provenance)
+    if report.ratchet is not None:
+        payload["ratchet_comparison"] = ratchet_dict(report.ratchet)
+    return payload
 
 
 def render_json(report: AnalysisReport, *, pretty: bool = False) -> str:
@@ -155,8 +230,8 @@ def output_schema() -> Mapping[str, object]:
             "evidence_level": {"enum": ["verified", "declared", "external", "unknown"]},
             "component_id": {"type": "string"},
             "subject_kind": {"type": "string"},
-            "observed": {"type": "string"},
-            "expected": {"type": "string"},
+            "observed": {},
+            "expected": {},
             "message": {"type": "string"},
             "path": {"type": "string"},
             "manifest_anchor": {"type": "string"},
@@ -167,6 +242,11 @@ def output_schema() -> Mapping[str, object]:
                 "properties": {
                     "path": {"type": "string"},
                     "manifest_anchor": {"type": "string"},
+                    "line": {"type": "integer", "minimum": 1},
+                    "column": {"type": "integer", "minimum": 1},
+                    "end_line": {"type": "integer", "minimum": 1},
+                    "end_column": {"type": "integer", "minimum": 1},
+                    "pointer": {"type": "string"},
                 },
             },
             "remediation": remediation,
@@ -174,6 +254,32 @@ def output_schema() -> Mapping[str, object]:
             "disposition": {"enum": ["active", "excepted"]},
             "exception": exception,
             "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "finding_key": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "related_locations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["location", "message", "relationship"],
+                    "properties": {
+                        "location": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["path"],
+                            "properties": {
+                                "path": {"type": "string"},
+                                "line": {"type": "integer", "minimum": 1},
+                                "column": {"type": "integer", "minimum": 1},
+                                "end_line": {"type": "integer", "minimum": 1},
+                                "end_column": {"type": "integer", "minimum": 1},
+                                "pointer": {"type": "string"},
+                            },
+                        },
+                        "message": {"type": "string"},
+                        "relationship": {"type": "string"},
+                    },
+                },
+            },
         },
     }
     return {
@@ -223,5 +329,7 @@ def output_schema() -> Mapping[str, object]:
                 },
             },
             "diagnostics": {"type": "array", "items": diagnostic},
+            "input_provenance": {"type": "object"},
+            "ratchet_comparison": {"type": "object"},
         },
     }
