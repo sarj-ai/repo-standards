@@ -90,9 +90,6 @@ class Remediation:
     summary: str
     steps: tuple[str, ...]
     validation: tuple[str, ...]
-    rollback: tuple[str, ...] = ()
-    suggested_manifest: dict[str, object] | None = None
-    auto_applicable: bool = False
 
 
 @dataclass(frozen=True, slots=True)

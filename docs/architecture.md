@@ -15,8 +15,8 @@ Core has no default policy and no product names.
 
 Repository manifests declare stable components. A path is evidence about a component; it is not
 the component's identity. Finding identity is keyed to its component and semantic manifest anchor,
-not current observed path text. V1 old-to-new mappings validate a unique, non-no-op target mapping;
-the richer evidence/plan semantics described in the roadmap are not implemented yet.
+not current observed path text. Old-to-new mappings validate a unique, non-no-op target mapping;
+they do not prove a physical move or operational equivalence.
 
 Dependencies are typed because source imports, build inputs, runtime calls, generated artifacts,
 data ownership, and deployment ordering have different safety implications. Policies evaluate only
@@ -34,8 +34,8 @@ misclassified as deployable applications or generic datastores.
 The policy is explicit data and installed code, not a core default. A future adopter can replace it
 with a different policy without forking the engine.
 
-## Deliberate V1 limits
+## Deliberate limits
 
-V1 validates declared repository facts. It does not attempt to replace Import Linter,
+Manifest analysis validates declared repository facts. It does not attempt to replace Import Linter,
 dependency-cruiser, Terraform, GitHub, or cloud control planes. Later adapters may ingest their
 deterministic outputs, but operational evidence remains separate from static declarations.

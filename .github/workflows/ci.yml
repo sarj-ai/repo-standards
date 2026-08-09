@@ -54,7 +54,7 @@ jobs:
         run: uv sync --locked
       - name: Enforce highest Sarj Standards profile
         run: >-
-          uvx --isolated --python 3.14 --from sarj-standards==1.2.0
+          uvx --isolated --python 3.14 --from sarj-standards==5.2.0
           sarj-standards check --trust-repository-code
 
   package:
@@ -75,13 +75,16 @@ jobs:
       - name: Install wheels into a clean environment
         run: |
           uv venv --python 3.12 /tmp/repo-lint-smoke
-          uv pip install --python /tmp/repo-lint-smoke/bin/python dist/*.whl
+          uv pip install --python /tmp/repo-lint-smoke/bin/python \
+            --find-links dist sarj-repo-lint
       - name: Smoke-test installed interfaces
         run: |
           /tmp/repo-lint-smoke/bin/repo-lint --help
           /tmp/repo-lint-smoke/bin/sarj-repo-lint --help
           /tmp/repo-lint-smoke/bin/repo-lint capabilities
           /tmp/repo-lint-smoke/bin/repo-lint schema
+          /tmp/repo-lint-smoke/bin/repo-lint report tests/fixtures/smoke \
+            --policy sarj --format json
 
   gate:
     name: CI / gate

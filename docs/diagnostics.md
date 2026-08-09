@@ -5,18 +5,13 @@ evidence level, component, subject kind, observed/expected values, repository-re
 manifest anchor, prerequisites, and structured remediation.
 
 Fingerprints exclude messages, absolute paths, line offsets, timestamps, usernames, and tool
-versions. Message improvements and physical moves therefore do not manufacture new debt when the
-component and semantic construct are unchanged.
+versions. They include the normalized observed and expected identity, so a changed occurrence is
+visible rather than being silently treated as the same evidence.
 
 Baselines bind to a policy-scope digest rather than the mutable component inventory. Adding,
 removing, or moving components therefore remains analyzable: new semantic fingerprints are debt
-and resolved fingerprints are stale. V1 validates migration mappings but does not yet attach their
-context or operational evidence to diagnostics.
+and resolved fingerprints are stale. The current policy validates migration mappings but does not preserve
+finding identity across a move or attach Git-tree and operational evidence to diagnostics.
 
 Remediation is deliberately non-executable. It includes ordered actions, validation expectations,
-rollback considerations, and an optional manifest fragment. V1 always emits
-`auto_applicable: false`; consumers must not turn suggestions into shell commands without review.
-
-For bounded LLM context, begin with `summary`, then select diagnostics by `rule_id`, `component_id`,
-or fingerprint. The canonical JSON contract makes it unnecessary to parse human prose to learn the
-verdict, evidence level, prerequisites, or next safe step.
+and no shell commands or repository mutation. The capability contract declares `autofix: false`.

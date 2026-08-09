@@ -3,11 +3,19 @@
 This is the target policy to lint toward, not a command to reorganize every repository at once.
 Each component is converted in its source repository before histories are merged.
 
-V1 machine enforcement covers application/library/contract/generated-client/migration/tool paths,
-Terraform/Cloud Build/Kubernetes/Cloudflare deployment paths, controlled Sarj products, declared
-dependency direction, and narrow capability warnings. Package-name templates, generated
+The current Sarj policy covers declared application/library/contract/generated-client/migration/tool
+paths, controlled Sarj products, declared
+dependency direction, controlled application roles, ownership-prefixed component IDs, strict
+kebab-case capability tokens, and exact kind-specific identity fields. Application-role and
+Terraform/Cloud Build/Kubernetes/Cloudflare target paths are advisory while they are calibrated
+against verified repository evidence. Package-name templates, generated
 provenance, consumer-count evidence, thin-workflow internals, action pins, and live deployment
 state remain guidance/roadmap items; inventory alone does not assert they pass.
+
+Manifest analysis evaluates owner-declared topology. It does not reconcile the manifest with the Git
+tree, prove paths exist, prove every package/workspace is declared, or bind migration evidence to a
+source and target revision. Library and generated-client target paths currently cover Python and
+TypeScript; other ecosystem-native package boundaries require typed adapters.
 
 ```text
 applications/<product>/<component>/
@@ -24,6 +32,13 @@ docs/{architecture,products/<product>,runbooks}/
 Sarj's controlled product IDs are `platform`, `vb`, and `najm`. Product IDs are policy-pack data,
 not engine constants. Another company can supply an open or controlled product registry in its own
 policy package.
+
+Application names are exactly `api`, `agent`, `worker`, or `web`, or a kebab-case domain followed
+by one of those roles, such as `integration-api` or `dashboard-web`. Product-owned stable component
+IDs start with `<product>.`; shared, foundation, and tool IDs start with `shared.`, `foundation.`,
+and `tool.` respectively. Capabilities are one lowercase ASCII kebab-case token. Distribution,
+import, image, runtime, and deployment names remain separately declared identities rather than
+being guessed from these tokens.
 
 ## Applications and reusable libraries
 

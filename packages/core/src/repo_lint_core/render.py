@@ -25,9 +25,6 @@ def diagnostic_dict(diagnostic: Diagnostic) -> Mapping[str, object]:
         "summary": diagnostic.remediation.summary,
         "steps": list(diagnostic.remediation.steps),
         "validation": list(diagnostic.remediation.validation),
-        "rollback": list(diagnostic.remediation.rollback),
-        "suggested_manifest": diagnostic.remediation.suggested_manifest,
-        "auto_applicable": diagnostic.remediation.auto_applicable,
     }
     return {
         "rule_id": diagnostic.rule_id,
@@ -44,7 +41,6 @@ def diagnostic_dict(diagnostic: Diagnostic) -> Mapping[str, object]:
         "location": {
             "path": diagnostic.path,
             "manifest_anchor": diagnostic.manifest_anchor,
-            "start": {"line": 1, "column": 1},
         },
         "remediation": remediation,
         "prerequisites": list(diagnostic.prerequisites),
@@ -84,9 +80,9 @@ def render_text(report: AnalysisReport) -> str:
         for issue in report.execution_issues
     ]
     lines.extend(
-        f"{item.path}:1:1: {item.rule_id} {item.message} "
+        f"{item.path}: {item.rule_id} {item.message} "
         f"[observed={item.observed!r}; expected={item.expected!r}]"
-        f" [disposition={item.disposition}]"
+        f" [anchor={item.manifest_anchor}; disposition={item.disposition}]"
         for item in report.diagnostics
     )
     lines.append(
@@ -111,17 +107,11 @@ def output_schema() -> Mapping[str, object]:
             "summary",
             "steps",
             "validation",
-            "rollback",
-            "suggested_manifest",
-            "auto_applicable",
         ],
         "properties": {
             "summary": {"type": "string"},
             "steps": {"type": "array", "items": {"type": "string"}},
             "validation": {"type": "array", "items": {"type": "string"}},
-            "rollback": {"type": "array", "items": {"type": "string"}},
-            "suggested_manifest": {"type": ["object", "null"]},
-            "auto_applicable": {"const": False},
         },
     }
     exception = {
@@ -173,19 +163,10 @@ def output_schema() -> Mapping[str, object]:
             "location": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["path", "manifest_anchor", "start"],
+                "required": ["path", "manifest_anchor"],
                 "properties": {
                     "path": {"type": "string"},
                     "manifest_anchor": {"type": "string"},
-                    "start": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": ["line", "column"],
-                        "properties": {
-                            "line": {"type": "integer", "minimum": 1},
-                            "column": {"type": "integer", "minimum": 1},
-                        },
-                    },
                 },
             },
             "remediation": remediation,

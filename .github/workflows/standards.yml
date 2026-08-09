@@ -1,4 +1,4 @@
-# Managed by sarj-standards 1.2.0; regenerate with `sarj-standards show ci --output .github/workflows/standards.yml`.
+# Managed by sarj-standards 5.2.0; regenerate with `sarj-standards show ci --output .github/workflows/standards.yml`.
 name: Standards
 
 on:
@@ -27,4 +27,4 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --locked
       - name: Run standards
-        run: uvx --isolated --python 3.14 --from sarj-standards==1.2.0 sarj-standards check --trust-repository-code
+        run: uvx --isolated --python 3.14 --from sarj-standards==5.2.0 sarj-standards check --trust-repository-code

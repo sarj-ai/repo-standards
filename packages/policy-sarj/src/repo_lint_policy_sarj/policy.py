@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 import re
-from typing import ClassVar, assert_never
+from types import MappingProxyType
+from typing import TYPE_CHECKING, ClassVar, assert_never
 
 from repo_lint_core.errors import ConfigurationError
 from repo_lint_core.models import (
@@ -17,6 +18,10 @@ from repo_lint_core.models import (
     Rule,
     RuleId,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 PRODUCTS = frozenset({"platform", "vb", "najm"})
@@ -57,6 +62,46 @@ EDGE_KINDS = frozenset(
 CODE_EDGES = frozenset({"source-import", "package-dependency"})
 VAGUE_CAPABILITIES = frozenset({"common", "core", "helpers", "shared", "utils"})
 _PATH_TOKEN = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"  # ruff: ignore[hardcoded-password-string] - regex, not a secret
+_APPLICATION_ROLE = rf"(?:api|agent|worker|web|{_PATH_TOKEN}-(?:api|agent|worker|web))"
+_OPERATIONAL_KINDS = frozenset(
+    {
+        ComponentKind.TERRAFORM_ROOT,
+        ComponentKind.CLOUD_BUILD,
+        ComponentKind.KUBERNETES,
+        ComponentKind.CLOUDFLARE,
+    }
+)
+_COMPONENT_FIELDS: Mapping[
+    ComponentKind, tuple[frozenset[str], frozenset[str]]
+] = MappingProxyType({
+    ComponentKind.APPLICATION: (frozenset({"product"}), frozenset({"capability"})),
+    ComponentKind.PRODUCT_LIBRARY: (
+        frozenset({"product", "capability"}),
+        frozenset(),
+    ),
+    ComponentKind.SHARED_LIBRARY: (frozenset({"capability"}), frozenset({"product"})),
+    ComponentKind.FOUNDATION_SERVICE: (frozenset(), frozenset({"product", "capability"})),
+    ComponentKind.CONTRACT: (frozenset(), frozenset({"capability"})),
+    ComponentKind.GENERATED_CLIENT: (
+        frozenset({"product", "capability"}),
+        frozenset(),
+    ),
+    ComponentKind.MIGRATION_SET: (frozenset({"product"}), frozenset({"capability"})),
+    ComponentKind.TERRAFORM_ROOT: (frozenset({"product"}), frozenset({"capability"})),
+    ComponentKind.CLOUD_BUILD: (
+        frozenset({"product", "capability"}),
+        frozenset(),
+    ),
+    ComponentKind.KUBERNETES: (
+        frozenset({"product", "capability"}),
+        frozenset(),
+    ),
+    ComponentKind.CLOUDFLARE: (
+        frozenset({"product", "capability"}),
+        frozenset(),
+    ),
+    ComponentKind.TOOL: (frozenset({"capability"}), frozenset({"product"})),
+})
 
 
 RULES = (
@@ -79,6 +124,29 @@ RULES = (
         ),
         bad_example="path = 'python/agent'",
         good_example="path = 'applications/platform/agent'",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/layout/operational-path"),
+        version=1,
+        severity="warning",
+        summary="Operational configuration has a declared consolidation target.",
+        rationale=(
+            "Operational configuration moves can affect build context, state, triggers, and "
+            "runtime behavior, so target placement remains advisory until verified."
+        ),
+        bad_example="path = 'iac/platform'",
+        good_example="path = 'deployments/platform/terraform'",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/schema/component-fields"),
+        version=1,
+        severity="error",
+        summary="Each component kind has exact required and forbidden identity fields.",
+        rationale=(
+            "Contradictory ownership fields make path and component-name derivation ambiguous."
+        ),
+        bad_example="kind = 'shared-library', product = 'platform'",
+        good_example="kind = 'shared-library', capability = 'request-signing'",
     ),
     Rule(
         rule_id=RuleId("sarj/graph/application-imports-application"),
@@ -136,6 +204,38 @@ RULES = (
         bad_example="capability = 'utils'",
         good_example="capability = 'request-signing'",
     ),
+    Rule(
+        rule_id=RuleId("sarj/naming/application-role"),
+        version=1,
+        severity="warning",
+        summary="Application names end in a controlled deployable role.",
+        rationale=(
+            "Role-bearing names make deployment ownership and repository navigation explicit."
+        ),
+        bad_example="applications/platform/integration",
+        good_example="applications/platform/integration-api",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/naming/component-id"),
+        version=1,
+        severity="error",
+        summary="Stable component IDs include their declared ownership namespace.",
+        rationale=(
+            "An ID that disagrees with product ownership makes diagnostics and "
+            "migrations ambiguous."
+        ),
+        bad_example="id = 'vb.agent', product = 'platform'",
+        good_example="id = 'platform.agent', product = 'platform'",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/naming/capability-token"),
+        version=1,
+        severity="error",
+        summary="Capabilities use one lowercase ASCII kebab-case token.",
+        rationale="One canonical token derives stable paths without ecosystem-specific ambiguity.",
+        bad_example="capability = 'request.signing'",
+        good_example="capability = 'request-signing'",
+    ),
 )
 
 
@@ -179,8 +279,8 @@ def _diagnostic(  # ruff: ignore[too-many-arguments] - wire diagnostic fields re
 def _expected_path(  # ruff: ignore[too-many-return-statements] - direct policy-kind mapping is easier to audit
     kind: ComponentKind, product: str | None, capability: str | None
 ) -> str:
-    product_token = product or "<product>"
-    capability_token = capability or "<capability>"
+    product_token = re.escape(product) if product else "<product>"
+    capability_token = re.escape(capability) if capability else "<capability>"
     if kind is ComponentKind.APPLICATION:
         return rf"applications/{product_token}/{_PATH_TOKEN}"
     if kind is ComponentKind.PRODUCT_LIBRARY:
@@ -190,7 +290,8 @@ def _expected_path(  # ruff: ignore[too-many-return-statements] - direct policy-
     if kind is ComponentKind.FOUNDATION_SERVICE:
         return rf"foundation/components/{_PATH_TOKEN}"
     if kind is ComponentKind.CONTRACT:
-        return rf"contracts/({product_token}|shared)/{_PATH_TOKEN}"
+        owner_token = product_token if product else "shared"
+        return rf"contracts/{owner_token}/{_PATH_TOKEN}"
     if kind is ComponentKind.GENERATED_CLIENT:
         return rf"clients/generated/{product_token}/{capability_token}/(python|typescript)"
     if kind is ComponentKind.MIGRATION_SET:
@@ -212,7 +313,7 @@ class SarjPolicy:
     """Versioned Sarj conventions implemented only against neutral core types."""
 
     policy_id: ClassVar[PolicyId] = PolicyId("sarj")
-    policy_version: ClassVar[int] = 1
+    policy_version: ClassVar[int] = 2
 
     @staticmethod
     def rules() -> tuple[Rule, ...]:
@@ -232,6 +333,11 @@ class SarjPolicy:
                     f"component {component.component_id} has unsupported kind {component.kind}"
                 )
             diagnostics.extend(_dependency_diagnostics(component, by_id))
+            field_diagnostic = _component_field_diagnostic(component, component_kind)
+            if field_diagnostic is not None:
+                diagnostics.append(field_diagnostic)
+                continue
+            diagnostics.extend(_naming_diagnostics(component, component_kind))
             if (
                 component_kind
                 in {
@@ -265,9 +371,14 @@ class SarjPolicy:
                 )
             expected_path = _expected_path(component_kind, component.product, component.capability)
             if re.fullmatch(expected_path, component.path) is None:
+                rule_id = (
+                    RuleId("sarj/layout/operational-path")
+                    if component_kind in _OPERATIONAL_KINDS
+                    else RuleId("sarj/layout/component-path")
+                )
                 diagnostics.append(
                     _diagnostic(
-                        rule_id=RuleId("sarj/layout/component-path"),
+                        rule_id=rule_id,
                         component_id=component.component_id,
                         subject_kind="component-path",
                         observed=component.path,
@@ -304,6 +415,122 @@ class SarjPolicy:
                     )
                 )
         return tuple(diagnostics)
+
+
+def _naming_diagnostics(
+    component: Component, component_kind: ComponentKind
+) -> list[Diagnostic]:
+    diagnostics: list[Diagnostic] = []
+    if component.capability is not None and re.fullmatch(_PATH_TOKEN, component.capability) is None:
+        diagnostics.append(
+            _diagnostic(
+                rule_id=RuleId("sarj/naming/capability-token"),
+                component_id=component.component_id,
+                subject_kind="capability",
+                observed=component.capability,
+                expected=_PATH_TOKEN,
+                message="component capability is not one kebab-case token",
+                path=component.path,
+                anchor=f"components.{component.component_id}.capability",
+                remediation=_remediation(
+                    "Choose one lowercase ASCII kebab-case capability token.",
+                    "Keep distribution, import, and runtime aliases separate from this identity.",
+                ),
+            )
+        )
+    expected_prefix = _component_id_prefix(component, component_kind)
+    if expected_prefix is not None and not component.component_id.startswith(expected_prefix):
+        diagnostics.append(
+            _diagnostic(
+                rule_id=RuleId("sarj/naming/component-id"),
+                component_id=component.component_id,
+                subject_kind="component-id",
+                observed=component.component_id,
+                expected=f"{expected_prefix}<component>",
+                message="component ID disagrees with its declared ownership namespace",
+                path=component.path,
+                anchor=f"components.{component.component_id}.id",
+                remediation=_remediation(
+                    "Use the declared ownership namespace in the stable component ID.",
+                    "Update exact manifest references and migration evidence together.",
+                ),
+            )
+        )
+    if component_kind is ComponentKind.APPLICATION:
+        application_name = component.path.rsplit("/", maxsplit=1)[-1]
+        canonical_application_path = (
+            rf"applications/{re.escape(component.product or '')}/{_PATH_TOKEN}"
+        )
+        if (
+            re.fullmatch(canonical_application_path, component.path) is not None
+            and re.fullmatch(_APPLICATION_ROLE, application_name) is None
+        ):
+            diagnostics.append(
+                _diagnostic(
+                    rule_id=RuleId("sarj/naming/application-role"),
+                    component_id=component.component_id,
+                    subject_kind="application-role",
+                    observed=application_name,
+                    expected="api|agent|worker|web|<domain>-(api|agent|worker|web)",
+                    message="application name does not end in a controlled deployable role",
+                    path=component.path,
+                    anchor=f"components.{component.component_id}.path",
+                    remediation=_remediation(
+                        "Name the deployable by its role or domain and role.",
+                        "Use api, agent, worker, or web as the final role token.",
+                    ),
+                )
+            )
+    return diagnostics
+
+
+def _component_field_diagnostic(
+    component: Component, component_kind: ComponentKind
+) -> Diagnostic | None:
+    required, forbidden = _COMPONENT_FIELDS[component_kind]
+    values = {"product": component.product, "capability": component.capability}
+    missing = sorted(field for field in required if values[field] is None)
+    present_forbidden = sorted(field for field in forbidden if values[field] is not None)
+    if not missing and not present_forbidden:
+        return None
+    problems: list[str] = [f"missing {field}" for field in missing]
+    problems.extend(f"forbidden {field}" for field in present_forbidden)
+    expected_parts: list[str] = []
+    if required:
+        expected_parts.append(f"required={','.join(sorted(required))}")
+    if forbidden:
+        expected_parts.append(f"forbidden={','.join(sorted(forbidden))}")
+    return _diagnostic(
+        rule_id=RuleId("sarj/schema/component-fields"),
+        component_id=component.component_id,
+        subject_kind="component-fields",
+        observed="; ".join(problems),
+        expected="; ".join(expected_parts) or "no product/capability constraints",
+        message="component identity fields contradict its declared kind",
+        path=component.path,
+        anchor=f"components.{component.component_id}",
+        remediation=_remediation(
+            "Make the component fields match the selected component kind.",
+            "Add required identity fields and remove fields forbidden for this kind.",
+            "Then rerun repo-lint so dependent naming and path rules can evaluate.",
+        ),
+    )
+
+
+def _component_id_prefix(
+    component: Component, component_kind: ComponentKind
+) -> str | None:
+    if component_kind is ComponentKind.SHARED_LIBRARY or (
+        component_kind is ComponentKind.CONTRACT and component.product is None
+    ):
+        return "shared."
+    if component_kind is ComponentKind.FOUNDATION_SERVICE:
+        return "foundation."
+    if component_kind is ComponentKind.TOOL:
+        return "tool."
+    if component.product in PRODUCTS:
+        return f"{component.product}."
+    return None
 
 
 def _dependency_diagnostics(

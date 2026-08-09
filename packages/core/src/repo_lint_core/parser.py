@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import json
 import re
 import tomllib
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_MAX_EXCEPTION_DAYS = 90
+_MAX_EXCEPTION_DURATION = timedelta(days=90)
 _MAX_INPUT_BYTES = 1_048_576
 _MAX_COMPONENTS = 10_000
 _MAX_MIGRATIONS = 10_000
@@ -187,7 +187,7 @@ def parse_exception(value: object, index: int) -> ExceptionRecord:
         ConfigurationError.fail(f"{context}.created_on and expires_on must be YYYY-MM-DD")
     if expiry_date < created_date:
         ConfigurationError.fail(f"{context}.expires_on must not precede created_on")
-    if (expiry_date - created_date).days > _MAX_EXCEPTION_DAYS:
+    if expiry_date - created_date > _MAX_EXCEPTION_DURATION:
         ConfigurationError.fail(f"{context} may not exceed 90 days")
     return ExceptionRecord(
         rule_id=RuleId(_string(data, "rule_id", context)),

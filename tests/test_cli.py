@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 from jsonschema import validate
 import pytest
@@ -52,7 +53,7 @@ GOOD_MANIFEST = """
 schema_version = 1
 repository_id = "example-repository"
 policy = "sarj"
-policy_version = 1
+policy_version = 2
 
 [[components]]
 id = "platform.agent"
@@ -81,7 +82,16 @@ def test_report_findings_are_nonblocking(tmp_path: Path) -> None:
     diagnostics = _object_list(report["diagnostics"])
     assert diagnostics[0]["rule_id"] == "sarj/layout/component-path"
     remediation = _object(diagnostics[0]["remediation"])
-    assert remediation["auto_applicable"] is False
+    assert remediation["steps"]
+    assert remediation["validation"]
+
+
+def test_text_diagnostics_do_not_invent_source_coordinates(tmp_path: Path) -> None:
+    _manifest(tmp_path, GOOD_MANIFEST.replace("applications/platform/agent", "python/agent"))
+    result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "text"])
+    assert result.exit_code == 0
+    assert ":1:1:" not in result.stdout
+    assert "anchor=components.platform.agent.path" in result.stdout
 
 
 def test_strict_errors_block(tmp_path: Path) -> None:
@@ -90,6 +100,28 @@ def test_strict_errors_block(tmp_path: Path) -> None:
         app, ["check", str(tmp_path), "--policy", "sarj", "--mode", "strict", "--format", "json"]
     )
     assert result.exit_code == 1
+
+
+def test_strict_operational_layout_guidance_is_nonblocking(tmp_path: Path) -> None:
+    operational_manifest = GOOD_MANIFEST.replace(
+        '''id = "platform.agent"
+kind = "application"
+product = "platform"
+path = "applications/platform/agent"''',
+        '''id = "platform.terraform"
+kind = "terraform-root"
+product = "platform"
+path = "iac/platform"''',
+    )
+    _manifest(tmp_path, operational_manifest)
+    result = runner.invoke(
+        app, ["check", str(tmp_path), "--policy", "sarj", "--mode", "strict", "--format", "json"]
+    )
+    report = _json_object(result.stdout)
+    assert result.exit_code == 0
+    diagnostics = _object_list(report["diagnostics"])
+    assert diagnostics[0]["rule_id"] == "sarj/layout/operational-path"
+    assert diagnostics[0]["severity"] == "warning"
 
 
 def test_malformed_manifest_is_incomplete(tmp_path: Path) -> None:
@@ -121,7 +153,7 @@ def test_report_validates_against_published_schema(tmp_path: Path) -> None:
     validate(instance=report, schema=schema)
 
 
-def test_incomplete_report_and_locations_validate_against_schema(tmp_path: Path) -> None:
+def test_incomplete_report_and_anchor_locations_validate_against_schema(tmp_path: Path) -> None:
     _manifest(tmp_path, "schema_version = 1\nunknown = true\n")
     incomplete = runner.invoke(
         app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"]
@@ -138,6 +170,8 @@ def test_incomplete_report_and_locations_validate_against_schema(tmp_path: Path)
     diagnostic = _object_list(_json_object(findings.stdout)["diagnostics"])[0]
     location = _object(diagnostic["location"])
     assert location["path"] == "python/agent"
+    assert location["manifest_anchor"] == "components.platform.agent.path"
+    assert "start" not in location
 
 
 def test_neutral_core_contains_no_sarj_policy_vocabulary() -> None:
@@ -148,6 +182,14 @@ def test_neutral_core_contains_no_sarj_policy_vocabulary() -> None:
     assert "sarj" not in source
     assert "najm" not in source
     assert '"platform"' not in source
+
+
+def test_behavior_docs_do_not_use_ambiguous_stage_versions() -> None:
+    repository = Path(__file__).parents[1]
+    documentation = [repository / "README.md", *sorted((repository / "docs").glob("*.md"))]
+    forbidden = re.compile(r"\b(?:Stage 0|V1|V2)\b")
+    for path in documentation:
+        assert forbidden.search(path.read_text(encoding="utf-8")) is None, path
 
 
 def test_manifest_symlink_is_rejected(tmp_path: Path) -> None:
@@ -209,7 +251,13 @@ def test_unknown_policy_is_structured_incomplete(tmp_path: Path) -> None:
     assert report["conclusion"] == "inconclusive"
 
 
-@pytest.mark.parametrize("arguments", [("rules",), ("explain", "example/rule")])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        pytest.param(("rules",), id="rules"),
+        pytest.param(("explain", "example/rule"), id="explain"),
+    ],
+)
 def test_unknown_policy_is_structured_for_rule_commands(arguments: tuple[str, ...]) -> None:
     result = runner.invoke(app, [*arguments, "--policy", "missing"])
     assert result.exit_code == 2

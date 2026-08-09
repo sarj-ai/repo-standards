@@ -11,7 +11,7 @@ The repository intentionally separates:
 - `repo-lint-policy-sarj`: Sarj products, topology, dependency rules, and remediation guidance;
 - `sarj-repo-lint`: the CLI assembly.
 
-This is a private Stage 0/V1 prototype. It does not move files, rewrite imports, generate source,
+This is a private prototype. It does not move files, rewrite imports, generate source,
 run package managers, call cloud APIs, deploy, or prove live operational state.
 
 ## Quick start
@@ -59,7 +59,7 @@ The default manifest is `.repo-lint/repository.toml`:
 schema_version = 1
 repository_id = "example-repository"
 policy = "sarj"
-policy_version = 1
+policy_version = 2
 
 [[components]]
 id = "platform.agent"
@@ -82,7 +82,8 @@ owner = "@example/platform"
 ```
 
 The manifest is strict: unknown keys, unknown component/edge kinds, duplicate IDs, unsafe paths,
-missing targets, and mismatched policy versions make analysis incomplete. `legacy = true` is
+invalid kind-specific product/capability fields, missing targets, and mismatched policy versions
+make analysis incomplete or produce a precise structural finding. `legacy = true` is
 inventory metadata only and never suppresses a rule; reviewed legacy debt lives in the exact
 baseline. Intentional moves use an explicit `[[migration_paths]]` record.
 
@@ -99,7 +100,7 @@ counts:
   "schema_version": 1,
   "repository_id": "example-repository",
   "policy": "sarj",
-  "policy_version": 1,
+  "policy_version": 2,
   "scope_digest": "<digest from a report>",
   "fingerprints": ["<exact blocking diagnostic fingerprint>"]
 }
@@ -117,14 +118,18 @@ Every diagnostic states its evidence level:
 - `external`: requires CI, registry, GitHub, cloud, or human evidence;
 - `unknown`: required evidence is missing.
 
-V1 blocks only deterministic structural violations and invalid declarations. It never equates a
+The current Sarj policy blocks only deterministic structural violations and invalid declarations. It evaluates
+owner-declared manifest facts; it does not prove that declared paths exist, that every tracked
+package or component is represented, or that an old path moved safely. Operational target paths
+for Terraform, Cloud Build, Kubernetes, and Cloudflare remain non-blocking guidance until typed
+evidence adapters can validate state boundaries, build contexts, and runtime configuration.
+
+The linter never equates a
 workflow file with proof that a deployment, approval, artifact promotion, rollback, or cloud IAM
 policy actually worked.
 
 See [architecture.md](docs/architecture.md), [diagnostics.md](docs/diagnostics.md), and
-[rule-evaluation.md](docs/rule-evaluation.md). The private fleet calibration is summarized in
-[corpus-calibration.md](docs/corpus-calibration.md), and the reviewed future interface is captured
-in [api-roadmap.md](docs/api-roadmap.md).
+[rule-evaluation.md](docs/rule-evaluation.md).
 The proposed reusable-code, repository-layout, Actions, Cloud Build, and deployment conventions are
 in [repository-policy.md](docs/repository-policy.md).
 
@@ -133,7 +138,7 @@ in [repository-policy.md](docs/repository-policy.md).
 ```bash
 uv sync
 uv run pytest
-uvx --isolated --python 3.14 --from sarj-standards==1.2.0 \
+uvx --isolated --python 3.14 --from sarj-standards==5.2.0 \
   sarj-standards check --trust-repository-code
 ```
 

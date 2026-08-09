@@ -1,0 +1,11 @@
+schema_version = 1
+repository_id = "wheel-smoke"
+policy = "sarj"
+policy_version = 2
+
+[[components]]
+id = "platform.agent"
+kind = "application"
+product = "platform"
+path = "applications/platform/agent"
+owner = "@example/platform"
