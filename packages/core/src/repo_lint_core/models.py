@@ -22,6 +22,7 @@ type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 RuleMaturity = Literal["experimental", "beta", "stable", "deprecated"]
 AdapterStatus = Literal["complete", "incomplete", "failed"]
+DeliveryProvider = Literal["github"]
 
 
 def _empty_json_mapping() -> dict[str, JSONValue]:
@@ -102,6 +103,18 @@ class ExceptionRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class DeliveryConfig:
+    """Declared branch-promotion topology for repository delivery policy."""
+
+    provider: DeliveryProvider = "github"
+    repository: str | None = None
+    production_branch: str = "main"
+    preview_branch: str = "preview"
+    development_branch: str = "dev"
+    sync_workflows: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Manifest:
     """Strict repository declaration consumed by the engine."""
 
@@ -111,6 +124,7 @@ class Manifest:
     components: tuple[Component, ...]
     migration_paths: tuple[MigrationPath, ...] = ()
     exceptions: tuple[ExceptionRecord, ...] = ()
+    delivery: DeliveryConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)

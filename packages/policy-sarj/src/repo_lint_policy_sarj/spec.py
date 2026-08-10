@@ -7,7 +7,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Literal
 
-from repo_lint_core.models import PolicyId, RuleId
+from repo_lint_core.models import EvidenceLevel, PolicyId, RuleId
 
 
 PROFILE_ID = "sarj/consolidation"
@@ -37,7 +37,7 @@ class RuleGovernance:
     rule_id: RuleId
     maturity: RuleMaturity
     classification: RuleClassification
-    evidence: Literal["declared", "verified"]
+    evidence: EvidenceLevel
     upstream: tuple[str, ...]
     precedence: int
 

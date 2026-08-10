@@ -93,7 +93,7 @@ jobs:
           "$SMOKE_ENV/bin/repo-lint" rest --help
           "$SMOKE_ENV/bin/repo-lint" rest rules
           "$SMOKE_ENV/bin/python" -c \
-            'import repo_lint_core, repo_lint_openapi, repo_lint_policy_sarj, repo_lint_rest'
+            'import repo_lint_core, repo_lint_github, repo_lint_openapi, repo_lint_policy_sarj, repo_lint_rest'
           mkdir -p "$FIXTURE_ROOT/.repo-lint"
           cp tests/fixtures/smoke/.repo-lint/repository.toml \
             "$FIXTURE_ROOT/.repo-lint/repository.toml"

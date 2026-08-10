@@ -1,6 +1,6 @@
 [project]
 name = "repo-lint-core"
-version = "0.2.0"
+version = "0.3.0"
 description = "Company-neutral repository lint engine"
 requires-python = ">=3.12"
 dependencies = []

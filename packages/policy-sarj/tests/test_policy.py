@@ -13,6 +13,7 @@ from repo_lint_core.models import (
     Mode,
     PolicyId,
     RepositoryId,
+    RuleId,
 )
 from repo_lint_policy_sarj import (
     POLICY_SPEC,
@@ -630,11 +631,15 @@ def test_policy_spec_is_closed_and_governance_covers_every_rule() -> None:
     assert POLICY_SPEC.profile.product_registry_mode == "closed"
     assert POLICY_SPEC.profile.repository_overrides is False
     assert POLICY_SPEC.profile.target_repository_plugins is False
-    assert POLICY_SPEC.policy_version == SarjPolicy.policy_version == 3
+    assert POLICY_SPEC.policy_version == SarjPolicy.policy_version == 4
     assert {item.rule_id for item in RULE_GOVERNANCE} == {
         item.rule_id for item in SarjPolicy.rules()
     }
-    assert all(item.evidence == "declared" for item in RULE_GOVERNANCE)
+    assert {item.evidence for item in RULE_GOVERNANCE} == {
+        "declared",
+        "external",
+        "verified",
+    }
     assert all(item.upstream for item in RULE_GOVERNANCE)
 
 
@@ -650,6 +655,31 @@ def test_warning_rules_are_explicitly_judgment_or_operational() -> None:
             }
         else:
             assert metadata.maturity is RuleMaturity.STABLE_ERROR
+
+
+def test_delivery_rule_governance_keeps_only_the_objective_invariant_blocking() -> None:
+    rules = {
+        rule.rule_id: rule
+        for rule in SarjPolicy.rules()
+        if rule.rule_id.startswith(("sarj/delivery/", "sarj/github/"))
+    }
+    assert set(rules) == {
+        "sarj/delivery/hotfix-backsync",
+        "sarj/github/actions-sha-pinning",
+        "sarj/github/explicit-permissions",
+        "sarj/github/job-timeouts",
+        "sarj/github/immutable-installs",
+        "sarj/github/vulnerability-gate",
+        "sarj/github/merge-queue-trigger",
+        "sarj/github/repository-governance",
+    }
+    assert rules[RuleId("sarj/delivery/hotfix-backsync")].severity == "error"
+    assert {
+        rule.severity for rule_id, rule in rules.items() if rule_id.startswith("sarj/github/")
+    } == {"warning"}
+    assert {
+        rule.maturity for rule_id, rule in rules.items() if rule_id.startswith("sarj/github/")
+    } == {"beta"}
 
 
 def test_public_expected_path_is_a_template_not_a_regex() -> None:

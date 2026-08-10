@@ -213,6 +213,7 @@ def analyze(
     *,
     mode: Mode,
     as_of: date | None = None,
+    additional_diagnostics: tuple[Diagnostic, ...] = (),
 ) -> AnalysisReport:
     """Evaluate a parsed manifest without repository-code execution."""
     if manifest.policy_id != policy.policy_id or manifest.policy_version != policy.policy_version:
@@ -221,7 +222,8 @@ def analyze(
             f"installed policy is {policy.policy_id}@{policy.policy_version}"
         )
     findings = tuple(
-        with_fingerprint(item) for item in core_diagnostics(manifest) + policy.evaluate(manifest)
+        with_fingerprint(item)
+        for item in core_diagnostics(manifest) + policy.evaluate(manifest) + additional_diagnostics
     )
     fingerprints = [item.fingerprint for item in findings]
     if len(fingerprints) != len(set(fingerprints)):

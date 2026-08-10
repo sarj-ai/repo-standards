@@ -2,19 +2,85 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+import importlib
 import json
 from pathlib import Path
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local Git fixture only
+from urllib.error import URLError
+from urllib.request import Request
 
 from jsonschema import validate
 import pytest
+from repo_lint_core import ConfigurationError
+from repo_lint_github import RepositoryEvidence
 from typer.testing import CliRunner
 
-from repo_lint_cli.main import app
+from repo_lint_cli.main import (
+    app,
+    gh_api_transport,
+    resolve_github_repository,
+)
 
 
 runner = CliRunner()
+
+
+def test_gh_transport_preserves_api_contract_without_forwarding_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[str] = []
+
+    def fake_run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        del kwargs
+        observed.extend(arguments)
+        return subprocess.CompletedProcess(arguments, 0, stdout=b"{}", stderr=b"")
+
+    def fake_which(name: str) -> str:
+        return f"/usr/bin/{name}"
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    request = Request(
+        "https://api.github.com/repos/acme/widgets",
+        headers={"Authorization": "Bearer never-forward-this"},
+    )
+
+    status, body = gh_api_transport(request, timedelta(seconds=2))
+
+    assert (status, body) == (200, b"{}")
+    assert "Accept: application/vnd.github+json" in observed
+    assert "X-GitHub-Api-Version: 2022-11-28" in observed
+    assert not any("never-forward-this" in value for value in observed)
+
+
+def test_gh_transport_normalizes_timeout_and_operational_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_which(name: str) -> str:
+        return f"/usr/bin/{name}"
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+
+    def timeout(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        del args, kwargs
+        command = "gh"
+        raise subprocess.TimeoutExpired(command, 2)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    request = Request("https://api.github.com/repos/acme/widgets")
+    with pytest.raises(TimeoutError, match="timed out"):
+        gh_api_transport(request, timedelta(seconds=2))
+
+    def failure(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        del args, kwargs
+        return subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"not authenticated: secret")
+
+    monkeypatch.setattr(subprocess, "run", failure)
+    with pytest.raises(URLError, match="could not complete") as captured:
+        gh_api_transport(request, timedelta(seconds=2))
+    assert "secret" not in str(captured.value)
 
 
 def _git(repository: Path, *arguments: str) -> None:
@@ -86,7 +152,7 @@ GOOD_MANIFEST = """
 schema_version = 1
 repository_id = "example-repository"
 policy = "sarj"
-policy_version = 3
+policy_version = 4
 
 [[components]]
 id = "platform.agent"
@@ -285,6 +351,36 @@ def test_inspect_supports_bounded_filtered_pages() -> None:
     assert all(item["kind"] == "project" for item in _object_list(payload["items"]))
 
 
+def test_github_audit_bootstraps_without_a_repository_manifest(tmp_path: Path) -> None:
+    workflow = tmp_path / ".github" / "workflows" / "ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "on: pull_request\npermissions: {}\njobs:\n  test:\n"
+        "    timeout-minutes: 5\n    steps:\n      - uses: actions/checkout@v4\n",
+        encoding="utf-8",
+    )
+    _commit_fixture(tmp_path)
+
+    result = runner.invoke(app, ["github", str(tmp_path), "--format", "json"])
+    report = _json_object(result.stdout)
+
+    assert result.exit_code == 0
+    assert report["command"] == "github"
+    assert report["completion"] == "complete"
+    diagnostics = _object_list(report["diagnostics"])
+    assert [item["rule_id"] for item in diagnostics] == ["sarj/github/actions-sha-pinning"]
+
+    workflow.write_text(
+        workflow.read_text(encoding="utf-8").replace(
+            "actions/checkout@v4",
+            "actions/checkout@0123456789abcdef0123456789abcdef01234567",
+        ),
+        encoding="utf-8",
+    )
+    dirty = runner.invoke(app, ["github", str(tmp_path), "--format", "json"])
+    assert dirty.stdout == result.stdout
+
+
 def test_invalid_page_is_a_structured_failure() -> None:
     result = runner.invoke(app, ["rules", "--limit", "501"])
     payload = _json_object(result.stdout)
@@ -302,8 +398,144 @@ def test_capabilities_are_machine_discoverable() -> None:
     safety = _object(capabilities["safety"])
     assert safety["repository_code_execution"] is False
     assert safety["mutation"] is False
+    assert safety["network"] is True
+    assert safety["network_default"] is False
+    assert safety["network_mode"] == "opt-in-read-only-github-api"
     assert _object(capabilities["tool"])["version"]
     assert capabilities["execution_issues"] == []
+
+
+def test_require_github_evidence_without_repository_is_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    _manifest(tmp_path, GOOD_MANIFEST)
+    result = runner.invoke(
+        app,
+        [
+            "report",
+            str(tmp_path),
+            "--format",
+            "json",
+            "--require-github-evidence",
+        ],
+    )
+    report = _json_object(result.stdout)
+    assert result.exit_code == 2
+    assert report["completion"] == "incomplete"
+    issues = _object_list(report["execution_issues"])
+    assert issues[0]["code"] == "github.required-evidence-unavailable"
+
+
+def test_github_repository_override_uses_token_from_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed: dict[str, str | None] = {}
+
+    class FakeGitHubClient:
+        def __init__(self, token: str | None) -> None:
+            observed["token"] = token
+
+        def collect(  # ruff: ignore[no-self-use] - test double matches client instance API
+            self, repository: str
+        ) -> RepositoryEvidence:
+            observed["repository"] = repository
+            return RepositoryEvidence(
+                repository=repository,
+                default_branch="main",
+                branches=(),
+                rulesets=(),
+                allow_auto_merge=False,
+                actions_default_workflow_permissions="read",
+                actions_can_approve_pull_requests=False,
+            )
+
+    cli_module = importlib.import_module("repo_lint_cli.main")
+    monkeypatch.setattr(cli_module, "GitHubClient", FakeGitHubClient)
+    monkeypatch.setenv("SARJ_REPO_LINT_GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "ignored/environment")
+    _manifest(tmp_path, GOOD_MANIFEST)
+    result = runner.invoke(
+        app,
+        [
+            "report",
+            str(tmp_path),
+            "--format",
+            "json",
+            "--github-repository",
+            "selected/repository",
+        ],
+    )
+    assert result.exit_code == 0
+    assert observed == {"token": "test-token", "repository": "selected/repository"}
+
+
+def test_github_repository_resolution_priority_and_safe_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _manifest(tmp_path, GOOD_MANIFEST)
+    _git(tmp_path, "remote", "add", "origin", "git@github.com:origin/repository.git")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "environment/repository")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    with pytest.raises(ConfigurationError, match="must match"):
+        resolve_github_repository(
+            tmp_path,
+            cli_repository="override/repository",
+            manifest_repository="manifest/repository",
+        )
+    assert (
+        resolve_github_repository(
+            tmp_path,
+            cli_repository=None,
+            manifest_repository="manifest/repository",
+        )
+        == "manifest/repository"
+    )
+    assert (
+        resolve_github_repository(tmp_path, cli_repository=None, manifest_repository=None)
+        == "environment/repository"
+    )
+    monkeypatch.delenv("GITHUB_REPOSITORY")
+    monkeypatch.delenv("GITHUB_ACTIONS")
+    assert (
+        resolve_github_repository(tmp_path, cli_repository=None, manifest_repository=None)
+        == "origin/repository"
+    )
+
+    _git(tmp_path, "remote", "set-url", "origin", "https://token@github.com/unsafe/repo.git")
+    assert (
+        resolve_github_repository(tmp_path, cli_repository=None, manifest_repository=None) is None
+    )
+    with pytest.raises(ConfigurationError, match="safe owner/name"):
+        resolve_github_repository(
+            tmp_path,
+            cli_repository="https://github.com/unsafe/repo",
+            manifest_repository=None,
+        )
+
+
+def test_workflow_analysis_reads_exact_committed_tree(tmp_path: Path) -> None:
+    policy_directory = tmp_path / ".repo-lint"
+    policy_directory.mkdir()
+    (policy_directory / "repository.toml").write_text(GOOD_MANIFEST, encoding="utf-8")
+    workflow = tmp_path / ".github" / "workflows" / "ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: CI\non: [pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+        "    steps:\n      - uses: actions/checkout@v4\n",
+        encoding="utf-8",
+    )
+    _commit_fixture(tmp_path)
+    workflow.write_text(
+        "name: CI\non: [pull_request]\npermissions: read-all\njobs:\n  test:\n"
+        "    timeout-minutes: 10\n    runs-on: ubuntu-latest\n    steps:\n"
+        "      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
+    diagnostics = _object_list(_json_object(result.stdout)["diagnostics"])
+    assert result.exit_code == 0
+    assert any(item["rule_id"] == "sarj/github/actions-sha-pinning" for item in diagnostics)
 
 
 def test_rules_are_filterable_and_paginated() -> None:

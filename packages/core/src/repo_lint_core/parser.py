@@ -14,6 +14,7 @@ from .models import (
     Baseline,
     Component,
     ComponentId,
+    DeliveryConfig,
     Dependency,
     ExceptionRecord,
     Manifest,
@@ -30,11 +31,14 @@ if TYPE_CHECKING:
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_GITHUB_REPOSITORY = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9_.-]+$")
 _MAX_EXCEPTION_DURATION = timedelta(days=90)
 _MAX_INPUT_BYTES = 1_048_576
 _MAX_COMPONENTS = 10_000
 _MAX_MIGRATIONS = 10_000
 _MAX_EXCEPTIONS = 1_000
+_ASCII_CONTROL_LIMIT = 32
+_DELIVERY_BRANCH_COUNT = 3
 
 
 def _read_bounded(path: Path, kind: str) -> bytes:
@@ -210,6 +214,79 @@ def parse_exception(value: object, index: int) -> ExceptionRecord:
     )
 
 
+def parse_delivery(value: object) -> DeliveryConfig:
+    """Parse an optional declaration of a repository's delivery topology."""
+    context = "delivery"
+    data = _mapping(value, context)
+    fields = {
+        "provider",
+        "repository",
+        "production_branch",
+        "preview_branch",
+        "development_branch",
+        "sync_workflows",
+    }
+    _strict_keys(data, fields, set(), context)
+    provider = data.get("provider", "github")
+    if provider != "github":
+        ConfigurationError.fail("delivery.provider must be 'github'")
+    repository = data.get("repository")
+    if repository is not None and (
+        not isinstance(repository, str) or _GITHUB_REPOSITORY.fullmatch(repository) is None
+    ):
+        ConfigurationError.fail("delivery.repository must be a GitHub owner/name")
+    production = _branch_name(
+        _string(data, "production_branch", context) if "production_branch" in data else "main",
+        "delivery.production_branch",
+    )
+    preview = _branch_name(
+        _string(data, "preview_branch", context) if "preview_branch" in data else "preview",
+        "delivery.preview_branch",
+    )
+    development = _branch_name(
+        _string(data, "development_branch", context) if "development_branch" in data else "dev",
+        "delivery.development_branch",
+    )
+    if len({production, preview, development}) != _DELIVERY_BRANCH_COUNT:
+        ConfigurationError.fail("delivery branch names must be distinct")
+    raw_workflows = _list(data.get("sync_workflows", []), "delivery.sync_workflows")
+    workflows: list[str] = []
+    for index, item in enumerate(raw_workflows):
+        if not isinstance(item, str) or not item:
+            ConfigurationError.fail(f"delivery.sync_workflows[{index}] must be a non-empty string")
+        workflows.append(canonical_path(item))
+    if len(workflows) != len(set(workflows)):
+        ConfigurationError.fail("delivery.sync_workflows must not contain duplicates")
+    return DeliveryConfig(
+        provider="github",
+        repository=repository,
+        production_branch=production,
+        preview_branch=preview,
+        development_branch=development,
+        sync_workflows=tuple(workflows),
+    )
+
+
+def _branch_name(value: str, context: str) -> str:
+    """Validate the portable subset of Git branch names used by delivery policy."""
+    invalid = (
+        not value
+        or value == "@"
+        or value.startswith(("/", "."))
+        or value.endswith(("/", ".", ".lock"))
+        or "//" in value
+        or ".." in value
+        or "@{" in value
+        or any(
+            char.isspace() or ord(char) < _ASCII_CONTROL_LIMIT or char in "~^:?*[\\"
+            for char in value
+        )
+    )
+    if invalid:
+        ConfigurationError.fail(f"{context} must be a valid Git branch name")
+    return value
+
+
 def parse_manifest_bytes(content: bytes) -> Manifest:
     """Parse bounded manifest bytes obtained from a trusted input selector."""
     try:
@@ -227,6 +304,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         "components",
         "migration_paths",
         "exceptions",
+        "delivery",
     }
     required = {"schema_version", "repository_id", "policy", "policy_version", "components"}
     _strict_keys(data, fields, required, "manifest")
@@ -259,6 +337,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
             parse_migration(item, index) for index, item in enumerate(raw_migrations)
         ),
         exceptions=tuple(parse_exception(item, index) for index, item in enumerate(raw_exceptions)),
+        delivery=parse_delivery(data["delivery"]) if "delivery" in data else None,
     )
 
 

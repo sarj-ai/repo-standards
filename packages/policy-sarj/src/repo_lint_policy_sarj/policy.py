@@ -336,6 +336,168 @@ RULES = (
         bad_example="capability = 'request.signing'",
         good_example="capability = 'request-signing'",
     ),
+    Rule(
+        rule_id=RuleId("sarj/delivery/hotfix-backsync"),
+        version=1,
+        severity="error",
+        summary="Production hotfixes automatically flow through preview to development.",
+        rationale=(
+            "A release fix that does not reach every longer-lived integration branch can be "
+            "silently reverted by the next promotion."
+        ),
+        bad_example="main is synchronized to preview, but preview is never synchronized to dev",
+        good_example="main -> preview -> dev through guarded pull requests and required CI",
+        problem=(
+            "Repositories with production, preview, and development branches need both "
+            "backsync edges to be safe, repeatable, and observable."
+        ),
+        harm="The next preview or development promotion can reintroduce a fixed production bug.",
+        non_goals=(
+            "creating branches or workflows",
+            "merging pull requests",
+            "automatically resolving merge conflicts",
+        ),
+        evidence_required=(
+            "all three delivery branches exist or are explicitly declared",
+            "both synchronization edges have guarded pull-request workflow structure",
+            "live repository settings expose protected branches and required CI",
+        ),
+        upstream=("GitHub Actions", "GitHub branch protection", "GitHub rulesets"),
+        references=(
+            "https://docs.github.com/en/actions/concepts/security/github_token",
+            "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets",
+        ),
+        precedence="Evaluate after delivery branch discovery and before advisory CI/CD rules.",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/github/actions-sha-pinning"),
+        version=1,
+        severity="warning",
+        summary="Non-local workflow dependencies are pinned to immutable digests.",
+        rationale=(
+            "A full immutable commit identifier prevents a mutable tag from changing trusted "
+            "workflow code without review."
+        ),
+        bad_example="uses: third-party/action@v2 or uses: docker://tool:latest",
+        good_example="uses: third-party/action@0123456789abcdef0123456789abcdef01234567 # v2",
+        non_goals=("executing actions", "automatically updating action references"),
+        evidence_required=("tracked workflow action references from the selected Git tree",),
+        upstream=("GitHub secure use reference",),
+        references=(
+            "https://docs.github.com/en/actions/how-tos/security-for-github-actions/security-guides/security-hardening-for-github-actions",
+        ),
+        precedence="Evaluate tracked workflow references independently of GitHub runtime state.",
+        maturity="beta",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/github/explicit-permissions"),
+        version=1,
+        severity="warning",
+        summary="GitHub workflows declare token permissions explicitly.",
+        rationale="Explicit permissions prevent jobs from inheriting broad repository defaults.",
+        bad_example="a workflow and its jobs omit permissions",
+        good_example="permissions: { contents: read }",
+        non_goals=("proving every declared permission is semantically minimal",),
+        evidence_required=("parsed workflow and job permission scopes",),
+        upstream=("GitHub Actions workflow syntax",),
+        precedence="Evaluate each parsed workflow independently.",
+        maturity="beta",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/github/job-timeouts"),
+        version=1,
+        severity="warning",
+        summary="Executable GitHub Actions jobs have explicit time bounds.",
+        rationale="A bounded job cannot consume runner capacity indefinitely after a hang.",
+        bad_example="an executable job omits timeout-minutes",
+        good_example="timeout-minutes: 15",
+        non_goals=("requiring timeout-minutes on reusable-workflow call jobs",),
+        evidence_required=("parsed executable job definitions",),
+        upstream=("GitHub Actions workflow syntax",),
+        precedence="Evaluate after safe workflow parsing.",
+        maturity="beta",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/github/immutable-installs"),
+        version=1,
+        severity="warning",
+        summary="Recognized CI dependency installs enforce committed lockfiles.",
+        rationale=(
+            "Frozen installs prevent dependency resolution from changing between review and CI."
+        ),
+        bad_example="uv sync or pnpm install without a lock-enforcing option",
+        good_example=(
+            "uv sync --locked, pnpm install --frozen-lockfile, or yarn install --immutable"
+        ),
+        non_goals=("executing package managers", "requiring lockfiles for global tool installs"),
+        evidence_required=("parsed executable workflow steps using a recognized package manager",),
+        upstream=("uv", "npm", "pnpm", "Yarn"),
+        precedence="Evaluate only recognized direct CI install commands.",
+        maturity="beta",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/github/vulnerability-gate"),
+        version=1,
+        severity="warning",
+        summary="Recognized vulnerability scanners propagate failures to CI.",
+        rationale=(
+            "A scanner hidden behind continue-on-error or shell success handlers cannot enforce "
+            "the repository's vulnerability policy."
+        ),
+        bad_example="pip-audit ... || true in a continue-on-error job",
+        good_example="a blocking pip-audit or OSV Scanner job with reviewed scoped exceptions",
+        non_goals=("choosing vulnerability policy", "calling vulnerability alert APIs"),
+        evidence_required=("parsed executable workflow steps invoking a recognized scanner",),
+        upstream=("pip-audit", "OSV Scanner", "npm audit", "pnpm audit"),
+        precedence="Evaluate only workflows that invoke a recognized vulnerability scanner.",
+        maturity="beta",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/github/merge-queue-trigger"),
+        version=1,
+        severity="warning",
+        summary="Required CI handles merge-group events when a merge queue is active.",
+        rationale=(
+            "A merge queue cannot complete when its required checks never run for merge groups."
+        ),
+        bad_example="an active merge queue with no merge_group workflow trigger",
+        good_example="on: [pull_request, merge_group]",
+        non_goals=("enabling a merge queue",),
+        evidence_required=("active branch ruleset evidence", "parsed workflow triggers"),
+        upstream=("GitHub merge queues", "GitHub Actions"),
+        references=(
+            "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue",
+        ),
+        precedence="Evaluate only when active merge-queue evidence is complete.",
+        maturity="beta",
+    ),
+    Rule(
+        rule_id=RuleId("sarj/github/repository-governance"),
+        version=1,
+        severity="warning",
+        summary="Basic repository governance files and settings are present.",
+        rationale=(
+            "Protected long-lived branches, ownership metadata, dependency-update automation, "
+            "and read-only Actions defaults provide a reviewable governance baseline."
+        ),
+        bad_example="unprotected delivery branches with no CODEOWNERS or update configuration",
+        good_example=(
+            "protected delivery branches, a tracked CODEOWNERS file, a supported dependency "
+            "updater configuration, and read-only default Actions permissions"
+        ),
+        non_goals=("changing GitHub settings", "opening dependency update pull requests"),
+        evidence_required=(
+            "live branch-protection and Actions-default settings",
+            "tracked CODEOWNERS and dependency-updater file presence",
+        ),
+        upstream=("GitHub rulesets", "CODEOWNERS", "Dependabot"),
+        references=(
+            "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners",
+            "https://docs.github.com/en/code-security/dependabot",
+        ),
+        precedence="Evaluate after branch discovery; unavailable external facts are inconclusive.",
+        maturity="beta",
+    ),
 )
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
@@ -357,6 +519,14 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("sarj/naming/application-role"): RuleClassification.JUDGMENT,
         RuleId("sarj/naming/component-id"): RuleClassification.SCHEMA,
         RuleId("sarj/naming/capability-token"): RuleClassification.SCHEMA,
+        RuleId("sarj/delivery/hotfix-backsync"): RuleClassification.OBJECTIVE,
+        RuleId("sarj/github/actions-sha-pinning"): RuleClassification.OPERATIONAL,
+        RuleId("sarj/github/explicit-permissions"): RuleClassification.OPERATIONAL,
+        RuleId("sarj/github/job-timeouts"): RuleClassification.OPERATIONAL,
+        RuleId("sarj/github/immutable-installs"): RuleClassification.OPERATIONAL,
+        RuleId("sarj/github/vulnerability-gate"): RuleClassification.OPERATIONAL,
+        RuleId("sarj/github/merge-queue-trigger"): RuleClassification.OPERATIONAL,
+        RuleId("sarj/github/repository-governance"): RuleClassification.JUDGMENT,
     }
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
@@ -378,6 +548,14 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("sarj/naming/application-role"): 140,
         RuleId("sarj/reuse/vague-capability"): 150,
         RuleId("sarj/graph/code-cycle"): 160,
+        RuleId("sarj/delivery/hotfix-backsync"): 170,
+        RuleId("sarj/github/actions-sha-pinning"): 180,
+        RuleId("sarj/github/explicit-permissions"): 190,
+        RuleId("sarj/github/job-timeouts"): 200,
+        RuleId("sarj/github/immutable-installs"): 210,
+        RuleId("sarj/github/vulnerability-gate"): 220,
+        RuleId("sarj/github/merge-queue-trigger"): 230,
+        RuleId("sarj/github/repository-governance"): 240,
     }
 )
 _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = MappingProxyType(
@@ -396,6 +574,31 @@ _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = Mapp
     }
 )
 
+_RULE_EVIDENCE: Mapping[RuleId, Literal["declared", "verified", "external"]] = MappingProxyType(
+    {
+        rule.rule_id: (
+            "external"
+            if rule.rule_id
+            in {
+                RuleId("sarj/delivery/hotfix-backsync"),
+                RuleId("sarj/github/merge-queue-trigger"),
+                RuleId("sarj/github/repository-governance"),
+            }
+            else "verified"
+            if rule.rule_id
+            in {
+                RuleId("sarj/github/actions-sha-pinning"),
+                RuleId("sarj/github/explicit-permissions"),
+                RuleId("sarj/github/job-timeouts"),
+                RuleId("sarj/github/immutable-installs"),
+                RuleId("sarj/github/vulnerability-gate"),
+            }
+            else "declared"
+        )
+        for rule in RULES
+    }
+)
+
 RULE_GOVERNANCE = tuple(
     RuleGovernance(
         rule_id=rule.rule_id,
@@ -403,8 +606,8 @@ RULE_GOVERNANCE = tuple(
             RuleMaturity.WARNING if rule.severity == "warning" else RuleMaturity.STABLE_ERROR
         ),
         classification=_RULE_CLASSIFICATION[rule.rule_id],
-        evidence="declared",
-        upstream=_UPSTREAM_BY_CLASSIFICATION[_RULE_CLASSIFICATION[rule.rule_id]],
+        evidence=_RULE_EVIDENCE[rule.rule_id],
+        upstream=rule.upstream or _UPSTREAM_BY_CLASSIFICATION[_RULE_CLASSIFICATION[rule.rule_id]],
         precedence=_RULE_PRECEDENCE[rule.rule_id],
     )
     for rule in RULES
@@ -413,7 +616,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=1,
     policy_id=PolicyId("sarj"),
-    policy_version=3,
+    policy_version=4,
     profile=ProfileDescriptor(
         profile_id=PROFILE_ID,
         title="Sarj organization consolidation target",

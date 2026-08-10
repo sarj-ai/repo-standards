@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, replace
-from datetime import date
+from datetime import date, timedelta
 from enum import StrEnum
 from importlib import metadata
 import json
+import os
 from pathlib import Path
-from typing import Annotated, NoReturn, TypeGuard
+import re
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local Git metadata query
+from typing import TYPE_CHECKING, Annotated, NamedTuple, NoReturn, TypeGuard
+from urllib.error import URLError
+from urllib.parse import SplitResult, urlsplit
 
 from repo_lint_core.canonical import canonical_json
 from repo_lint_core.catalog import core_rules
@@ -24,6 +30,7 @@ from repo_lint_core.inspection import (
 )
 from repo_lint_core.models import (
     AnalysisReport,
+    DeliveryConfig,
     Diagnostic,
     ExecutionIssue,
     Mode,
@@ -31,11 +38,15 @@ from repo_lint_core.models import (
     PolicyId,
     RepositoryId,
     RepositoryInspection,
+    RepositorySnapshot,
     Rule,
     RuleId,
 )
 from repo_lint_core.registry import POLICY_API_VERSION, PolicyRegistry
-from repo_lint_core.render import output_schema, render_text, report_dict
+from repo_lint_core.render import diagnostic_dict, output_schema, render_text, report_dict
+from repo_lint_github import GitHubAnalysisReport, GitHubClient
+from repo_lint_github import WorkflowDocument as GitHubWorkflowDocument
+from repo_lint_github import analyze as analyze_github
 from repo_lint_openapi import AnalysisReport as OpenApiAnalysisReport
 from repo_lint_openapi import AnalysisRequest as OpenApiAnalysisRequest
 from repo_lint_openapi import DocumentInput as OpenApiDocumentInput
@@ -50,6 +61,10 @@ from repo_lint_rest import (
 )
 from repo_lint_rest import TrackedFile as RestTrackedFile
 import typer
+
+
+if TYPE_CHECKING:
+    from urllib.request import Request
 
 
 app = typer.Typer(
@@ -74,6 +89,20 @@ _INSPECTION_KINDS = frozenset(
 _OPENAPI_BASENAMES = frozenset({"openapi.json", "openapi.yaml", "openapi.yml"})
 _MAX_OPENAPI_DOCUMENTS = 100
 _MAX_OPENAPI_TOTAL_BYTES = 20 * 1024 * 1024
+_MAX_GIT_ORIGIN_BYTES = 4_096
+_GITHUB_SLUG = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?/"
+    r"[A-Za-z0-9_.-]{1,100}"
+)
+_GITHUB_SCP_ORIGIN = re.compile(r"git@github\.com:(?P<path>[^?#]+)")
+_GITHUB_HTTP_ERROR = re.compile(r"\(HTTP (?P<status>[1-5][0-9]{2})\)")
+
+
+class GitHubTransportResponse(NamedTuple):
+    """One bounded response from the GitHub CLI transport adapter."""
+
+    status: int
+    body: bytes
 
 
 class RequestError(ValueError):
@@ -146,6 +175,7 @@ def capabilities_command() -> None:
             "capabilities",
             "check",
             "explain",
+            "github",
             "inspect",
             "report",
             "rest check",
@@ -165,13 +195,21 @@ def capabilities_command() -> None:
             for policy in registry.policies
         ],
         "safety": {
-            "network": False,
+            "network": True,
+            "network_default": False,
+            "network_mode": "opt-in-read-only-github-api",
             "repository_code_execution": False,
             "mutation": False,
             "autofix": False,
             "inspection_input": "exact-git-head-tree",
         },
         "domains": {
+            "github": {
+                "status": "beta",
+                "input": "committed-workflow-yaml",
+                "manifest_required": False,
+                "live_evidence": "explicit-read-only",
+            },
             "repository": {"status": "stable"},
             "rest": {
                 "status": "preview",
@@ -240,6 +278,208 @@ def inspect_command(
     typer.echo(rendered, nl=False)
     if inspection.completion != "complete":
         raise typer.Exit(2)
+
+
+@app.command("github")
+def github_command(
+    root: Annotated[Path, typer.Argument()] = Path(),
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
+    github_repository: Annotated[
+        str | None,
+        typer.Option(
+            help="GitHub owner/name for explicit read-only branch and repository evidence."
+        ),
+    ] = None,
+) -> None:
+    """Audit committed GitHub workflows, with or without a repository manifest."""
+    try:
+        report, identity, canonical_repository = _github_command_analysis(
+            root=root,
+            github_repository=github_repository,
+        )
+    except (ConfigurationError, OSError, ValueError) as error:
+        payload: Mapping[str, object] = {
+            **_envelope(
+                "github",
+                completion="incomplete",
+                conclusion="inconclusive",
+                issues=[
+                    _issue_payload(
+                        "github.analysis-incomplete",
+                        "github",
+                        str(error),
+                        "Correct the selected Git tree or GitHub audit input and rerun.",
+                    )
+                ],
+            ),
+            "summary": {"diagnostics": 0, "errors": 0, "warnings": 0},
+            "diagnostics": list[Mapping[str, object]](),
+        }
+        typer.echo(_render_github_payload(payload, output_format), nl=False)
+        raise typer.Exit(2) from None
+    diagnostics = report.diagnostics
+    payload = {
+        **_envelope(
+            "github",
+            completion=report.completion,
+            conclusion=report.conclusion,
+            provenance={
+                "kind": "git-tree",
+                "source_revision": identity.source_revision,
+                "tree_digest": identity.tree_digest,
+                "github_repository_requested": github_repository,
+                "github_repository_canonical": canonical_repository,
+            },
+            issues=[
+                {
+                    "code": item.code,
+                    "phase": item.phase,
+                    "message": item.message,
+                    "retryable": item.retryable,
+                    "remediation": list(item.remediation),
+                }
+                for item in report.execution_issues
+            ],
+        ),
+        "summary": {
+            "diagnostics": len(diagnostics),
+            "errors": sum(item.severity == "error" for item in diagnostics),
+            "warnings": sum(item.severity == "warning" for item in diagnostics),
+        },
+        "diagnostics": [diagnostic_dict(item) for item in diagnostics],
+    }
+    typer.echo(_render_github_payload(payload, output_format), nl=False)
+    if report.completion != "complete":
+        raise typer.Exit(2)
+    if any(item.severity == "error" for item in diagnostics):
+        raise typer.Exit(1)
+
+
+def _github_command_analysis(
+    *,
+    root: Path,
+    github_repository: str | None,
+) -> tuple[GitHubAnalysisReport, GitIdentity, str | None]:
+    resolved = root.resolve(strict=True)
+    identity = git_identity(resolved)
+    inspection = inspect_repository(resolved, identity=identity)
+    delivery = _tracked_delivery_config(resolved, identity, inspection)
+    workflows = _workflow_documents(resolved, identity, inspection)
+    evidence = None
+    canonical_repository = None
+    if github_repository is not None:
+        repository = resolve_github_repository(
+            resolved,
+            cli_repository=github_repository,
+            manifest_repository=delivery.repository if delivery else None,
+        )
+        if repository is None:
+            ConfigurationError.fail("GitHub repository could not be resolved")
+        token = os.environ.get(  # ruff: ignore[banned-api] - approved credential source
+            "SARJ_REPO_LINT_GITHUB_TOKEN"
+        )
+        evidence = _authenticated_github_client(token).collect(repository)
+        canonical_repository = evidence.repository
+    report = analyze_github(
+        delivery,
+        evidence,
+        workflows,
+        repository_files=tuple(item.path for item in inspection.tracked_files),
+        selected_revision=identity.source_revision if evidence is not None else None,
+    )
+    return report, identity, canonical_repository
+
+
+def _authenticated_github_client(token: str | None) -> GitHubClient:
+    if token is not None:
+        return GitHubClient(token)
+    if shutil.which("gh") is not None:
+        return GitHubClient(None, transport=gh_api_transport)
+    return GitHubClient(None)
+
+
+def gh_api_transport(request: Request, timeout: timedelta) -> GitHubTransportResponse:
+    """Use the existing GitHub CLI authentication context without exporting its token."""
+    executable = shutil.which("gh")
+    if executable is None:
+        message = "GitHub CLI is unavailable"
+        raise OSError(message)
+    try:
+        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed read-only GitHub API query
+            [
+                executable,
+                "api",
+                request.full_url,
+                "--method",
+                "GET",
+                "--header",
+                "Accept: application/vnd.github+json",
+                "--header",
+                "X-GitHub-Api-Version: 2022-11-28",
+            ],
+            check=False,
+            capture_output=True,
+            timeout=timeout.total_seconds(),
+        )
+    except subprocess.TimeoutExpired as error:
+        message = "GitHub CLI API request timed out"
+        raise TimeoutError(message) from error
+    if result.returncode == 0:
+        return GitHubTransportResponse(200, result.stdout)
+    message = result.stderr.decode("utf-8", errors="replace")
+    match = _GITHUB_HTTP_ERROR.search(message)
+    if match is None:
+        failure = (
+            "GitHub CLI could not complete the authenticated API request for "
+            f"{urlsplit(request.full_url).path}"
+        )
+        raise URLError(failure)
+    return GitHubTransportResponse(int(match.group("status")), result.stdout or b"{}")
+
+
+def _tracked_delivery_config(
+    root: Path,
+    identity: GitIdentity,
+    inspection: RepositoryInspection,
+) -> DeliveryConfig | None:
+    manifest_path = ".repo-lint/repository.toml"
+    if not any(item.path == manifest_path for item in inspection.tracked_files):
+        return None
+    return load_repository_snapshot(root, identity=identity).manifest.delivery
+
+
+def _workflow_documents(
+    root: Path,
+    identity: GitIdentity,
+    inspection: RepositoryInspection,
+) -> tuple[GitHubWorkflowDocument, ...]:
+    blobs = read_tracked_blob_contents(root, inspection.workflow_paths, identity=identity)
+    return tuple(GitHubWorkflowDocument(path=item.path, content=item.content) for item in blobs)
+
+
+def _render_github_payload(payload: Mapping[str, object], output_format: OutputFormat) -> str:
+    if output_format is OutputFormat.JSON:
+        return canonical_json(payload) + "\n"
+    if output_format is OutputFormat.PRETTY_JSON:
+        return json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
+    lines: list[str] = []
+    for item in _mapping_list(payload.get("diagnostics")):
+        location_value = item.get("location")
+        location = _string_key_mapping(location_value)
+        path = location.get("path", item.get("path", ".github/workflows"))
+        line = location.get("line")
+        coordinate = f"{path}{':' + str(line) if line is not None else ''}"
+        lines.append(
+            f"{coordinate}: {item.get('severity', 'warning')} "
+            f"{item.get('rule_id', 'github/unknown')}: "
+            f"{item.get('message', 'GitHub policy finding')}"
+        )
+    lines.extend(
+        f"repo-lint: analysis incomplete: {item.get('code')}: {item.get('message')}"
+        for item in _mapping_list(payload.get("execution_issues"))
+    )
+    lines.append(f"repo-lint github: {payload.get('conclusion', 'inconclusive')}")
+    return "\n".join(lines) + "\n"
 
 
 def _inspection_payload(
@@ -713,6 +953,14 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - C
     mode: Annotated[Mode, typer.Option()] = Mode.STRICT,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
     as_of: Annotated[str | None, typer.Option(help="Deterministic YYYY-MM-DD")] = None,
+    github_repository: Annotated[
+        str | None,
+        typer.Option(help="GitHub owner/name override for optional read-only delivery evidence."),
+    ] = None,
+    require_github_evidence: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - Typer option
+        bool,
+        typer.Option(help="Exit 2 unless configured GitHub evidence is complete."),
+    ] = False,
 ) -> None:
     """Analyze one repository manifest."""
     raise typer.Exit(
@@ -724,17 +972,27 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - C
             mode=mode,
             output_format=output_format,
             as_of=as_of,
+            github_repository=github_repository,
+            require_github_evidence=require_github_evidence,
         )
     )
 
 
 @app.command("report")
-def report_command(
+def report_command(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - CLI boundary
     root: Annotated[Path, typer.Argument()] = Path(),
     manifest: Annotated[str, typer.Option()] = ".repo-lint/repository.toml",
     policy: Annotated[str, typer.Option()] = "sarj",
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
     as_of: Annotated[str | None, typer.Option(help="Deterministic YYYY-MM-DD")] = None,
+    github_repository: Annotated[
+        str | None,
+        typer.Option(help="GitHub owner/name override for optional read-only delivery evidence."),
+    ] = None,
+    require_github_evidence: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - Typer option
+        bool,
+        typer.Option(help="Exit 2 unless configured GitHub evidence is complete."),
+    ] = False,
 ) -> None:
     """Analyze one manifest without blocking on completed policy findings."""
     raise typer.Exit(
@@ -746,6 +1004,8 @@ def report_command(
             mode=Mode.REPORT,
             output_format=output_format,
             as_of=as_of,
+            github_repository=github_repository,
+            require_github_evidence=require_github_evidence,
         )
     )
 
@@ -759,6 +1019,8 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
     mode: Mode,
     output_format: OutputFormat,
     as_of: str | None,
+    github_repository: str | None,
+    require_github_evidence: bool,
 ) -> int:
     command = "report" if mode is Mode.REPORT else "check"
     baseline_state: Mapping[str, object] = {
@@ -775,6 +1037,8 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
             policy=policy,
             mode=mode,
             as_of=as_of,
+            github_repository=github_repository,
+            require_github_evidence=require_github_evidence,
         )
     except ConfigurationError as error:
         report = _incomplete(PolicyId(policy_name), mode, str(error))
@@ -809,6 +1073,8 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
         ),
         nl=False,
     )
+    if report.completion != "complete":
+        return 2
     if mode is Mode.REPORT:
         return 0
     if mode is Mode.STRICT:
@@ -829,6 +1095,8 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     policy: Policy,
     mode: Mode,
     as_of: str | None,
+    github_repository: str | None,
+    require_github_evidence: bool,
 ) -> tuple[
     AnalysisReport,
     tuple[Diagnostic, ...],
@@ -849,9 +1117,25 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         if mode is Mode.RATCHET and "baseline" in str(error):
             raise BaselineError(str(error)) from error
         raise
+    github_diagnostics, github_issues = _github_analysis(
+        root=resolved_root,
+        snapshot=snapshot,
+        github_repository=github_repository,
+        require_github_evidence=require_github_evidence,
+    )
+    report = analyze(
+        snapshot.manifest,
+        policy,
+        mode=mode,
+        as_of=_parse_date(as_of),
+        additional_diagnostics=github_diagnostics,
+    )
     report = replace(
-        analyze(snapshot.manifest, policy, mode=mode, as_of=_parse_date(as_of)),
+        report,
         input_provenance=snapshot.provenance,
+        completion="incomplete" if github_issues else "complete",
+        conclusion="inconclusive" if github_issues else report.conclusion,
+        execution_issues=github_issues,
     )
     if mode is not Mode.RATCHET:
         return report, (), {"status": "not-requested", "path": None}, {"status": "not-requested"}
@@ -896,6 +1180,52 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     return report, regressions, baseline_state, ratchet_state
 
 
+def _github_analysis(
+    *,
+    root: Path,
+    snapshot: RepositorySnapshot,
+    github_repository: str | None,
+    require_github_evidence: bool,
+) -> tuple[tuple[Diagnostic, ...], tuple[ExecutionIssue, ...]]:
+    """Return exact-tree workflow diagnostics plus optional read-only GitHub evidence."""
+    # Kept local to this CLI boundary: the core engine remains network-free.
+    manifest = snapshot.manifest
+    inspection = snapshot.inspection
+    provenance = snapshot.provenance
+    workflow_blobs = read_tracked_blob_contents(
+        root,
+        inspection.workflow_paths,
+        identity=GitIdentity(provenance.source_revision, provenance.tree_digest),
+    )
+    workflows = tuple(
+        GitHubWorkflowDocument(path=item.path, content=item.content) for item in workflow_blobs
+    )
+    collection_requested = github_repository is not None or require_github_evidence
+    evidence = None
+    if collection_requested:
+        repository = resolve_github_repository(
+            root,
+            cli_repository=github_repository,
+            manifest_repository=(manifest.delivery.repository if manifest.delivery else None),
+        )
+        if repository is not None:
+            token = os.environ.get(  # ruff: ignore[banned-api] - approved credential source
+                "SARJ_REPO_LINT_GITHUB_TOKEN"
+            )
+            evidence = _authenticated_github_client(token).collect(repository)
+    effective_config = manifest.delivery
+    if require_github_evidence and evidence is None and effective_config is None:
+        effective_config = DeliveryConfig()
+    github_report = analyze_github(
+        effective_config,
+        evidence,
+        workflows,
+        repository_files=tuple(item.path for item in inspection.tracked_files),
+        selected_revision=provenance.source_revision if evidence is not None else None,
+    )
+    return github_report.diagnostics, github_report.execution_issues
+
+
 def _parse_date(value: str | None) -> date | None:
     if value is None:
         return None
@@ -906,6 +1236,100 @@ def _parse_date(value: str | None) -> date | None:
     if parsed.isoformat() != value:
         ConfigurationError.fail("--as-of must use YYYY-MM-DD")
     return parsed
+
+
+def resolve_github_repository(
+    root: Path,
+    *,
+    cli_repository: str | None,
+    manifest_repository: str | None,
+) -> str | None:
+    """Resolve one GitHub slug without accepting credentials or arbitrary hosts."""
+    if (
+        cli_repository is not None
+        and manifest_repository is not None
+        and cli_repository.casefold() != manifest_repository.casefold()
+    ):
+        ConfigurationError.fail(
+            "--github-repository must match delivery.repository when both are provided"
+        )
+    actions_repository = (
+        os.environ.get(  # ruff: ignore[banned-api] - GitHub Actions repository context
+            "GITHUB_REPOSITORY"
+        )
+        if os.environ.get(  # ruff: ignore[banned-api] - GitHub Actions trust signal
+            "GITHUB_ACTIONS"
+        )
+        == "true"
+        else None
+    )
+    candidate = (
+        cli_repository
+        or manifest_repository
+        or actions_repository
+        or _github_repository_from_origin(root)
+    )
+    if candidate is None:
+        return None
+    if not _GITHUB_SLUG.fullmatch(candidate) or candidate.endswith(("/.", "/..")):
+        ConfigurationError.fail("GitHub repository must use a safe owner/name value")
+    return candidate
+
+
+def _github_repository_from_origin(  # ruff: ignore[too-many-return-statements] - reject unsafe forms explicitly
+    root: Path,
+) -> str | None:
+    executable = shutil.which("git")
+    if executable is None:
+        return None
+    environment = {
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "LC_ALL": "C",
+    }
+    try:
+        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed Git metadata query
+            [executable, "-C", str(root), "config", "--local", "--get", "remote.origin.url"],
+            check=False,
+            capture_output=True,
+            env=environment,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0 or len(result.stdout) > _MAX_GIT_ORIGIN_BYTES:
+        return None
+    try:
+        origin = result.stdout.decode("utf-8", errors="strict").strip()
+    except UnicodeDecodeError:
+        return None
+    if (match := _GITHUB_SCP_ORIGIN.fullmatch(origin)) is not None:
+        return _slug_from_origin_path(match.group("path"))
+    parsed = urlsplit(origin)
+    if _unsafe_github_origin(parsed):
+        return None
+    return _slug_from_origin_path(parsed.path)
+
+
+def _unsafe_github_origin(parsed: SplitResult) -> bool:
+    """Return whether a parsed origin could expose credentials or target another host."""
+    return (
+        parsed.scheme not in {"https", "ssh"}
+        or parsed.hostname != "github.com"
+        or parsed.port is not None
+        or bool(parsed.query)
+        or bool(parsed.fragment)
+        or parsed.password is not None
+        or (parsed.scheme == "https" and parsed.username is not None)
+        or (parsed.scheme == "ssh" and parsed.username != "git")
+    )
+
+
+def _slug_from_origin_path(path: str) -> str | None:
+    candidate = path.removeprefix("/").removesuffix(".git")
+    return candidate if _GITHUB_SLUG.fullmatch(candidate) else None
 
 
 def _policy(name: str) -> Policy:
@@ -1008,7 +1432,8 @@ def explain_rule(
 ) -> None:
     """Explain one immutable rule."""
     try:
-        rules = {str(item.rule_id): item for item in _all_rules(_policy(policy))}
+        selected_policy = _policy(policy)
+        rules = {str(item.rule_id): item for item in _all_rules(selected_policy)}
     except ConfigurationError as error:
         _emit_command_error("explain", "policy.unavailable", str(error))
     rule = rules.get(rule_id)
@@ -1024,7 +1449,10 @@ def explain_rule(
             "explain",
             provenance={
                 "kind": "installed-policy",
-                "policy": policy,
+                "policy": {
+                    "id": str(selected_policy.policy_id),
+                    "version": selected_policy.policy_version,
+                },
                 "policy_api_version": POLICY_API_VERSION,
             },
         ),
@@ -1048,9 +1476,10 @@ def list_rules(
     try:
         page_limit, offset = _page_options(limit, cursor)
         _validate_severity(severity)
+        selected_policy = _policy(policy)
         rules = [
             item
-            for item in sorted(_all_rules(_policy(policy)), key=lambda item: item.rule_id)
+            for item in sorted(_all_rules(selected_policy), key=lambda item: item.rule_id)
             if (rule_prefix is None or str(item.rule_id).startswith(rule_prefix))
             and (severity is None or item.severity == severity)
         ]
@@ -1065,7 +1494,10 @@ def list_rules(
             "rules",
             provenance={
                 "kind": "installed-policy",
-                "policy": policy,
+                "policy": {
+                    "id": str(selected_policy.policy_id),
+                    "version": selected_policy.policy_version,
+                },
                 "policy_api_version": POLICY_API_VERSION,
             },
         ),
@@ -1203,6 +1635,12 @@ def _mapping_list(value: object) -> list[Mapping[str, object]]:
             continue
         result.append({key: item for key, item in candidate.items() if isinstance(key, str)})
     return result
+
+
+def _string_key_mapping(value: object) -> Mapping[str, object]:
+    if not _is_object_mapping(value):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
