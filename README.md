@@ -43,6 +43,25 @@ branches, install workflows, merge pull requests, enable auto-merge, or alter br
 See [Delivery and CI/CD policy](docs/delivery-policy.md) for the evidence model and complete
 behavior.
 
+## GitHub Action
+
+Organization repositories can consume the linter directly as a private GitHub Action. This
+avoids distributing a personal access token or duplicating the checkout and locked-install
+sequence in every consumer:
+
+```yaml
+- name: Enforce repository architecture
+  uses: sarj-ai/sarj-repo-lint@<full-commit-sha>
+  with:
+    root: .
+    policy: sarj
+    mode: ratchet
+```
+
+The action remains read-only and inspects the caller's committed checkout. Repository
+administrators must grant the consuming repository access to this private action. Pin a full
+commit SHA; never consume a moving branch.
+
 ## Safety model
 
 - Repository contents are read from one exact Git tree.
@@ -92,4 +111,4 @@ uv run repo-lint github /path/to/repository \
 Exit `0` means the selected mode is satisfied, exit `1` means blocking policy findings, and
 exit `2` means analysis was incomplete. Advisory beta warnings are visible but do not block
 strict mode. Adding or changing `[delivery]` changes policy applicability and the scope digest;
-ratchet baselines must be regenerated and reviewed when moving to Sarj policy version 4.
+ratchet baselines must be regenerated and reviewed when changing Sarj policy versions.

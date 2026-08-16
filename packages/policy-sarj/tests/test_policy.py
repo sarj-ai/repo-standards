@@ -631,7 +631,7 @@ def test_policy_spec_is_closed_and_governance_covers_every_rule() -> None:
     assert POLICY_SPEC.profile.product_registry_mode == "closed"
     assert POLICY_SPEC.profile.repository_overrides is False
     assert POLICY_SPEC.profile.target_repository_plugins is False
-    assert POLICY_SPEC.policy_version == SarjPolicy.policy_version == 4
+    assert POLICY_SPEC.policy_version == SarjPolicy.policy_version == 5
     assert {item.rule_id for item in RULE_GOVERNANCE} == {
         item.rule_id for item in SarjPolicy.rules()
     }
@@ -694,7 +694,7 @@ def test_public_expected_path_is_a_template_not_a_regex() -> None:
         )
     )
     expected = report.diagnostics[0].expected
-    assert expected == "libraries/{python,typescript}/platform/signing"
+    assert expected == "libraries/{kotlin,python,swift,typescript}/platform/signing"
     assert "(?:" not in expected
     assert "\\" not in expected
 

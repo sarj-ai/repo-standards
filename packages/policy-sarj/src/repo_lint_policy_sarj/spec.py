@@ -139,7 +139,7 @@ PATH_TEMPLATES = (
         "product-library",
         (
             LiteralSegment("libraries"),
-            ChoiceSegment(("python", "typescript")),
+            ChoiceSegment(("kotlin", "python", "swift", "typescript")),
             FieldSegment("product"),
             FieldSegment("capability"),
         ),
@@ -148,7 +148,7 @@ PATH_TEMPLATES = (
         "shared-library",
         (
             LiteralSegment("libraries"),
-            ChoiceSegment(("python", "typescript")),
+            ChoiceSegment(("kotlin", "python", "swift", "typescript")),
             LiteralSegment("shared"),
             FieldSegment("capability"),
         ),

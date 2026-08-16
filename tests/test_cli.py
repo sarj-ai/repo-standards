@@ -152,7 +152,7 @@ GOOD_MANIFEST = """
 schema_version = 1
 repository_id = "example-repository"
 policy = "sarj"
-policy_version = 4
+policy_version = 5
 
 [[components]]
 id = "platform.agent"

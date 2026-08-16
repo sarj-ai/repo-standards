@@ -105,6 +105,12 @@ jobs:
             --policy sarj --format json > "$REPORT_PATH"
           "$SMOKE_ENV/bin/python" -c \
             'import json, os; from importlib.metadata import version; p=json.load(open(os.environ["REPORT_PATH"])); assert p["completion"] == "complete"; assert p["tool"]["version"] == version("sarj-repo-lint")'
+      - name: Smoke-test the consumer action
+        uses: ./
+        with:
+          root: ${{ runner.temp }}/repo-lint-fixture
+          policy: sarj
+          mode: report
 
   gate:
     name: CI / gate
