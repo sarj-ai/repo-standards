@@ -13,6 +13,7 @@ from .inspection import (
     parse_workspace_metadata,
     read_tracked_blob_contents,
 )
+from .migration import migration_diagnostics
 from .models import (
     AdapterRun,
     AdapterStatus,
@@ -96,6 +97,7 @@ __all__ = [
     "load_baseline",
     "load_manifest",
     "load_repository_snapshot",
+    "migration_diagnostics",
     "parse_baseline_bytes",
     "parse_manifest_bytes",
     "parse_project_metadata",

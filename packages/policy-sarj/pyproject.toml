@@ -3,7 +3,7 @@ name = "repo-lint-policy-sarj"
 version = "0.3.0"
 description = "Sarj repository architecture policy for repo-lint"
 requires-python = ">=3.12"
-dependencies = ["repo-lint-core==0.3.0"]
+dependencies = ["repo-lint-core==0.5.0"]
 
 [project.entry-points."repo_lint.policies.v1"]
 sarj = "repo_lint_policy_sarj:SarjPolicy"

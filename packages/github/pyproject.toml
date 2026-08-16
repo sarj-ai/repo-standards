@@ -5,7 +5,7 @@ description = "Read-only GitHub CI/CD evidence and deterministic workflow policy
 requires-python = ">=3.12"
 dependencies = [
   "PyYAML>=6.0.2,<7",
-  "repo-lint-core==0.3.0",
+  "repo-lint-core==0.5.0",
 ]
 
 [build-system]

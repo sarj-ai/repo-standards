@@ -4,7 +4,7 @@ version = "0.2.0"
 description = "Inert REST framework capability detection and operation identity contracts"
 requires-python = ">=3.12"
 dependencies = [
-  "repo-lint-core==0.3.0",
+  "repo-lint-core==0.5.0",
   "repo-lint-openapi==0.2.0",
 ]
 

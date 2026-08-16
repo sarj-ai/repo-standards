@@ -28,6 +28,7 @@ from repo_lint_core.inspection import (
     load_repository_snapshot,
     read_tracked_blob_contents,
 )
+from repo_lint_core.migration import migration_diagnostics
 from repo_lint_core.models import (
     AnalysisReport,
     DeliveryConfig,
@@ -1128,7 +1129,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         policy,
         mode=mode,
         as_of=_parse_date(as_of),
-        additional_diagnostics=github_diagnostics,
+        additional_diagnostics=migration_diagnostics(snapshot) + github_diagnostics,
     )
     report = replace(
         report,
