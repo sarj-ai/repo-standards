@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: Validate / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13', '3.14']
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+      - name: Check out tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.5'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install locked environment
+        run: uv sync --locked --python "${{ matrix.python-version }}"
+      - name: Test
+        run: uv run --python "${{ matrix.python-version }}" pytest
+
+  package:
+    name: Build and install artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+      - name: Check out tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.5'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Build distribution
+        run: uv build --no-sources --out-dir dist
+      - name: Verify public distribution boundary
+        run: uv run --frozen python verify_release_artifacts.py --distributions dist
+      - name: Install wheels into a clean environment
+        env:
+          SMOKE_ENV: ${{ runner.temp }}/repo-lint-smoke
+        run: |
+          uv venv --python 3.12 "$SMOKE_ENV"
+          uv pip install --python "$SMOKE_ENV/bin/python" \
+            --find-links dist sarj-repo-lint
+      - name: Smoke-test installed interfaces
+        env:
+          FIXTURE_ROOT: ${{ runner.temp }}/repo-lint-fixture
+          REPORT_PATH: ${{ runner.temp }}/repo-lint-report.json
+          SMOKE_ENV: ${{ runner.temp }}/repo-lint-smoke
+        run: |
+          "$SMOKE_ENV/bin/repo-lint" --help
+          "$SMOKE_ENV/bin/sarj-repo-lint" --help
+          "$SMOKE_ENV/bin/repo-lint" --version
+          "$SMOKE_ENV/bin/repo-lint" capabilities
+          "$SMOKE_ENV/bin/repo-lint" pull-request size --help
+          "$SMOKE_ENV/bin/repo-lint" schema
+          "$SMOKE_ENV/bin/repo-lint" schema openapi-analysis
+          "$SMOKE_ENV/bin/repo-lint" rest --help
+          "$SMOKE_ENV/bin/repo-lint" rest rules
+          "$SMOKE_ENV/bin/python" -c \
+            'import repo_lint, repo_lint.core, repo_lint.github, repo_lint.openapi, repo_lint.policy_sarj, repo_lint.rest'
+          mkdir -p "$FIXTURE_ROOT/.repo-lint"
+          cp tests/fixtures/smoke/.repo-lint/repository.toml \
+            "$FIXTURE_ROOT/.repo-lint/repository.toml"
+          git -C "$FIXTURE_ROOT" init --quiet
+          git -C "$FIXTURE_ROOT" add .
+          git -C "$FIXTURE_ROOT" -c user.name='Repository Lint' \
+            -c user.email='repository-lint@example.invalid' commit --quiet -m fixture
+          "$SMOKE_ENV/bin/repo-lint" report "$FIXTURE_ROOT" \
+            --policy sarj --format json > "$REPORT_PATH"
+          "$SMOKE_ENV/bin/python" -c \
+            'import json, os; from importlib.metadata import version; p=json.load(open(os.environ["REPORT_PATH"])); assert p["completion"] == "complete"; assert p["tool"]["version"] == version("sarj-repo-lint")'
+      - name: Smoke-test the consumer action
+        uses: ./
+        with:
+          root: ${{ runner.temp }}/repo-lint-fixture
+          policy: sarj
+          mode: report
+      - name: Add consumer action size fixture
+        env:
+          FIXTURE_ROOT: ${{ runner.temp }}/repo-lint-fixture
+        run: |
+          mkdir -p "$FIXTURE_ROOT/tests"
+          printf 'assert True\n' > "$FIXTURE_ROOT/tests/test_fixture.py"
+          printf 'value = 1\n' > "$FIXTURE_ROOT/production.py"
+          git -C "$FIXTURE_ROOT" add .
+          git -C "$FIXTURE_ROOT" -c user.name='Repository Lint' \
+            -c user.email='repository-lint@example.invalid' commit --quiet -m size-fixture
+      - name: Smoke-test pull-request size action
+        id: size-action
+        uses: ./
+        with:
+          operation: pull-request-size
+          root: ${{ runner.temp }}/repo-lint-fixture
+          base: HEAD^
+          head: HEAD
+      - name: Verify pull-request size action output
+        env:
+          COUNTED_LINES: ${{ steps.size-action.outputs.counted-lines }}
+          EXCLUDED_LINES: ${{ steps.size-action.outputs.excluded-lines }}
+          TOTAL_LINES: ${{ steps.size-action.outputs.total-lines }}
+        run: |
+          test "$COUNTED_LINES" = 1
+          test "$EXCLUDED_LINES" = 1
+          test "$TOTAL_LINES" = 2
+
+  gate:
+    name: CI / gate
+    if: always()
+    needs: [validate, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every expected lane
+        env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        run: |
+          test "$VALIDATE_RESULT" = success
+          test "$PACKAGE_RESULT" = success

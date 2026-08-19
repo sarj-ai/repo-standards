@@ -1,0 +1,93 @@
+---
+import { Code } from '@astrojs/starlight/components';
+
+import Breadcrumbs from '../../../components/Breadcrumbs.astro';
+import ReferencePage from '../../../components/ReferencePage.astro';
+import {
+  catalog,
+  categoryHref,
+  rulePage,
+  type Rule,
+} from '../../../lib/catalog';
+import { sourceRevision } from '../../../lib/build';
+
+export function getStaticPaths() {
+  return catalog.rules.map((rule) => {
+    const [family, ...id] = rule.rule_id.split('/');
+    return { params: { family, id: id.join('/') }, props: { rule } };
+  });
+}
+
+interface Props { rule: Rule }
+const { rule } = Astro.props;
+const sourceUrl = `${catalog.product.repository_url}/blob/${sourceRevision}/${rule.source.path}`;
+const page = rulePage(rule);
+const { category, topic, previous, next } = page;
+const limits = [...rule.non_goals, ...rule.false_positive_controls];
+---
+
+<ReferencePage title={rule.title} description={rule.summary}>
+  <article class="rule-detail" data-rule-page data-rule-id={rule.rule_id} data-rule-category={rule.category_id} data-rule-topic={rule.topic_id}>
+    <Breadcrumbs items={[
+      { label: 'Rules', href: '/rules/' },
+      { label: category.category.label, href: categoryHref(category.category.category_id) },
+      { label: topic.topic.label, href: `${categoryHref(category.category.category_id)}#topic-${topic.topic.topic_id}` },
+      { label: rule.title },
+    ]} />
+    <header class="section-heading">
+      <code class="rule-id">{rule.rule_id}</code>
+      <h1>{rule.title}</h1>
+      <p class="lede" data-rule-summary>{rule.summary}</p>
+      <div class="rule-facts" aria-label="Rule classification">
+        <span class:list={['rule-fact', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>
+        {rule.lifecycle.status !== 'stable' && <span class="rule-fact">{rule.lifecycle.status}</span>}
+      </div>
+    </header>
+
+    <section aria-labelledby="examples">
+      <h2 id="examples">Examples</h2>
+      {rule.examples.map((example) => (
+        <div class="examples" data-example-pair={example.fixture_id}>
+          <figure class="example example--bad" data-example-kind="flagged">
+            <figcaption><strong>Flagged</strong><span>Fails</span></figcaption>
+            <Code code={example.flagged} lang={example.language} wrap />
+          </figure>
+          <figure class="example example--good" data-example-kind="passes">
+            <figcaption><strong>Passes</strong><span>Clean</span></figcaption>
+            <Code code={example.passes} lang={example.language} wrap />
+          </figure>
+        </div>
+      ))}
+    </section>
+
+    <section><h2>Why it matters</h2><p>{rule.impact}</p></section>
+
+    <section>
+      <h2>How detection works</h2>
+      <p>{rule.detects}</p>
+      <h3>What is inspected</h3>
+      <ul>{rule.evidence_required.map((value) => <li>{value}</li>)}</ul>
+      {limits.length > 0 && <><h3>Limits</h3><ul>{limits.map((value) => <li>{value}</li>)}</ul></>}
+    </section>
+
+    <section>
+      <h2>How to fix it</h2>
+      <p>{rule.remediation.summary}</p>
+      <ol>{rule.remediation.steps.map((value) => <li>{value}</li>)}</ol>
+      <h3>Verify</h3>
+      <ul>{rule.remediation.validation.map((value) => <li>{value}</li>)}</ul>
+    </section>
+
+    <nav class="rule-navigation" aria-label="Rule navigation" data-rule-nav>
+      {previous
+        ? <a rel="prev" href={previous.href}><span>Previous in {topic.topic.label}</span><strong>{previous.rule.title}</strong></a>
+        : <span></span>}
+      {next && <a rel="next" href={next.href}><span>Next in {topic.topic.label}</span><strong>{next.rule.title}</strong></a>}
+    </nav>
+
+    <footer class="rule-footer">
+      {rule.references.length > 0 && <p>{rule.references.map((value, index) => <><a href={value}>Reference {index + 1}</a>{index < rule.references.length - 1 ? ' · ' : ''}</>)}</p>}
+      <p><a href={sourceUrl}>Source</a> · Rule version {rule.rule_version}</p>
+    </footer>
+  </article>
+</ReferencePage>

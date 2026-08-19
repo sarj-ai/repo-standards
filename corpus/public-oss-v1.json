@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "corpus_id": "public-oss-v1",
+  "selection": {
+    "rule": "stratified-anchor-v1",
+    "seed": "sarj-repo-lint|public-oss-v1|2026-08-09",
+    "selected_at": "2026-08-09",
+    "replacement_policy": "new-version-only"
+  },
+  "sources": [
+    {
+      "report_name": "django",
+      "profile": "python-framework",
+      "url": "https://github.com/django/django",
+      "default_branch": "main",
+      "commit": "c9eb16a87e60c305fb3651459639f647cce498db",
+      "tree": "4771fe4db61802c2a9418d94f2032fa91a5354b3",
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "files": [
+          {"path": "LICENSE", "blob": "5f4f225dd282aa7e4361ec3c2750bbbaaed8ab1f"},
+          {"path": "LICENSE.python", "blob": "2fc28e876fa1fc8c536f46b81789e2bb51b323c0"}
+        ]
+      },
+      "include": ["**"],
+      "exclude": [],
+      "snapshot": {"status": "not-downloaded", "content_sha256": null}
+    },
+    {
+      "report_name": "next-js",
+      "profile": "javascript-typescript-polyglot-monorepo",
+      "url": "https://github.com/vercel/next.js",
+      "default_branch": "canary",
+      "commit": "62d9b8e03160727191bdcecd96c2284575621501",
+      "tree": "7be44e2a2b6fa952306a1fdcaeb8448d64217ad0",
+      "license": {
+        "spdx": "MIT",
+        "files": [
+          {"path": "license.md", "blob": "5948ee9bd0de5064423688a2967ab3111c2658ed"}
+        ]
+      },
+      "include": ["**"],
+      "exclude": [],
+      "snapshot": {"status": "not-downloaded", "content_sha256": null}
+    },
+    {
+      "report_name": "kubernetes",
+      "profile": "go-control-plane-megarepo",
+      "url": "https://github.com/kubernetes/kubernetes",
+      "default_branch": "master",
+      "commit": "94c136764292cc5fac976c0de6587daaea56410f",
+      "tree": "73f9f49cd05ee5ced253f407903d1056c53a60e7",
+      "license": {
+        "spdx": "Apache-2.0",
+        "files": [
+          {"path": "LICENSE", "blob": "d645695673349e3947e8e5ae42332d0ac3164cd7"},
+          {"path": "LICENSES", "tree": "e12b1908187a1bc2d687a7dcc814e692d73f9281"}
+        ]
+      },
+      "include": ["**"],
+      "exclude": [],
+      "snapshot": {"status": "not-downloaded", "content_sha256": null}
+    },
+    {
+      "report_name": "rust",
+      "profile": "rust-language-toolchain-megarepo",
+      "url": "https://github.com/rust-lang/rust",
+      "default_branch": "main",
+      "commit": "153ecc4f74035b709bb3e1eb9546f1d934865042",
+      "tree": "67bdca51ff60d14506f66711602ea57f022b36ee",
+      "license": {
+        "spdx": "MIT OR Apache-2.0",
+        "files": [
+          {"path": "LICENSE-APACHE", "blob": "1b5ec8b78e237b5c3b3d812a7c0a6589d0f7161d"},
+          {"path": "LICENSE-MIT", "blob": "a2070c4be7acd5316f8d0357ca3c12419a2f3c62"},
+          {"path": "LICENSES", "tree": "92581023d7edf449d1769b1a1d1eb02fdeb23830"},
+          {"path": "license-metadata.json", "blob": "b58329b2ccc19d0071ca61e9a8a767adb96d167f"}
+        ]
+      },
+      "include": ["**"],
+      "exclude": [],
+      "snapshot": {"status": "not-downloaded", "content_sha256": null}
+    },
+    {
+      "report_name": "spring-boot",
+      "profile": "java-gradle-multiproject",
+      "url": "https://github.com/spring-projects/spring-boot",
+      "default_branch": "main",
+      "commit": "ee3c48d00ffa6efda14e730c02ba145dc15e0fe4",
+      "tree": "c46ba81dde08b55ef01d6d67d5ed35cc8abd38e9",
+      "license": {
+        "spdx": "Apache-2.0",
+        "files": [
+          {"path": "LICENSE.txt", "blob": "823c1c8e9820bcc35d561f04d1cc972323162769"}
+        ]
+      },
+      "include": ["**"],
+      "exclude": [],
+      "snapshot": {"status": "not-downloaded", "content_sha256": null}
+    },
+    {
+      "report_name": "cloud-builders",
+      "profile": "cloud-build-container-config",
+      "url": "https://github.com/GoogleCloudPlatform/cloud-builders",
+      "default_branch": "master",
+      "commit": "b70cb2afa75d0aae29cb2c91d9cdec3dd1c2e957",
+      "tree": "b4e5a6d4154e5daeeff40d84b3b8277714a01238",
+      "license": {
+        "spdx": "Apache-2.0",
+        "files": [
+          {"path": "LICENSE", "blob": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"}
+        ]
+      },
+      "include": ["**"],
+      "exclude": [],
+      "snapshot": {"status": "not-downloaded", "content_sha256": null}
+    }
+  ]
+}

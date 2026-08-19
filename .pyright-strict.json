@@ -1,0 +1,96 @@
+{
+  // Maximally-strict pyright / basedpyright config.
+  //
+  // MUST be JSON(C), not TOML: pyright's `extends` silently ignores a bare-key
+  // .toml file (it loads JSON only), so a .toml strict config never actually
+  // applies — the type checker just runs on its defaults. JSONC keeps comments.
+  "typeCheckingMode": "strict",
+  "strictListInference": true,
+  "strictDictionaryInference": true,
+  "strictSetInference": true,
+  "strictParameterNoneValue": true,
+  "deprecateTypingAliases": true,
+  "enableExperimentalFeatures": false,
+
+  "reportUnusedImport": "error",
+  "reportUnusedVariable": "error",
+  "reportDeprecated": "error",
+  // Off: FastAPI/Starlette route handler functions (@router.get, etc.) are called
+  // via framework dispatch, not direct module invocations.
+  "reportUnusedFunction": false,
+  // Off: third-party untyped SDKs (e.g. google.cloud.pubsub_v1, psycopg) cause workspace-wide noise.
+  "reportMissingTypeStubs": false,
+
+  "reportUnknownMemberType": "error",
+  "reportUnknownParameterType": "error",
+  "reportMissingParameterType": "error",
+  "reportUnknownVariableType": "error",
+  "reportUnknownArgumentType": "error",
+  "reportMissingTypeArgument": "error",
+  "reportUnknownLambdaType": "error",
+  "reportUnusedClass": "error",
+  // Fires on every builder/fluent call (argparse.add_argument, query builders, …)
+  // where the returned handle is intentionally discarded — noise, not type safety.
+  "reportUnusedCallResult": false,
+  "reportUnusedCoroutine": "error",
+
+  "reportUnnecessaryIsInstance": "error",
+  // Exhaustive match fallbacks are required by SARJ032 and remain useful to
+  // runtime checkers when a type grows, so they are not unnecessary branches.
+  "reportUnnecessaryComparison": "none",
+  "reportUnnecessaryCast": "error",
+  "reportUnnecessaryContains": "error",
+  "reportConstantRedefinition": "error",
+  "reportCallIssue": "error",
+  "reportMatchNotExhaustive": "error",
+  "reportUntypedFunctionDecorator": "error",
+  "reportUnnecessaryTypeIgnoreComment": "error",
+  "reportReturnType": "error",
+  "reportPropertyTypeMismatch": "error",
+  "reportArgumentType": "error",
+  // reportPrivateUsage stays at error. Pyright resolves the declaring class and
+  // catches private base-class access that syntax-only checks cannot see, but it
+  // cannot distinguish first-party modules from dependency implementation APIs.
+  // A necessary dependency-boundary reach therefore needs a reasoned line-level
+  // suppression; disabling the check would also hide actionable local defects.
+  "reportPrivateUsage": "error",
+  // Pin strict-mode defaults that define module API visibility. Explicit keys
+  // keep upgrades from silently weakening private imports or dynamic exports.
+  "reportPrivateImportUsage": "error",
+  "reportUnsupportedDunderAll": "error",
+  // Off: low value — forcing `@override` on every `ast.NodeVisitor.visit_*` hook
+  // (and similar framework dispatch methods) is noise, not safety.
+  "reportImplicitOverride": false,
+  // Off: ruff owns string-concat style. ruff's ISC003 forbids explicit `+` of
+  // string literals (prefers implicit), which directly contradicts flagging
+  // implicit concatenation here — the two cannot both be satisfied. ruff's ISC001
+  // still catches the dangerous single-line "missing comma" accident.
+  "reportImplicitStringConcatenation": "none",
+  // (reportShadowedImports was removed from pyright upstream — pyright 1.1.411
+  //  AND basedpyright both reject it as unrecognized; basedpyright likewise
+  //  rejects reportInvalidExceptionType — so both are omitted to keep every
+  //  checker's output clean.)
+  "reportMissingSuperCall": "error",
+  "reportUninitializedInstanceVariable": "error",
+  "reportInconsistentConstructor": "error",
+  "reportInvalidStubStatement": "error",
+  "reportSelfClsParameterName": "error",
+  "reportTypeCommentUsage": "error",
+  // basedpyright-only (8 keys): reportInvalidCast, reportUnsafeMultipleInheritance,
+  // reportImplicitRelativeImport, reportExplicitAny, reportIgnoreCommentWithoutRule,
+  // reportPrivateLocalImportUsage, reportAny, reportUnannotatedClassAttribute.
+  // Plain pyright (verified on 1.1.411) prints `Config contains unrecognized
+  // setting "<key>"` once per key and then IGNORES it — the run still exits 0
+  // with "0 errors". The warnings are cosmetic; the keys stay because
+  // basedpyright is the canonical checker and dropping them would silently
+  // weaken it. Consumers on plain pyright lose only these eight checks.
+  "reportInvalidCast": "error",
+  "reportUnsafeMultipleInheritance": "error",
+  "reportImplicitRelativeImport": "error",
+  "reportUnreachable": "error",
+  "reportExplicitAny": "error",
+  "reportIgnoreCommentWithoutRule": "error",
+  "reportPrivateLocalImportUsage": "error",
+  "reportAny": "error",
+  "reportUnannotatedClassAttribute": "error"
+}

@@ -1,0 +1,5 @@
+{
+  "extends": ".pyright-strict.json",
+  "pythonVersion": "3.12",
+  "include": ["src", "tests"]
+}

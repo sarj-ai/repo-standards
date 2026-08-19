@@ -1,0 +1,38 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+
+import { referenceSidebar } from '../lib/catalog';
+
+interface Props {
+  title: string;
+  description: string;
+  pagefind?: boolean;
+  noindex?: boolean;
+  hasSidebar?: boolean;
+}
+
+const {
+  title,
+  description,
+  pagefind = true,
+  noindex = false,
+  hasSidebar = true,
+} = Astro.props;
+---
+
+<StarlightPage
+  frontmatter={{
+    title,
+    description,
+    pagefind,
+    prev: false,
+    next: false,
+    head: noindex ? [{ tag: 'meta', attrs: { name: 'robots', content: 'noindex, nofollow' } }] : [],
+  }}
+  sidebar={referenceSidebar()}
+  hasSidebar={hasSidebar}
+>
+  <div data-pagefind-body={pagefind ? true : undefined} data-pagefind-ignore={pagefind ? undefined : true}>
+    <slot />
+  </div>
+</StarlightPage>

@@ -1,0 +1,42 @@
+---
+import { Code } from '@astrojs/starlight/components';
+
+import ReferencePage from '../components/ReferencePage.astro';
+import { catalog } from '../lib/catalog';
+
+const install = `uv tool install ${catalog.product.distribution}\nrepo-lint --help`;
+const safety = [
+  catalog.safety.mutation ? 'May modify files' : 'Read-only',
+  catalog.safety.network_default ? catalog.safety.network_mode : 'Offline by default',
+  `Checks the ${catalog.safety.inspection_input}`,
+].join('. ');
+---
+
+<ReferencePage title={catalog.product.title} description={catalog.product.summary} pagefind={false}>
+  <article class="overview">
+    <header class="hero">
+      <h1>{catalog.rules.length} repository rules</h1>
+      <div class="hero-actions">
+        <a class="primary-action" href="/rules/">Browse rules</a>
+      </div>
+    </header>
+
+    <section aria-labelledby="capabilities">
+      <h2 id="capabilities">What it checks</h2>
+      <div class="capability-grid">
+        {catalog.capabilities.map((capability) => (
+          <article class="capability-card">
+            <h3>{capability.title}</h3>
+            <p>{capability.summary}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+
+    <section class="install" aria-labelledby="install">
+      <h2 id="install">Install</h2>
+      <Code code={install} lang="bash" frame="terminal" wrap />
+      <p>{safety}.</p>
+    </section>
+  </article>
+</ReferencePage>

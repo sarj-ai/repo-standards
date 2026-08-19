@@ -1,0 +1,40 @@
+---
+import ReferencePage from '../../components/ReferencePage.astro';
+import { catalog, type Parameter } from '../../lib/catalog';
+
+function parameterLabel(parameter: Parameter): string {
+  return parameter.names.join(', ');
+}
+
+function parameterDetails(parameter: Parameter): string {
+  const pieces = [parameter.value_type, parameter.required ? 'required' : 'optional'];
+  if (parameter.repeatable) pieces.push('repeatable');
+  if (parameter.choices.length > 0) pieces.push(parameter.choices.join(' | '));
+  return pieces.join(' · ');
+}
+---
+
+<ReferencePage title="CLI" description={`${catalog.commands.length} cataloged commands.`}>
+  <header class="section-heading">
+    <p class="eyebrow">{catalog.product.executables.join(' · ')}</p>
+    <h1>CLI</h1>
+    <p class="lede">{catalog.commands.length} cataloged commands</p>
+  </header>
+  <nav class="command-index" aria-label="Commands">
+    {catalog.commands.map((command) => <a href={`#${command.command_id}`}>{command.path.join(' ')}</a>)}
+  </nav>
+  {catalog.commands.map((command) => (
+    <section class="command" id={command.command_id}>
+      <h2><code>repo-lint {command.path.join(' ')}</code></h2>
+      <p>{command.summary}</p>
+      {[...command.arguments, ...command.options].length > 0 && (
+        <dl class="parameters">
+          {[...command.arguments, ...command.options].map((parameter) => <>
+            <dt><code>{parameterLabel(parameter)}</code></dt>
+            <dd><span>{parameterDetails(parameter)}</span>{parameter.help && <p>{parameter.help}</p>}</dd>
+          </>)}
+        </dl>
+      )}
+    </section>
+  ))}
+</ReferencePage>

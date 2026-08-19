@@ -1,0 +1,25 @@
+---
+import ReferencePage from '../../components/ReferencePage.astro';
+import { catalog } from '../../lib/catalog';
+---
+
+<ReferencePage title="Schemas" description={`${catalog.schemas.length} versioned machine contracts.`}>
+  <header class="section-heading">
+    <p class="eyebrow">Machine contracts</p>
+    <h1>Schemas</h1>
+    <p class="lede">{catalog.schemas.length} versioned machine contracts</p>
+  </header>
+  <div class="schema-list">
+    {catalog.schemas.map((schema) => (
+      <article>
+        <h2>{schema.title}</h2>
+        <dl class="metadata">
+          <dt>ID</dt><dd><code>{schema.schema_id}</code></dd>
+          <dt>Version</dt><dd>{schema.schema_version}</dd>
+          <dt>CLI</dt><dd><code>repo-lint schema {schema.cli_selector}</code></dd>
+        </dl>
+        <a href={`/api/v2/schemas/${encodeURIComponent(schema.schema_id)}.schema.json`}>JSON Schema</a>
+      </article>
+    ))}
+  </div>
+</ReferencePage>

@@ -1,0 +1,18 @@
+# Managed by `sarj-standards setup`; commit this file.
+schema = 3
+bundle = "6.4.1"
+profile = "application"
+rule_profile = "all"
+
+[capabilities]
+disable = ["eslint"]
+
+[artifacts]
+durable = [".github/**"]
+
+[dest]
+python = "."
+typescript = "."
+
+[hooks]
+manager = "pre-commit"

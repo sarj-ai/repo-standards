@@ -1,0 +1,67 @@
+[project]
+name = "sarj-repo-lint"
+version = "0.6.0"
+description = "Deterministic repository architecture, migration, and API contract linter"
+authors = [{ name = "sarj-ai" }]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["architecture", "github-actions", "lint", "openapi", "repository"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+requires-python = ">=3.12"
+dependencies = [
+  "PyYAML>=6.0.2,<7",
+  "pydantic>=2.12,<3",
+  "typer>=0.15.0,<1",
+]
+readme = "README.md"
+
+[project.urls]
+Homepage = "https://repo-standards.sarj.ai"
+Repository = "https://github.com/sarj-ai/sarj-repo-lint"
+Issues = "https://github.com/sarj-ai/sarj-repo-lint/issues"
+Documentation = "https://repo-standards.sarj.ai"
+
+[project.scripts]
+repo-lint = "repo_lint.cli:main"
+sarj-repo-lint = "repo_lint.cli:main"
+
+[project.entry-points."repo_lint.policies.v1"]
+sarj = "repo_lint.policy_sarj:SarjPolicy"
+
+[dependency-groups]
+dev = [
+  "basedpyright>=1.31.0",
+  "jsonschema>=4.25.0",
+  "pytest>=8.4.0",
+  "ruff>=0.12.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "repo_lint"
+
+[tool.pytest.ini_options]
+addopts = "-q --import-mode=importlib"
+testpaths = ["tests"]
+
+[tool.ruff]
+extend = ".ruff-strict.toml"
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+extend-select = ["B", "E", "F", "I", "PERF", "PL", "RUF", "S", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["implicit-namespace-package", "magic-value-comparison", "assert"]

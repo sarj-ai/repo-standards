@@ -1,0 +1,42 @@
+---
+import Breadcrumbs from '../../../components/Breadcrumbs.astro';
+import ReferencePage from '../../../components/ReferencePage.astro';
+import { referenceCatalog, type CategoryView } from '../../../lib/catalog';
+
+export function getStaticPaths() {
+  return referenceCatalog.map((category) => ({
+    params: { category: category.category.category_id },
+    props: { category },
+  }));
+}
+
+interface Props { category: CategoryView }
+const { category } = Astro.props;
+---
+
+<ReferencePage title={category.category.label} description={`${category.ruleCount} repository rules.`}>
+  <Breadcrumbs items={[{ label: 'Rules', href: '/rules/' }, { label: category.category.label }]} />
+  <header class="section-heading">
+    <h1>{category.category.label}</h1>
+    <p class="lede">{category.ruleCount} rules</p>
+  </header>
+  <div class="rule-catalog" data-category-id={category.category.category_id}>
+    {category.topics.map(({ topic, rules }) => {
+      return (
+        <section class="rule-topic" aria-labelledby={`topic-${topic.topic_id}`}>
+          <h2 id={`topic-${topic.topic_id}`}>{topic.label}</h2>
+          <div class="rule-list">
+            {rules.map(({ rule, href }) => (
+              <a class="rule-row" href={href} data-rule-id={rule.rule_id}>
+                <strong>{rule.title}</strong>
+                <span>{rule.summary}</span>
+                <code>{rule.rule_id}</code>
+                <span class:list={['severity', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>
+              </a>
+            ))}
+          </div>
+        </section>
+      );
+    })}
+  </div>
+</ReferencePage>

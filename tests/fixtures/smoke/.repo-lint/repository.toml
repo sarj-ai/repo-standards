@@ -1,0 +1,11 @@
+schema_version = 1
+repository_id = "wheel-smoke"
+policy = "sarj"
+policy_version = 5
+
+[[components]]
+id = "alpha.agent"
+kind = "application"
+product = "alpha"
+path = "applications/alpha/agent"
+owner = "@example/alpha"
