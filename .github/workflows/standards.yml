@@ -43,5 +43,5 @@ jobs:
         run: uv sync --locked
       - name: Run standards
         env:
-          SARJ_REACT_DOCTOR_BASE: ${{ github.event.pull_request.base.sha || github.sha }}
+          SARJ_REACT_DOCTOR_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap==1.0.3 sarj-standards check --trust-repository-code --format github
