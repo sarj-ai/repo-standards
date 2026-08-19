@@ -34,7 +34,7 @@ jobs:
             .sarj-standards.toml
             **/uv.lock
       - name: Install Python dependencies
-        run: uv sync --locked --all-packages
+        run: uv sync --locked
       - name: Run standards
         env:
           SARJ_REACT_DOCTOR_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
