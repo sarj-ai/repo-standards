@@ -1,9 +1,8 @@
-"""CLI contract tests."""
-
 from __future__ import annotations
 
 from datetime import timedelta
 import importlib
+from importlib.metadata import version
 import json
 from pathlib import Path
 import shutil
@@ -13,18 +12,25 @@ from urllib.request import Request
 
 from jsonschema import validate
 import pytest
-from repo_lint_core import ConfigurationError
-from repo_lint_github import RepositoryEvidence
 from typer.testing import CliRunner
 
-from repo_lint_cli.main import (
+from repo_lint.cli import (
     app,
     gh_api_transport,
     resolve_github_repository,
 )
+from repo_lint.core import ConfigurationError
+from repo_lint.github import RepositoryEvidence
 
 
 runner = CliRunner()
+
+
+def test_version_matches_installed_distribution() -> None:
+    result = runner.invoke(app, ["--version"])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip() == version("sarj-repo-lint")
 
 
 def test_gh_transport_preserves_api_contract_without_forwarding_authorization(
@@ -147,6 +153,22 @@ def test_pull_request_size_command_returns_stable_json(tmp_path: Path) -> None:
     assert payload["command"] == "pull-request size"
     assert _object(payload["summary"])["counted_lines"] == 3
     assert _object(payload["summary"])["excluded_lines"] == 20
+
+
+def test_pull_request_size_errors_have_command_specific_remediation(tmp_path: Path) -> None:
+    missing = runner.invoke(app, ["pull-request", "size", str(tmp_path), "--format", "json"])
+    missing_issue = _object_list(_json_object(missing.stdout)["execution_issues"])[0]
+    assert "trusted revision" in str(missing_issue["remediation"])
+
+    _git(tmp_path, "init", "--quiet")
+    (tmp_path / "app.py").write_text("value = 1\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    invalid = runner.invoke(
+        app,
+        ["pull-request", "size", str(tmp_path), "--base", "missing", "--format", "json"],
+    )
+    invalid_issue = _object_list(_json_object(invalid.stdout)["execution_issues"])[0]
+    assert "Fetch and verify" in str(invalid_issue["remediation"])
 
 
 def _manifest(root: Path, text: str) -> None:
@@ -323,7 +345,7 @@ def test_incomplete_report_and_anchor_locations_validate_against_schema(tmp_path
 
 
 def test_neutral_core_contains_no_sarj_policy_vocabulary() -> None:
-    core = Path(__file__).parents[1] / "packages" / "core" / "src" / "repo_lint_core"
+    core = Path(__file__).parents[1] / "src" / "repo_lint" / "core"
     source = "\n".join(
         path.read_text(encoding="utf-8") for path in sorted(core.glob("*.py"))
     ).casefold()
@@ -485,7 +507,7 @@ def test_github_repository_override_uses_token_from_environment(
                 actions_can_approve_pull_requests=False,
             )
 
-    cli_module = importlib.import_module("repo_lint_cli.main")
+    cli_module = importlib.import_module("repo_lint.cli")
     monkeypatch.setattr(cli_module, "GitHubClient", FakeGitHubClient)
     monkeypatch.setenv("SARJ_REPO_LINT_GITHUB_TOKEN", "test-token")
     monkeypatch.setenv("GITHUB_REPOSITORY", "ignored/environment")

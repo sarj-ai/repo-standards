@@ -1,63 +1,156 @@
 name: Publish
 
 on:
-  workflow_dispatch:
   push:
-    tags: ['v*']
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
-  build:
-    name: Build distributions
+  detect:
+    name: Detect unpublished version
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.version.outputs.publish }}
+      version: ${{ steps.version.outputs.version }}
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
       - name: Check out release revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Detect registry state
+        id: version
+        run: |
+          version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          response=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            "https://pypi.org/pypi/sarj-repo-lint/$version/json")
+          case "$response" in
+            200) publish=false ;;
+            404) publish=true ;;
+            *) echo "PyPI returned HTTP $response" >&2; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and verify release
+    if: needs.detect.outputs.publish == 'true'
+    needs: [detect]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+      - name: Check out release revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          enable-cache: false
-      - name: Require release tag to match package version
-        if: github.event_name == 'push'
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          version: '0.12.5'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Verify source
         run: |
-          package_version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-          test "$RELEASE_TAG" = "v$package_version"
-      - name: Build every distribution
-        run: uv build --all-packages --out-dir dist
-      - name: Upload distributions
+          uv sync --locked --python 3.14
+          uv audit --locked --preview-features audit-command
+          uv run pytest
+          uv run ruff check .
+          uv run basedpyright
+      - name: Build publishable artifacts
+        run: uv build --no-sources --out-dir dist/packages
+      - name: Verify installed wheel and source distribution
+        env:
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
+          SMOKE_ROOT: ${{ runner.temp }}/smoke
+        run: |
+          test "$(find dist/packages -maxdepth 1 -name '*.whl' | wc -l)" -eq 1
+          test "$(find dist/packages -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 1
+          uv venv --python 3.14 "$SMOKE_ROOT/wheel"
+          uv pip install --python "$SMOKE_ROOT/wheel/bin/python" dist/packages/*.whl
+          "$SMOKE_ROOT/wheel/bin/repo-lint" --version | grep -Fx "$RELEASE_VERSION"
+          "$SMOKE_ROOT/wheel/bin/sarj-repo-lint" --help >/dev/null
+          "$SMOKE_ROOT/wheel/bin/python" -c 'import repo_lint, repo_lint.core, repo_lint.github, repo_lint.openapi, repo_lint.policy_sarj, repo_lint.rest'
+          uv venv --python 3.14 "$SMOKE_ROOT/sdist"
+          uv pip install --python "$SMOKE_ROOT/sdist/bin/python" dist/packages/*.tar.gz
+          "$SMOKE_ROOT/sdist/bin/repo-lint" --version | grep -Fx "$RELEASE_VERSION"
+          cd dist
+          sha256sum packages/* > SHA256SUMS
+      - name: Upload verified artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: distributions
+          name: release-${{ needs.detect.outputs.version }}
           path: dist/*
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
 
   publish:
     name: Publish to PyPI
-    if: github.event_name == 'push'
-    needs: [build]
+    if: needs.detect.outputs.publish == 'true'
+    needs: [detect, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: pypi
+    environment: pypi-release
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Harden the runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
-          enable-cache: false
-      - name: Download distributions
+          egress-policy: audit
+      - name: Download verified artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: distributions
+          name: release-${{ needs.detect.outputs.version }}
           path: dist
+      - name: Verify artifact checksums
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
       - name: Publish with trusted identity
-        run: uv publish --trusted-publishing always dist/*
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/packages
+
+  release:
+    name: Create GitHub release
+    if: needs.detect.outputs.publish == 'true'
+    needs: [detect, build, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+      - name: Download verified artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-${{ needs.detect.outputs.version }}
+          path: dist
+      - name: Create immutable release reference
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
+        run: >-
+          gh release create "v$RELEASE_VERSION" dist/packages/* dist/SHA256SUMS
+          --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA"
+          --generate-notes

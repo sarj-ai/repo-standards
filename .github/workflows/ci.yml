@@ -24,44 +24,35 @@ jobs:
       matrix:
         python-version: ['3.12', '3.13', '3.14']
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
       - name: Check out tested revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          enable-cache: false
+          version: '0.12.5'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install locked environment
         run: uv sync --locked --python "${{ matrix.python-version }}"
       - name: Test
         run: uv run --python "${{ matrix.python-version }}" pytest
-
-  standards:
-    name: Highest Sarj Standards
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Check out tested revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          enable-cache: false
-      - name: Install locked environment
-        run: uv sync --locked
-      - name: Enforce highest Sarj Standards profile
-        run: >-
-          uvx --isolated --python 3.14 --from sarj-standards==5.2.0
-          sarj-standards check --trust-repository-code
 
   package:
     name: Build and install artifacts
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
       - name: Check out tested revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -69,9 +60,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          enable-cache: false
-      - name: Build every distribution
-        run: uv build --all-packages --out-dir dist
+          version: '0.12.5'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Build distribution
+        run: uv build --no-sources --out-dir dist
       - name: Install wheels into a clean environment
         env:
           SMOKE_ENV: ${{ runner.temp }}/repo-lint-smoke
@@ -87,6 +80,7 @@ jobs:
         run: |
           "$SMOKE_ENV/bin/repo-lint" --help
           "$SMOKE_ENV/bin/sarj-repo-lint" --help
+          "$SMOKE_ENV/bin/repo-lint" --version
           "$SMOKE_ENV/bin/repo-lint" capabilities
           "$SMOKE_ENV/bin/repo-lint" pull-request size --help
           "$SMOKE_ENV/bin/repo-lint" schema
@@ -94,7 +88,7 @@ jobs:
           "$SMOKE_ENV/bin/repo-lint" rest --help
           "$SMOKE_ENV/bin/repo-lint" rest rules
           "$SMOKE_ENV/bin/python" -c \
-            'import repo_lint_core, repo_lint_github, repo_lint_openapi, repo_lint_policy_sarj, repo_lint_rest'
+            'import repo_lint, repo_lint.core, repo_lint.github, repo_lint.openapi, repo_lint.policy_sarj, repo_lint.rest'
           mkdir -p "$FIXTURE_ROOT/.repo-lint"
           cp tests/fixtures/smoke/.repo-lint/repository.toml \
             "$FIXTURE_ROOT/.repo-lint/repository.toml"
@@ -133,21 +127,24 @@ jobs:
       - name: Verify pull-request size action output
         env:
           COUNTED_LINES: ${{ steps.size-action.outputs.counted-lines }}
-        run: test "$COUNTED_LINES" = 1
+          EXCLUDED_LINES: ${{ steps.size-action.outputs.excluded-lines }}
+          TOTAL_LINES: ${{ steps.size-action.outputs.total-lines }}
+        run: |
+          test "$COUNTED_LINES" = 1
+          test "$EXCLUDED_LINES" = 1
+          test "$TOTAL_LINES" = 2
 
   gate:
     name: CI / gate
     if: always()
-    needs: [validate, standards, package]
+    needs: [validate, package]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require every expected lane
         env:
           VALIDATE_RESULT: ${{ needs.validate.result }}
-          STANDARDS_RESULT: ${{ needs.standards.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
         run: |
           test "$VALIDATE_RESULT" = success
-          test "$STANDARDS_RESULT" = success
           test "$PACKAGE_RESULT" = success

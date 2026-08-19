@@ -32,9 +32,12 @@
   // Fires on every builder/fluent call (argparse.add_argument, query builders, …)
   // where the returned handle is intentionally discarded — noise, not type safety.
   "reportUnusedCallResult": false,
+  "reportUnusedCoroutine": "error",
 
   "reportUnnecessaryIsInstance": "error",
-  "reportUnnecessaryComparison": "error",
+  // Exhaustive match fallbacks are required by SARJ032 and remain useful to
+  // runtime checkers when a type grows, so they are not unnecessary branches.
+  "reportUnnecessaryComparison": "none",
   "reportUnnecessaryCast": "error",
   "reportUnnecessaryContains": "error",
   "reportConstantRedefinition": "error",
@@ -61,6 +64,10 @@
   // another instance of itself. Its false positives here are per-line and
   // documented; its true positives are the ones nothing else can see.
   "reportPrivateUsage": "error",
+  // Pin strict-mode defaults that define module API visibility. Explicit keys
+  // keep upgrades from silently weakening private imports or dynamic exports.
+  "reportPrivateImportUsage": "error",
+  "reportUnsupportedDunderAll": "error",
   // Off: low value — forcing `@override` on every `ast.NodeVisitor.visit_*` hook
   // (and similar framework dispatch methods) is noise, not safety.
   "reportImplicitOverride": false,

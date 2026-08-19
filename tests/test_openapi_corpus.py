@@ -1,5 +1,3 @@
-"""Integrity checks for the public OpenAPI calibration manifest."""
-
 from __future__ import annotations
 
 import json
