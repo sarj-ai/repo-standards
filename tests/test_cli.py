@@ -83,15 +83,16 @@ def test_gh_transport_normalizes_timeout_and_operational_failure(
     assert "secret" not in str(captured.value)
 
 
-def _git(repository: Path, *arguments: str) -> None:
+def _git(repository: Path, *arguments: str) -> str:
     executable = shutil.which("git")
     assert executable is not None
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Git fixture only
+    completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Git fixture only
         [executable, "-C", str(repository), *arguments],
         check=True,
         capture_output=True,
         timeout=10,
     )
+    return completed.stdout.decode().strip()
 
 
 def _commit_fixture(repository: Path) -> None:
@@ -112,6 +113,40 @@ def _commit_changes(repository: Path) -> None:
         "-m",
         "fixture",
     )
+
+
+def test_pull_request_size_command_returns_stable_json(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    (tmp_path / ".gitattributes").write_text("generated/** pr-size-excluded\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("value = 1\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    (tmp_path / "src" / "app.py").write_text("value = 2\nextra = 3\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_app.py").write_text("assert True\n" * 20, encoding="utf-8")
+    _commit_changes(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "size",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            "HEAD",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_object(result.stdout)
+    assert payload["command"] == "pull-request size"
+    assert _object(payload["summary"])["counted_lines"] == 3
+    assert _object(payload["summary"])["excluded_lines"] == 20
 
 
 def _manifest(root: Path, text: str) -> None:

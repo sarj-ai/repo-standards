@@ -2,6 +2,10 @@ name: Sarj repository lint
 description: Enforce Sarj repository architecture against the caller's exact checked-out tree
 
 inputs:
+  operation:
+    description: Operation to run (check or pull-request-size)
+    required: false
+    default: check
   root:
     description: Repository root to inspect
     required: false
@@ -18,6 +22,26 @@ inputs:
     description: Output format
     required: false
     default: text
+  base:
+    description: Trusted base revision for pull-request-size
+    required: false
+    default: ''
+  head:
+    description: Head revision for pull-request-size
+    required: false
+    default: HEAD
+  generated-attribute:
+    description: Git attribute marking repository-specific excluded artifacts
+    required: false
+    default: pr-size-excluded
+
+outputs:
+  counted-lines:
+    description: Review-sized line count from pull-request-size
+    value: ${{ steps.pull-request-size.outputs.counted-lines }}
+  report-json:
+    description: Canonical JSON report from pull-request-size
+    value: ${{ steps.pull-request-size.outputs.report-json }}
 
 runs:
   using: composite
@@ -30,6 +54,7 @@ runs:
       shell: bash
       run: uv sync --project "$GITHUB_ACTION_PATH" --locked
     - name: Enforce repository architecture
+      if: inputs.operation == 'check'
       shell: bash
       env:
         INPUT_FORMAT: ${{ inputs.format }}
@@ -39,3 +64,30 @@ runs:
       run: >-
         uv run --project "$GITHUB_ACTION_PATH" repo-lint check "$INPUT_ROOT"
         --policy "$INPUT_POLICY" --mode "$INPUT_MODE" --format "$INPUT_FORMAT"
+    - name: Analyze pull-request size
+      id: pull-request-size
+      if: inputs.operation == 'pull-request-size'
+      shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_GENERATED_ATTRIBUTE: ${{ inputs.generated-attribute }}
+        INPUT_HEAD: ${{ inputs.head }}
+        INPUT_ROOT: ${{ inputs.root }}
+      run: |
+        report=$(uv run --project "$GITHUB_ACTION_PATH" repo-lint pull-request size "$INPUT_ROOT" \
+          --base "$INPUT_BASE" --head "$INPUT_HEAD" \
+          --generated-attribute "$INPUT_GENERATED_ATTRIBUTE" --format json)
+        counted=$(python -c 'import json,sys; print(json.load(sys.stdin)["summary"]["counted_lines"])' <<< "$report")
+        echo "counted-lines=$counted" >> "$GITHUB_OUTPUT"
+        echo "report-json=$report" >> "$GITHUB_OUTPUT"
+        uv run --project "$GITHUB_ACTION_PATH" repo-lint pull-request size "$INPUT_ROOT" \
+          --base "$INPUT_BASE" --head "$INPUT_HEAD" \
+          --generated-attribute "$INPUT_GENERATED_ATTRIBUTE" --format text >> "$GITHUB_STEP_SUMMARY"
+    - name: Reject unsupported operation
+      if: inputs.operation != 'check' && inputs.operation != 'pull-request-size'
+      shell: bash
+      env:
+        INPUT_OPERATION: ${{ inputs.operation }}
+      run: |
+        echo "Unsupported operation: $INPUT_OPERATION" >&2
+        exit 2

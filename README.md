@@ -74,6 +74,35 @@ existing authenticated `gh` CLI session and are never read from repository confi
 Use `repo-lint capabilities` for the installed feature contract and `repo-lint rules` for the
 versioned rule catalog.
 
+## Pull-request size analysis
+
+The CLI can calculate review-sized churn between two Git revisions without calling GitHub or
+mutating repository state:
+
+```bash
+uvx --from sarj-repo-lint==0.6.0 repo-lint pull-request size . \
+  --base origin/main --head HEAD --format json
+```
+
+Conventional Python and JavaScript/TypeScript test paths are excluded automatically. Repositories
+can mark exact generated artifacts and other machine-owned files with the bare
+`pr-size-excluded` Git attribute. Attributes are always read from the trusted base revision, so a
+pull request cannot change its own size policy. The result includes counted and excluded totals,
+category totals, and the largest counted files. Thresholds and GitHub mutations remain consumer
+policy; the command only reports deterministic evidence.
+
+The pinned composite action exposes the same analyzer for consumers that have organization access
+to the private action:
+
+```yaml
+- id: size
+  uses: sarj-ai/sarj-repo-lint@<full-commit-sha>
+  with:
+    operation: pull-request-size
+    base: ${{ github.event.pull_request.base.sha }}
+    head: ${{ github.event.pull_request.head.sha }}
+```
+
 ## Quick start
 
 Install the locked development environment and run an offline report against an exact Git tree:

@@ -48,6 +48,12 @@ from .models import (
     WorkspaceEvidence,
 )
 from .parser import load_baseline, load_manifest, parse_baseline_bytes, parse_manifest_bytes
+from .pull_request_size import (
+    PullRequestFileSize,
+    PullRequestSize,
+    analyze_pull_request_size,
+    is_test_path,
+)
 from .registry import POLICY_API_VERSION, PolicyRegistry
 
 
@@ -77,6 +83,8 @@ __all__ = [
     "Policy",
     "PolicyRegistry",
     "ProjectCoordinate",
+    "PullRequestFileSize",
+    "PullRequestSize",
     "Query",
     "RatchetClassification",
     "RatchetComparison",
@@ -90,10 +98,12 @@ __all__ = [
     "TrackedFileEvidence",
     "WorkspaceEvidence",
     "analyze",
+    "analyze_pull_request_size",
     "check_baseline",
     "classify_baseline",
     "core_rules",
     "inspect_repository",
+    "is_test_path",
     "load_baseline",
     "load_manifest",
     "load_repository_snapshot",

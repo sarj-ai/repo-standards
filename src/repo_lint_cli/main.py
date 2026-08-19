@@ -43,6 +43,7 @@ from repo_lint_core.models import (
     Rule,
     RuleId,
 )
+from repo_lint_core.pull_request_size import PullRequestSize, analyze_pull_request_size
 from repo_lint_core.registry import POLICY_API_VERSION, PolicyRegistry
 from repo_lint_core.render import diagnostic_dict, output_schema, render_text, report_dict
 from repo_lint_github import GitHubAnalysisReport, GitHubClient
@@ -80,7 +81,14 @@ rest_app = typer.Typer(
     no_args_is_help=True,
     pretty_exceptions_enable=False,
 )
+pull_request_app = typer.Typer(
+    name="pull-request",
+    help="Analyze pull-request changes without mutating repository or GitHub state.",
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+)
 app.add_typer(rest_app, name="rest")
+app.add_typer(pull_request_app, name="pull-request")
 
 _DISTRIBUTION_NAME = "sarj-repo-lint"
 _MAX_PAGE_SIZE = 500
@@ -178,6 +186,7 @@ def capabilities_command() -> None:
             "explain",
             "github",
             "inspect",
+            "pull-request size",
             "report",
             "rest check",
             "rest discover",
@@ -222,6 +231,101 @@ def capabilities_command() -> None:
         "pagination": {"default_limit": 100, "maximum_limit": _MAX_PAGE_SIZE},
     }
     typer.echo(canonical_json(payload))
+
+
+@pull_request_app.command("size")
+def pull_request_size_command(
+    root: Annotated[Path, typer.Argument()] = Path(),
+    base: Annotated[str, typer.Option(help="Trusted base revision used for diff and policy.")] = "",
+    head: Annotated[str, typer.Option(help="Head revision to compare with the base.")] = "HEAD",
+    generated_attribute: Annotated[
+        str,
+        typer.Option(help="Git attribute that marks repository-specific excluded artifacts."),
+    ] = "pr-size-excluded",
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
+) -> None:
+    """Calculate review-sized churn while excluding tests and declared generated artifacts."""
+    if not base:
+        _emit_command_error(
+            "pull-request size",
+            "request.invalid",
+            "--base is required",
+            phase="request",
+        )
+    try:
+        result = analyze_pull_request_size(
+            root,
+            base=base,
+            head=head,
+            generated_attribute=generated_attribute,
+        )
+    except (ConfigurationError, OSError) as error:
+        _emit_command_error(
+            "pull-request size",
+            "analysis.incomplete",
+            str(error),
+            phase="analysis",
+        )
+    top_files = 10
+    payload = _pull_request_size_payload(result, top_files=top_files)
+    if output_format is OutputFormat.TEXT:
+        typer.echo(_render_pull_request_size(result, top_files=top_files), nl=False)
+    elif output_format is OutputFormat.PRETTY_JSON:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True) + "\n", nl=False)
+    else:
+        typer.echo(canonical_json(payload) + "\n", nl=False)
+
+
+def _pull_request_size_payload(result: PullRequestSize, *, top_files: int) -> Mapping[str, object]:
+    category_lines = result.category_lines()
+    largest = sorted(
+        (item for item in result.files if item.category == "production"),
+        key=lambda item: (-item.lines, item.path),
+    )[:top_files]
+    return {
+        **_envelope(
+            "pull-request size",
+            provenance={"kind": "git-revisions", "base": result.base, "head": result.head},
+        ),
+        "policy": {
+            "test_conventions": True,
+            "generated_attribute": result.generated_attribute,
+            "attribute_source": result.base,
+        },
+        "summary": {
+            "counted_lines": result.counted_lines,
+            "excluded_lines": result.excluded_lines,
+            "total_lines": result.total_lines,
+            "changed_files": len(result.files),
+            "categories": category_lines,
+        },
+        "largest_counted_files": [
+            {
+                "path": item.path,
+                "lines": item.lines,
+                "additions": item.additions,
+                "deletions": item.deletions,
+            }
+            for item in largest
+        ],
+    }
+
+
+def _render_pull_request_size(result: PullRequestSize, *, top_files: int) -> str:
+    categories = result.category_lines()
+    lines = [
+        f"Counted review size: {result.counted_lines} lines",
+        f"Excluded churn: {result.excluded_lines} lines",
+        "Categories: " + ", ".join(f"{name}={value}" for name, value in categories.items()),
+    ]
+    largest = sorted(
+        (item for item in result.files if item.category == "production"),
+        key=lambda item: (-item.lines, item.path),
+    )[:top_files]
+    if largest:
+        lines.append("Largest counted files:")
+        lines.extend(f"  {item.lines:>6}  {item.path}" for item in largest)
+    return "\n".join(lines) + "\n"
 
 
 @app.command("inspect")
