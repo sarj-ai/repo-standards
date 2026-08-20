@@ -19,7 +19,7 @@ for (const [, document] of documents) {
     hashes.add(`'sha256-${createHash('sha256').update(match[1]).digest('base64')}'`);
   }
 }
-const completePolicy = addScriptDefault(appendHashes(policy, [...hashes].sort()));
+const completePolicy = appendHashes(policy, [...hashes].sort());
 for (const [path, document] of documents) {
   await writeFile(new URL(path, outputDirectory), document.replace(policyPattern(), ''), 'utf8');
 }
@@ -47,12 +47,4 @@ function appendHashes(policy: string, hashes: string[]): string {
   if (directive === undefined) throw new Error('Content Security Policy is missing script-src-elem.');
   const additions = hashes.filter((hash) => !directive.includes(hash));
   return policy.replace(pattern, `$1 ${additions.join(' ')}$2`);
-}
-
-function addScriptDefault(policy: string): string {
-  const pattern = /(^|;\s*)(script-src [^;]*)(;)/u;
-  const directive = pattern.exec(policy)?.[2];
-  if (directive === undefined) return `${policy} script-src 'self' 'wasm-unsafe-eval';`;
-  if (directive.includes("'wasm-unsafe-eval'")) return policy;
-  return policy.replace(pattern, `$1${directive.trimEnd()} 'wasm-unsafe-eval'$3`);
 }

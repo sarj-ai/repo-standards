@@ -35,7 +35,6 @@ export default defineConfig({
       scriptDirective: {
         resources: [
           { resource: "'self'", kind: 'element' },
-          { resource: "'wasm-unsafe-eval'", kind: 'element' },
         ],
       },
       styleDirective: { resources: [{ resource: "'unsafe-inline'", kind: 'attribute' }] },
@@ -58,10 +57,13 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/sarj-ai/repo-standards' },
       ],
-      pagefind: true,
+      pagefind: false,
       tableOfContents: false,
       credits: false,
-      components: { PageTitle: './src/components/PageTitle.astro' },
+      components: {
+        PageTitle: './src/components/PageTitle.astro',
+        Search: './src/components/NoSearch.astro',
+      },
     }),
   ],
 });

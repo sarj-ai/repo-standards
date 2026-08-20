@@ -6,7 +6,6 @@ import { referenceSidebar } from '../lib/catalog';
 interface Props {
   title: string;
   description: string;
-  pagefind?: boolean;
   noindex?: boolean;
   hasSidebar?: boolean;
 }
@@ -14,18 +13,16 @@ interface Props {
 const {
   title,
   description,
-  pagefind = true,
   noindex = false,
   hasSidebar = true,
 } = Astro.props;
-const discovery = noindex ? 'unlisted' : pagefind ? 'searchable' : 'navigation-only';
 ---
 
 <SharedReferencePage
   title={title}
   description={description}
   sidebar={referenceSidebar()}
-  discovery={discovery}
+  indexable={!noindex}
   hasSidebar={hasSidebar}
 >
   <slot />
