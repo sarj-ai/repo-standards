@@ -461,7 +461,10 @@ def github_command(
     ] = None,
     enable_rule: Annotated[
         list[str] | None,
-        typer.Option("--enable-rule", help="Activate one approved rule ID for this run."),
+        typer.Option(
+            "--enable-rule",
+            help="Activate one approved rule-id@version selector for this run.",
+        ),
     ] = None,
 ) -> None:
     """Audit committed GitHub workflows, with or without a repository manifest."""
@@ -938,7 +941,10 @@ def rest_check_command(
     ] = RestEnforcement.STRICT,
     enable_rule: Annotated[
         list[str] | None,
-        typer.Option("--enable-rule", help="Activate one approved rule ID for this run."),
+        typer.Option(
+            "--enable-rule",
+            help="Activate one approved rule-id@version selector for this run.",
+        ),
     ] = None,
 ) -> None:
     """Check one committed OpenAPI contract from the exact selected Git tree."""
@@ -1170,7 +1176,10 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - C
     ] = False,
     enable_rule: Annotated[
         list[str] | None,
-        typer.Option("--enable-rule", help="Activate one approved rule ID for this run."),
+        typer.Option(
+            "--enable-rule",
+            help="Activate one approved rule-id@version selector for this run.",
+        ),
     ] = None,
 ) -> None:
     """Analyze one repository manifest."""
@@ -1207,7 +1216,10 @@ def report_command(  # ruff: ignore[too-many-arguments,too-many-positional-argum
     ] = False,
     enable_rule: Annotated[
         list[str] | None,
-        typer.Option("--enable-rule", help="Activate one approved rule ID for this run."),
+        typer.Option(
+            "--enable-rule",
+            help="Activate one approved rule-id@version selector for this run.",
+        ),
     ] = None,
 ) -> None:
     """Analyze one manifest without blocking on completed policy findings."""

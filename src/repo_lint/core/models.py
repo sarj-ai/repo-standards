@@ -475,3 +475,19 @@ class AnalysisReport:
     summary: dict[str, int] = field(default_factory=dict)
     input_provenance: InputProvenance | None = None
     ratchet: RatchetComparison | None = None
+
+    def __post_init__(self) -> None:
+        if self.completion == "incomplete":
+            if self.conclusion != "inconclusive" or not self.execution_issues or self.diagnostics:
+                message = (
+                    "incomplete reports must be inconclusive, contain execution issues, "
+                    "and contain no diagnostics"
+                )
+                raise ValueError(message)
+            return
+        if self.conclusion == "inconclusive" or self.execution_issues:
+            message = "complete reports cannot be inconclusive or contain execution issues"
+            raise ValueError(message)
+        if (self.conclusion == "passed") == bool(self.diagnostics):
+            message = "passed reports require no diagnostics; findings reports require diagnostics"
+            raise ValueError(message)

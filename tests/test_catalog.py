@@ -4,23 +4,19 @@ from hashlib import sha256
 from importlib.metadata import version
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from jsonschema import Draft202012Validator, validate
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
+import pytest
 from typer.testing import CliRunner
 
-from repo_lint.catalog import build_catalog, catalog_schema
+from repo_lint.catalog import Catalog, LifecycleDescriptor, build_catalog, catalog_schema
 from repo_lint.cli import app
 from repo_lint.core.canonical import canonical_json
 from repo_lint.core.catalog import core_rules
 from repo_lint.core.models import JSONValue
 from repo_lint.core.registry import PolicyRegistry
 from repo_lint.openapi import rules as openapi_rules
-
-
-if TYPE_CHECKING:
-    import pytest
 
 
 runner = CliRunner()
@@ -65,6 +61,28 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     assert {
         binding.default_activation for policy in catalog.policies for binding in policy.bindings
     } == {"disabled"}
+
+
+def test_catalog_versions_are_positive_and_lifecycle_states_are_coherent() -> None:
+    catalog = build_catalog(app, package_version="9.8.7")
+    payload = catalog.model_dump(mode="python")
+    payload["rules"][0]["rule_version"] = 0
+    with pytest.raises(ValidationError, match="greater than 0"):
+        Catalog.model_validate(payload)
+
+    with pytest.raises(ValidationError, match="cannot contain deprecation metadata"):
+        LifecycleDescriptor(status="stable", deprecated_in="2.0.0")
+    with pytest.raises(ValidationError, match="require deprecation and removal versions"):
+        LifecycleDescriptor(status="deprecated", deprecated_in="2.0.0")
+
+
+def test_catalog_policy_binding_review_status_must_match_its_rule() -> None:
+    catalog = build_catalog(app, package_version="9.8.7")
+    payload = catalog.model_dump(mode="python")
+    payload["policies"][0]["bindings"][0]["review_status"] = "approved"
+
+    with pytest.raises(ValidationError, match="policy binding does not match its rule"):
+        Catalog.model_validate(payload)
 
 
 def test_catalog_graph_is_complete() -> None:

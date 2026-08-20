@@ -68,6 +68,7 @@ _ANNOTATION_OBJECT = TypeAdapter(dict[str, object])
 CommandId = NewType("CommandId", str)
 CapabilityId = NewType("CapabilityId", str)
 NonEmptyText = Annotated[str, Field(min_length=1)]
+PositiveVersion = Annotated[int, Field(gt=0)]
 RuleIdValue = Annotated[
     RuleId,
     Field(pattern=r"^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*){2,}$"),
@@ -152,6 +153,23 @@ class LifecycleDescriptor(CatalogModel):
     replacement_rule_id: str | None = None
     removal_not_before: str | None = None
 
+    @model_validator(mode="after")
+    def validate_state(self) -> Self:
+        deprecation_values = (
+            self.deprecated_in,
+            self.replacement_rule_id,
+            self.removal_not_before,
+        )
+        if self.status != "deprecated" and any(value is not None for value in deprecation_values):
+            message = "active rule lifecycles cannot contain deprecation metadata"
+            raise ValueError(message)
+        if self.status == "deprecated" and (
+            self.deprecated_in is None or self.removal_not_before is None
+        ):
+            message = "deprecated rule lifecycles require deprecation and removal versions"
+            raise ValueError(message)
+        return self
+
 
 class RemediationDescriptor(CatalogModel):
     summary: NonEmptyText
@@ -200,7 +218,7 @@ class CategoryDescriptor(CatalogModel):
 class RuleDescriptor(CatalogModel):
     kind: Literal["rule"] = "rule"
     rule_id: RuleIdValue
-    rule_version: int
+    rule_version: PositiveVersion
     title: Annotated[str, Field(min_length=1, max_length=72)]
     category_id: RuleCategoryId
     topic_id: RuleTopicId
@@ -255,7 +273,7 @@ class RuleDescriptor(CatalogModel):
 
 class PolicyRuleBinding(CatalogModel):
     rule_id: RuleId
-    rule_version: int
+    rule_version: PositiveVersion
     severity: Literal["warning", "error"]
     classification: str | None = None
     evidence_level: str | None = None
@@ -266,7 +284,7 @@ class PolicyRuleBinding(CatalogModel):
 
 class PolicyDescriptor(CatalogModel):
     policy_id: str
-    policy_version: int
+    policy_version: PositiveVersion
     title: str
     bindings: tuple[PolicyRuleBinding, ...]
 
@@ -394,7 +412,9 @@ def _validate_policy_bindings(
     for binding in policy.bindings:
         rule = rules_by_id.get(binding.rule_id)
         if rule is None or (
-            binding.rule_version != rule.rule_version or binding.severity != rule.default_severity
+            binding.rule_version != rule.rule_version
+            or binding.severity != rule.default_severity
+            or binding.review_status != rule.review.status
         ):
             message = f"catalog policy binding does not match its rule: {binding.rule_id}"
             raise ValueError(message)

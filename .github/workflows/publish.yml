@@ -19,9 +19,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      build: ${{ steps.version.outputs.build }}
+      artifact_source: ${{ steps.version.outputs.artifact_source }}
+      create_tag: ${{ steps.version.outputs.create_tag }}
+      prepare_artifacts: ${{ steps.version.outputs.prepare_artifacts }}
       publish_primary: ${{ steps.version.outputs.publish_primary }}
       release: ${{ steps.version.outputs.release }}
+      source_sha: ${{ steps.version.outputs.source_sha }}
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Harden the runner
@@ -36,34 +39,43 @@ jobs:
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-          primary_response=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            "https://pypi.org/pypi/repo-standards/$version/json")
-          case "$primary_response" in
-            200) primary_exists=true ;;
-            404) primary_exists=false ;;
-            *) echo "PyPI repo-standards returned HTTP $primary_response" >&2; exit 1 ;;
-          esac
-          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            release_exists=true
-          else
-            release_exists=false
-          fi
-          if [[ "$primary_exists" == true && "$release_exists" == true ]]; then build=false; else build=true; fi
-          if [[ "$primary_exists" == false ]]; then publish_primary=true; else publish_primary=false; fi
-          if [[ "$release_exists" == false ]]; then release=true; else release=false; fi
-          {
-            echo "version=$version"
-            echo "build=$build"
-            echo "publish_primary=$publish_primary"
-            echo "release=$release"
-          } >> "$GITHUB_OUTPUT"
+        run: >-
+          python release_reconciliation.py inspect
+          --version "$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          --repository "$GITHUB_REPOSITORY"
+          --head-sha "$GITHUB_SHA"
+          --github-output "$GITHUB_OUTPUT"
+
+  anchor:
+    name: Anchor immutable release source
+    if: needs.detect.outputs.create_tag == 'true'
+    needs: [detect]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+      - name: Create immutable version tag before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.detect.outputs.source_sha }}
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
+        run: >-
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs"
+          --field "ref=refs/tags/v$RELEASE_VERSION"
+          --field "sha=$RELEASE_SHA"
 
   build:
-    name: Build and verify release
-    if: needs.detect.outputs.build == 'true'
-    needs: [detect]
+    name: Prepare and verify release artifacts
+    if: >-
+      always() &&
+      needs.detect.outputs.prepare_artifacts == 'true' &&
+      (needs.anchor.result == 'success' || needs.anchor.result == 'skipped')
+    needs: [detect, anchor]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -76,6 +88,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+          ref: ${{ needs.detect.outputs.source_sha }}
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -83,18 +96,44 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Verify source
+        if: needs.detect.outputs.artifact_source == 'build'
         run: |
           uv sync --locked --python 3.14
           uv audit --locked --preview-features audit-command
           uv run pytest
           uv run ruff check .
           uv run basedpyright
+      - name: Render exact release identity
+        if: needs.detect.outputs.artifact_source == 'build'
+        run: >-
+          python release_reconciliation.py prepare-readme
+          --readme README.md
+          --version "${{ needs.detect.outputs.version }}"
+          --source-sha "${{ needs.detect.outputs.source_sha }}"
       - name: Build publishable artifacts
+        if: needs.detect.outputs.artifact_source == 'build'
         run: uv build --no-sources --out-dir dist/packages/repo-standards
+      - name: Reuse surviving registry artifacts
+        if: needs.detect.outputs.artifact_source != 'build'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python release_reconciliation.py download
+          --source "${{ needs.detect.outputs.artifact_source }}"
+          --version "${{ needs.detect.outputs.version }}"
+          --repository "$GITHUB_REPOSITORY"
+          --source-sha "${{ needs.detect.outputs.source_sha }}"
+          --directory dist/packages/repo-standards
       - name: Verify public distribution boundary
         run: >-
           uv run --frozen python verify_release_artifacts.py
           --distributions dist/packages/repo-standards
+      - name: Verify exact release identity in package documentation
+        run: >-
+          python release_reconciliation.py verify-documents
+          --directory dist/packages/repo-standards
+          --version "${{ needs.detect.outputs.version }}"
+          --source-sha "${{ needs.detect.outputs.source_sha }}"
       - name: Verify installed wheel and source distribution
         env:
           RELEASE_VERSION: ${{ needs.detect.outputs.version }}
@@ -111,8 +150,10 @@ jobs:
           uv pip install --python "$SMOKE_ROOT/sdist/bin/python" \
             dist/packages/repo-standards/repo_standards-*.tar.gz
           "$SMOKE_ROOT/sdist/bin/repo-standards" --version | grep -Fx "$RELEASE_VERSION"
-          cd dist
-          sha256sum packages/*/* > SHA256SUMS
+          if [[ ! -f dist/SHA256SUMS ]]; then
+            cd dist
+            sha256sum packages/*/* > SHA256SUMS
+          fi
       - name: Upload verified artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -174,7 +215,7 @@ jobs:
       - name: Create immutable release reference
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_SHA: ${{ needs.detect.outputs.source_sha }}
           RELEASE_VERSION: ${{ needs.detect.outputs.version }}
         run: >-
           gh release create "v$RELEASE_VERSION" dist/packages/*/* dist/SHA256SUMS

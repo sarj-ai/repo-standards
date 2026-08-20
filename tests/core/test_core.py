@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import pytest
 
@@ -10,11 +10,13 @@ from repo_lint.core.canonical import canonical_json, canonical_path, semantic_fi
 from repo_lint.core.engine import analyze, check_baseline, classify_baseline
 from repo_lint.core.errors import ConfigurationError
 from repo_lint.core.models import (
+    AnalysisReport,
     Baseline,
     Component,
     ComponentId,
     Diagnostic,
     ExceptionRecord,
+    ExecutionIssue,
     Manifest,
     MigrationPath,
     Mode,
@@ -39,6 +41,66 @@ class EmptyPolicy:
     def evaluate(manifest: Manifest) -> tuple[Diagnostic, ...]:
         del manifest
         return ()
+
+
+def _execution_issue() -> ExecutionIssue:
+    return ExecutionIssue(
+        code="analysis.failed",
+        phase="analysis",
+        message="Analysis could not complete.",
+        retryable=False,
+        remediation=("Correct the input and retry.",),
+    )
+
+
+def _report(
+    *,
+    completion: Literal["complete", "incomplete"] = "complete",
+    conclusion: Literal["passed", "findings", "inconclusive"] = "passed",
+    diagnostics: tuple[Diagnostic, ...] = (),
+    execution_issues: tuple[ExecutionIssue, ...] = (),
+) -> AnalysisReport:
+    return AnalysisReport(
+        mode=Mode.STRICT,
+        repository_id=RepositoryId("example-repository"),
+        policy_id=PolicyId("example"),
+        policy_version=1,
+        scope_digest="a" * 64,
+        completion=completion,
+        conclusion=conclusion,
+        diagnostics=diagnostics,
+        execution_issues=execution_issues,
+    )
+
+
+def test_analysis_report_rejects_incoherent_completion_states() -> None:
+    issue = _execution_issue()
+    with pytest.raises(ValueError, match="incomplete reports must be inconclusive"):
+        _report(completion="incomplete", conclusion="passed", execution_issues=(issue,))
+    with pytest.raises(ValueError, match="complete reports cannot be inconclusive"):
+        _report(conclusion="inconclusive", execution_issues=(issue,))
+
+
+def test_analysis_report_rejects_incoherent_result_payloads() -> None:
+    finding = analyze(
+        _manifest(
+            Component(ComponentId("parent"), "service", "services/a", "@example/team"),
+            Component(ComponentId("child"), "service", "services/a/child", "@example/team"),
+        ),
+        EmptyPolicy(),
+        mode=Mode.STRICT,
+    ).diagnostics[0]
+    with pytest.raises(ValueError, match="passed reports require no diagnostics"):
+        _report(diagnostics=(finding,))
+    with pytest.raises(ValueError, match="findings reports require diagnostics"):
+        _report(conclusion="findings")
+
+    incomplete = _report(
+        completion="incomplete",
+        conclusion="inconclusive",
+        execution_issues=(_execution_issue(),),
+    )
+    assert incomplete.diagnostics == ()
 
 
 def test_canonical_json_rejects_non_finite_numbers() -> None:
