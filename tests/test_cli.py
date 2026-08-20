@@ -498,7 +498,7 @@ def test_capabilities_are_machine_discoverable() -> None:
     assert capabilities["execution_issues"] == []
 
 
-def test_require_github_evidence_without_repository_is_incomplete(
+def test_removed_github_rules_do_not_require_repository_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
@@ -514,10 +514,10 @@ def test_require_github_evidence_without_repository_is_incomplete(
         ],
     )
     report = _json_object(result.stdout)
-    assert result.exit_code == 2
-    assert report["completion"] == "incomplete"
-    issues = _object_list(report["execution_issues"])
-    assert issues[0]["code"] == "github.required-evidence-unavailable"
+    assert result.exit_code == 0
+    assert report["completion"] == "complete"
+    assert report["conclusion"] == "passed"
+    assert report["execution_issues"] == []
 
 
 def test_github_repository_override_uses_token_from_environment(

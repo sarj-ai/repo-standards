@@ -153,7 +153,7 @@ def test_branch_trio_auto_detects_without_toml_config() -> None:
     assert not report.diagnostics
 
 
-def test_selected_non_default_revision_is_inconclusive_for_delivery() -> None:
+def test_removed_delivery_rules_do_not_require_live_revision_evidence() -> None:
     evidence = _evidence()
     evidence = RepositoryEvidence(
         repository=evidence.repository,
@@ -175,20 +175,17 @@ def test_selected_non_default_revision_is_inconclusive_for_delivery() -> None:
 
     report = analyze(None, evidence, (), selected_revision="c" * 40)
 
-    assert report.completion == "incomplete"
-    assert "delivery/branches/hotfix-back-sync" not in _rule_ids(report)
-    assert "not the live main branch head" in report.execution_issues[0].message
-    assert report.execution_issues[0].code == "github.default-branch-revision-mismatch"
-    assert report.execution_issues[0].retryable
-    assert "Fetch and audit" in report.execution_issues[0].remediation[0]
+    assert report.completion == "complete"
+    assert report.conclusion == "passed"
+    assert not report.execution_issues
 
 
-def test_live_delivery_without_selected_revision_is_inconclusive() -> None:
+def test_removed_delivery_rules_do_not_require_a_selected_revision() -> None:
     report = analyze(_config(), _evidence(), (_safe_workflow(),))
 
-    assert report.completion == "incomplete"
-    assert "delivery/branches/hotfix-back-sync" not in _rule_ids(report)
-    assert "selected Git revision" in report.execution_issues[0].message
+    assert report.completion == "complete"
+    assert report.conclusion == "passed"
+    assert not report.execution_issues
 
 
 def test_canonical_repository_and_requested_case_match_declared_identity() -> None:
@@ -226,12 +223,11 @@ def test_no_branch_trio_does_not_infer_delivery_intent() -> None:
     assert "delivery/branches/hotfix-back-sync" not in _rule_ids(report)
 
 
-def test_missing_external_evidence_is_inconclusive_not_a_false_finding() -> None:
+def test_removed_delivery_rules_do_not_require_external_evidence() -> None:
     report = analyze(_config(), None, (_safe_workflow(),))
-    assert report.completion == "incomplete"
-    assert report.conclusion == "inconclusive"
-    assert "delivery/branches/hotfix-back-sync" not in _rule_ids(report)
-    assert report.execution_issues[0].code == "github.required-evidence-unavailable"
+    assert report.completion == "complete"
+    assert report.conclusion == "passed"
+    assert not report.execution_issues
 
 
 def test_sha_hardening_and_governance_warnings_are_consolidated() -> None:
