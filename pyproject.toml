@@ -1,6 +1,6 @@
 [project]
 name = "repo-standards"
-version = "1.0.0"
+version = "2.0.0"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
@@ -31,8 +31,6 @@ Documentation = "https://repo-standards.sarj.ai"
 
 [project.scripts]
 repo-standards = "repo_lint.cli:main"
-repo-lint = "repo_lint.cli:main"
-sarj-repo-lint = "repo_lint.cli:main"
 
 [project.entry-points."repo_lint.policies.v2"]
 sarj = "repo_lint.policy_sarj:SarjPolicy"

@@ -512,7 +512,7 @@ def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
                 "contract analysis."
             ),
             distribution="repo-standards",
-            executables=("repo-standards", "repo-lint", "sarj-repo-lint"),
+            executables=("repo-standards",),
             repository_url="https://github.com/sarj-ai/repo-standards",
             website_url="https://repo-standards.sarj.ai/",
         ),

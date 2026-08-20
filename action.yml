@@ -2,26 +2,10 @@ name: Sarj pull-request size
 description: Measure review-sized pull-request churn without enabling repository lint rules
 
 inputs:
-  operation:
-    description: Deprecated compatibility input; only pull-request-size is accepted
-    required: false
-    default: ''
   root:
     description: Repository root to inspect
     required: false
     default: .
-  policy:
-    description: Removed repository-lint input; must remain empty
-    required: false
-    default: ''
-  mode:
-    description: Removed repository-lint input; must remain empty
-    required: false
-    default: ''
-  format:
-    description: Removed repository-lint input; must remain empty
-    required: false
-    default: ''
   base:
     description: Trusted base revision for pull-request-size
     required: false
@@ -52,22 +36,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Validate compatibility inputs
-      shell: bash
-      env:
-        INPUT_FORMAT: ${{ inputs.format }}
-        INPUT_MODE: ${{ inputs.mode }}
-        INPUT_OPERATION: ${{ inputs.operation }}
-        INPUT_POLICY: ${{ inputs.policy }}
-      run: |
-        if [[ "$INPUT_OPERATION" == "check" || -n "$INPUT_POLICY" || -n "$INPUT_MODE" || -n "$INPUT_FORMAT" ]]; then
-          echo "Repository lint rules are disabled pending review. Remove operation/policy/mode/format; this Action now measures pull-request size only. Pin v0.6.0 to retain the previous check behavior." >&2
-          exit 2
-        fi
-        if [[ -n "$INPUT_OPERATION" && "$INPUT_OPERATION" != "pull-request-size" ]]; then
-          echo "Unsupported legacy operation: $INPUT_OPERATION" >&2
-          exit 2
-        fi
     - name: Install uv
       uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
