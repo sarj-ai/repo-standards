@@ -51,10 +51,14 @@ jobs:
             release_exists=false
           fi
           if [[ "$package_exists" == true && "$release_exists" == true ]]; then build=false; else build=true; fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "build=$build" >> "$GITHUB_OUTPUT"
-          echo "publish=$([[ "$package_exists" == false ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-          echo "release=$([[ "$release_exists" == false ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          if [[ "$package_exists" == false ]]; then publish=true; else publish=false; fi
+          if [[ "$release_exists" == false ]]; then release=true; else release=false; fi
+          {
+            echo "version=$version"
+            echo "build=$build"
+            echo "publish=$publish"
+            echo "release=$release"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     name: Build and verify release
