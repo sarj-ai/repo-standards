@@ -5,7 +5,6 @@ import pytest
 from repo_lint.core import rule_reviews
 from repo_lint.core.models import RuleId
 from repo_lint.core.rule_reviews import (
-    REQUIRED_RULE_REVIEW_CHECKS,
     ApprovedRuleReview,
     PendingRuleReview,
     RuleVersion,
@@ -20,18 +19,11 @@ def test_every_unapproved_rule_is_pending_and_disabled() -> None:
     assert review_for(RuleId("core/layout/non-overlapping-root"), 1) == PendingRuleReview()
 
 
-def test_approved_review_requires_all_checks_and_review_reference() -> None:
-    with pytest.raises(ValueError, match="every review check"):
-        ApprovedRuleReview(completed_checks=(), reviewed_in="a" * 40)
+def test_approved_review_requires_immutable_review_reference() -> None:
     with pytest.raises(ValueError, match="immutable 40- or 64-character object ID"):
-        ApprovedRuleReview(completed_checks=REQUIRED_RULE_REVIEW_CHECKS, reviewed_in="")
+        ApprovedRuleReview(reviewed_in="")
     with pytest.raises(ValueError, match="immutable 40- or 64-character object ID"):
         ApprovedRuleReview(reviewed_in="release/1")
-
-
-def test_pending_review_rejects_duplicate_checks() -> None:
-    with pytest.raises(ValueError, match="unique"):
-        PendingRuleReview(completed_checks=("name", "name"))
 
 
 def test_activation_is_explicit_and_version_bound(monkeypatch: pytest.MonkeyPatch) -> None:

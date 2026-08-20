@@ -5,9 +5,12 @@ from hashlib import sha256
 import json
 from typing import TYPE_CHECKING
 
+from jsonschema import ValidationError as JSONSchemaValidationError
+from jsonschema import validate
 import pytest
 
 from repo_lint.openapi import AnalysisReport, DocumentInput, analyze_bytes, rules
+from repo_lint.openapi.schema import analysis_schema
 
 
 if TYPE_CHECKING:
@@ -71,6 +74,27 @@ def test_minimal_json_document_is_clean_and_deterministic() -> None:
     assert first.completion == "complete"
     assert first.conclusion == "passed"
     assert first == second
+
+
+def test_openapi_report_rejects_incoherent_outcome_states() -> None:
+    with pytest.raises(ValueError, match="complete OpenAPI reports cannot be inconclusive"):
+        AnalysisReport(2, "complete", "inconclusive", "openapi.json", None, (), ())
+
+
+def test_openapi_schema_rejects_incoherent_outcome_states() -> None:
+    with pytest.raises(JSONSchemaValidationError):
+        validate(
+            instance={
+                "schema_version": 2,
+                "completion": "complete",
+                "conclusion": "inconclusive",
+                "entrypoint": "openapi.json",
+                "openapi_version": None,
+                "diagnostics": [],
+                "execution_issues": [],
+            },
+            schema=analysis_schema(),
+        )
 
 
 @pytest.mark.parametrize(

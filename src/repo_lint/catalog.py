@@ -36,9 +36,7 @@ from repo_lint.core.models import (
 from repo_lint.core.registry import POLICY_API_VERSION, PolicyRegistry
 from repo_lint.core.render import output_schema
 from repo_lint.core.rule_reviews import (
-    REQUIRED_RULE_REVIEW_CHECKS,
     ApprovedRuleReview,
-    ReviewCheck,
     review_for,
 )
 from repo_lint.core.taxonomy import CATEGORIES
@@ -53,7 +51,7 @@ if TYPE_CHECKING:
 
 
 _CATALOG_KIND = "repo-lint.catalog"
-_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v4.schema.json"
+_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v5.schema.json"
 _PUBLIC_REFERENCE_HOSTS = frozenset(
     {
         "docs.github.com",
@@ -69,6 +67,10 @@ CommandId = NewType("CommandId", str)
 CapabilityId = NewType("CapabilityId", str)
 NonEmptyText = Annotated[str, Field(min_length=1)]
 PositiveVersion = Annotated[int, Field(gt=0)]
+ImmutableReviewReference = Annotated[
+    str,
+    Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"),
+]
 RuleIdValue = Annotated[
     RuleId,
     Field(pattern=r"^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*){2,}$"),
@@ -179,21 +181,12 @@ class RemediationDescriptor(CatalogModel):
 
 class PendingRuleReviewDescriptor(CatalogModel):
     status: Literal["pending"] = "pending"
-    completed_checks: tuple[ReviewCheck, ...] = ()
     reviewed_in: None = None
 
 
 class ApprovedRuleReviewDescriptor(CatalogModel):
     status: Literal["approved"] = "approved"
-    completed_checks: tuple[ReviewCheck, ...]
-    reviewed_in: NonEmptyText
-
-    @model_validator(mode="after")
-    def validate_complete(self) -> Self:
-        if self.completed_checks != REQUIRED_RULE_REVIEW_CHECKS:
-            message = "approved rules require every canonical review check"
-            raise ValueError(message)
-        return self
+    reviewed_in: ImmutableReviewReference
 
 
 RuleReviewDescriptor = Annotated[
@@ -327,7 +320,7 @@ class SchemaDescriptor(CatalogModel):
 
 class Catalog(CatalogModel):
     kind: Literal["repo-lint.catalog"] = _CATALOG_KIND
-    schema_version: Literal[4] = 4
+    schema_version: Literal[5] = 5
     catalog_version: str
     product: ProductDescriptor
     provenance: ProvenanceDescriptor
@@ -448,6 +441,34 @@ def _validate_command_graph(catalog: Catalog) -> None:
 def catalog_schema() -> dict[str, JSONValue]:
     schema = _JSON_OBJECT.validate_python(Catalog.model_json_schema(), strict=True)
     schema["$id"] = _CATALOG_SCHEMA_ID
+    definitions = schema.get("$defs")
+    if isinstance(definitions, dict):
+        lifecycle = definitions.get("LifecycleDescriptor")
+        if isinstance(lifecycle, dict):
+            lifecycle["oneOf"] = [
+                {
+                    "properties": {
+                        "status": {"enum": ["experimental", "beta", "stable"]},
+                        "deprecated_in": {"const": None},
+                        "replacement_rule_id": {"const": None},
+                        "removal_not_before": {"const": None},
+                    },
+                    "required": [
+                        "status",
+                        "deprecated_in",
+                        "replacement_rule_id",
+                        "removal_not_before",
+                    ],
+                },
+                {
+                    "properties": {
+                        "status": {"const": "deprecated"},
+                        "deprecated_in": {"type": "string"},
+                        "removal_not_before": {"type": "string"},
+                    },
+                    "required": ["status", "deprecated_in", "removal_not_before"],
+                },
+            ]
     return schema
 
 
@@ -475,6 +496,35 @@ def report_schema() -> dict[str, JSONValue]:
     )
     schema["required"] = required
     schema["properties"] = properties
+    schema["oneOf"] = [
+        {
+            "properties": {
+                "completion": {"const": "complete"},
+                "conclusion": {"const": "passed"},
+                "diagnostics": {"maxItems": 0},
+                "execution_issues": {"maxItems": 0},
+            },
+            "required": ["completion", "conclusion", "diagnostics", "execution_issues"],
+        },
+        {
+            "properties": {
+                "completion": {"const": "complete"},
+                "conclusion": {"const": "findings"},
+                "diagnostics": {"minItems": 1},
+                "execution_issues": {"maxItems": 0},
+            },
+            "required": ["completion", "conclusion", "diagnostics", "execution_issues"],
+        },
+        {
+            "properties": {
+                "completion": {"const": "incomplete"},
+                "conclusion": {"const": "inconclusive"},
+                "diagnostics": {"maxItems": 0},
+                "execution_issues": {"minItems": 1},
+            },
+            "required": ["completion", "conclusion", "diagnostics", "execution_issues"],
+        },
+    ]
     return schema
 
 
@@ -642,13 +692,10 @@ def _rule_descriptor(rule: Rule, source_path: str) -> RuleDescriptor:
     review = review_for(RuleId(str(rule.rule_id)), rule.version)
     if isinstance(review, ApprovedRuleReview):
         review_descriptor: RuleReviewDescriptor = ApprovedRuleReviewDescriptor(
-            completed_checks=review.completed_checks,
             reviewed_in=review.reviewed_in,
         )
     else:
-        review_descriptor = PendingRuleReviewDescriptor(
-            completed_checks=review.completed_checks,
-        )
+        review_descriptor = PendingRuleReviewDescriptor()
     return RuleDescriptor(
         rule_id=RuleId(str(rule.rule_id)),
         rule_version=rule.version,
@@ -895,7 +942,7 @@ def _schemas() -> tuple[SchemaDescriptor, ...]:
             "openapi-analysis",
             openapi_report_schema(),
         ),
-        ("catalog", "Repo-lint public catalog", 4, "catalog", catalog_schema()),
+        ("catalog", "Repo-lint public catalog", 5, "catalog", catalog_schema()),
     )
     return tuple(
         SchemaDescriptor(

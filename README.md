@@ -4,7 +4,7 @@
 repository rules are available for review but remain disabled until individually approved
 and explicitly activated by a consumer.
 
-After a rule is approved, opt in per run with `--enable-rule <rule-id>`. Approval alone
+After a rule is approved, opt in per run with `--enable-rule <rule-id>@<version>`. Approval alone
 never enables a rule, and the option may be repeated for multiple approved rules.
 
 ## Run it

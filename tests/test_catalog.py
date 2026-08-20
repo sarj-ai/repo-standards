@@ -6,11 +6,18 @@ import json
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, validate
+from jsonschema import ValidationError as JSONSchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 import pytest
 from typer.testing import CliRunner
 
-from repo_lint.catalog import Catalog, LifecycleDescriptor, build_catalog, catalog_schema
+from repo_lint.catalog import (
+    ApprovedRuleReviewDescriptor,
+    Catalog,
+    LifecycleDescriptor,
+    build_catalog,
+    catalog_schema,
+)
 from repo_lint.cli import app
 from repo_lint.core.canonical import canonical_json
 from repo_lint.core.catalog import core_rules
@@ -54,7 +61,7 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
 
-    assert catalog.schema_version == 4
+    assert catalog.schema_version == 5
     assert {rule.review.status for rule in catalog.rules} == {"pending"}
     assert rule_ids == sorted(expected_rule_ids)
     assert len(rule_ids) == len(set(rule_ids)) == 15
@@ -83,6 +90,13 @@ def test_catalog_policy_binding_review_status_must_match_its_rule() -> None:
 
     with pytest.raises(ValidationError, match="policy binding does not match its rule"):
         Catalog.model_validate(payload)
+
+
+def test_approved_review_descriptor_requires_immutable_object_id() -> None:
+    with pytest.raises(ValidationError, match="string_pattern_mismatch"):
+        ApprovedRuleReviewDescriptor(
+            reviewed_in="mutable-branch",
+        )
 
 
 def test_catalog_graph_is_complete() -> None:
@@ -180,6 +194,25 @@ def test_catalog_and_every_embedded_schema_are_valid_json_schemas() -> None:
         Draft202012Validator.check_schema(document)
 
 
+def test_catalog_schema_encodes_lifecycle_and_approved_review_states() -> None:
+    schema = catalog_schema()
+    definitions = schema["$defs"]
+    assert isinstance(definitions, dict)
+
+    with pytest.raises(JSONSchemaValidationError):
+        validate(
+            instance={"status": "stable", "deprecated_in": "3.0.0"},
+            schema=_JSON_OBJECT.validate_python(
+                definitions["LifecycleDescriptor"], strict=True
+            ),
+        )
+    approved = _JSON_OBJECT.validate_python(
+        definitions["ApprovedRuleReviewDescriptor"], strict=True
+    )
+    properties = _JSON_OBJECT.validate_python(approved["properties"], strict=True)
+    assert set(properties) == {"status", "reviewed_in"}
+
+
 def test_catalog_schema_documents_exactly_match_their_cli_selectors() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
 
@@ -196,7 +229,7 @@ def test_catalog_schema_descriptor_versions_match_public_contracts() -> None:
     }
 
     assert versions == {
-        "catalog": 4,
+        "catalog": 5,
         "openapi-analysis": 2,
         "report": 2,
     }

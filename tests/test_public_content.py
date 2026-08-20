@@ -62,6 +62,20 @@ def test_public_distribution_has_no_legacy_compatibility_surface() -> None:
     assert "publish_compat" not in jobs
 
 
+def test_publish_revalidates_immutable_tag_before_registry_write() -> None:
+    workflow = (REPOSITORY_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
+    publish_job = workflow.index("\n  publish_primary:\n")
+    release_job = workflow.index("\n  release:\n")
+    publish_section = workflow[publish_job:release_job]
+
+    assert "Verify immutable version tag" in publish_section
+    assert "git/ref/tags/v$RELEASE_VERSION" in publish_section
+    assert 'test "$tag_sha" = "$RELEASE_SHA"' in publish_section
+    assert publish_section.index("Verify immutable version tag") < publish_section.index(
+        "Publish with trusted identity"
+    )
+
+
 def _public_files() -> tuple[Path, ...]:
     return tuple(
         path
