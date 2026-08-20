@@ -5,6 +5,7 @@ import importlib
 from importlib.metadata import version
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local Git fixture only
 from urllib.error import URLError
@@ -259,7 +260,7 @@ def test_unapproved_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
             "report",
             str(tmp_path),
             "--enable-rule",
-            "architecture/dependencies/policy",
+            "architecture/dependencies/policy@1",
             "--format",
             "json",
         ],
@@ -269,6 +270,16 @@ def test_unapproved_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert report["conclusion"] == "inconclusive"
     assert "not approved for activation" in str(report)
+
+
+def test_enable_rule_help_requires_an_exact_version() -> None:
+    result = runner.invoke(app, ["check", "--help"], terminal_width=160)
+    help_text = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", result.stdout).split())
+
+    assert result.exit_code == 0
+    assert "--enable-rule" in help_text
+    assert "rule-id@version" in help_text
+    assert "selector" in help_text
 
 
 def test_text_diagnostics_do_not_invent_source_coordinates(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Literal
 
 from .errors import ConfigurationError
@@ -26,6 +27,8 @@ REQUIRED_RULE_REVIEW_CHECKS: tuple[ReviewCheck, ...] = (
     "flagged-case",
     "passing-case",
 )
+
+_IMMUTABLE_REVIEW_REFERENCE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,8 +57,8 @@ class ApprovedRuleReview:
         if self.completed_checks != REQUIRED_RULE_REVIEW_CHECKS:
             message = "approved rules require every review check in canonical order"
             raise ValueError(message)
-        if not self.reviewed_in.strip():
-            message = "approved rules require an immutable review reference"
+        if _IMMUTABLE_REVIEW_REFERENCE.fullmatch(self.reviewed_in) is None:
+            message = "approved rules require an immutable 40- or 64-character object ID"
             raise ValueError(message)
 
 
@@ -95,12 +98,26 @@ def approved_rule_versions() -> frozenset[RuleVersion]:
     return approved
 
 
-def activated_rule_versions(requested_rule_ids: tuple[str, ...]) -> frozenset[RuleVersion]:
-    if len(requested_rule_ids) != len(set(requested_rule_ids)):
-        ConfigurationError.fail("enabled rule IDs must be unique")
+def activated_rule_versions(requested_rules: tuple[str, ...]) -> frozenset[RuleVersion]:
+    requested = tuple(_parse_rule_version(value) for value in requested_rules)
+    if len(requested) != len(set(requested)):
+        ConfigurationError.fail("enabled rule ID and version selectors must be unique")
     approved = approved_rule_versions()
-    approved_ids = {str(item.rule_id) for item in approved}
-    unavailable = sorted(set(requested_rule_ids) - approved_ids)
+    unavailable = sorted(
+        f"{item.rule_id}@{item.version}" for item in set(requested) - approved
+    )
     if unavailable:
         ConfigurationError.fail(f"rules are not approved for activation: {', '.join(unavailable)}")
-    return frozenset(item for item in approved if str(item.rule_id) in requested_rule_ids)
+    return frozenset(requested)
+
+
+def _parse_rule_version(value: str) -> RuleVersion:
+    rule_id, separator, version_text = value.rpartition("@")
+    if not separator or not rule_id or not version_text.isascii() or not version_text.isdecimal():
+        ConfigurationError.fail(
+            f"enabled rules must use an exact rule-id@version selector: {value}"
+        )
+    version = int(version_text)
+    if version < 1:
+        ConfigurationError.fail(f"enabled rule versions must be positive: {value}")
+    return RuleVersion(RuleId(rule_id), version)
