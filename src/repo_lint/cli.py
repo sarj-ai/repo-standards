@@ -75,7 +75,7 @@ if TYPE_CHECKING:
 
 
 app = typer.Typer(
-    name="repo-lint",
+    name="repo-standards",
     help="Deterministic, read-only repository architecture and API contract linter.",
     no_args_is_help=True,
     pretty_exceptions_enable=False,
@@ -95,7 +95,7 @@ pull_request_app = typer.Typer(
 app.add_typer(rest_app, name="rest")
 app.add_typer(pull_request_app, name="pull-request")
 
-_DISTRIBUTION_NAME = "sarj-repo-lint"
+_DISTRIBUTION_NAME = "repo-standards"
 _MAX_PAGE_SIZE = 500
 _INSPECTION_KINDS = frozenset(
     {"all", "project", "workflow", "cloudbuild", "dockerfile", "terraform", "openapi"}
@@ -205,7 +205,7 @@ def _envelope(
 
 
 def _tool() -> Mapping[str, object]:
-    return {"name": "repo-lint", "version": _installed_version()}
+    return {"name": "repo-standards", "version": _installed_version()}
 
 
 def _installed_version() -> str:
@@ -662,10 +662,10 @@ def _render_github_payload(payload: Mapping[str, object], output_format: OutputF
             f"{item.get('message', 'GitHub policy finding')}"
         )
     lines.extend(
-        f"repo-lint: analysis incomplete: {item.get('code')}: {item.get('message')}"
+        f"repo-standards: analysis incomplete: {item.get('code')}: {item.get('message')}"
         for item in _mapping_list(payload.get("execution_issues"))
     )
-    lines.append(f"repo-lint github: {payload.get('conclusion', 'inconclusive')}")
+    lines.append(f"repo-standards github: {payload.get('conclusion', 'inconclusive')}")
     return "\n".join(lines) + "\n"
 
 
@@ -868,7 +868,7 @@ def rest_discover_command(
         "next_actions": (
             []
             if len(candidates) == 1
-            else ["Select one exact tracked contract with `repo-lint rest check --spec PATH`."]
+            else ["Select one exact tracked contract with `repo-standards rest check --spec PATH`."]
         ),
     }
     typer.echo(canonical_json(payload))
@@ -1002,7 +1002,7 @@ def rest_rules_command() -> None:
     payload = {
         **_envelope(
             "rest.rules",
-            provenance={"kind": "installed-package", "package": "sarj-repo-lint"},
+            provenance={"kind": "installed-package", "package": "repo-standards"},
         ),
         "rules": [asdict(item) for item in installed],
         "summary": {"rules": len(installed)},
@@ -1020,7 +1020,7 @@ def rest_explain_command(rule_id: Annotated[str, typer.Argument()]) -> None:
     payload = {
         **_envelope(
             "rest.explain",
-            provenance={"kind": "installed-package", "package": "sarj-repo-lint"},
+            provenance={"kind": "installed-package", "package": "repo-standards"},
         ),
         "rule": asdict(rule),
     }
@@ -1660,7 +1660,7 @@ def explain_rule(
             "explain",
             "rule.unknown",
             f"rule is not installed for policy {policy}: {rule_id}",
-            remediation="Use `repo-lint rules` to discover installed rule IDs.",
+            remediation="Use `repo-standards rules` to discover installed rule IDs.",
         )
     payload = {
         **_envelope(

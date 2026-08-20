@@ -81,7 +81,7 @@ def _missing_target(migration: MigrationPath) -> Diagnostic:
                 "Add the component's tracked files at the declared target path.",
                 "Update path-sensitive build and workspace configuration in the same change.",
             ),
-            validation=("Run repo-lint check against the resulting commit.",),
+            validation=("Run repo-standards check against the resulting commit.",),
         ),
     )
 
@@ -106,7 +106,7 @@ def _retained_source(migration: MigrationPath, source_files: _PathMatch) -> Diag
                 "Move obsolete files and declare intentional compatibility components explicitly.",
             ),
             validation=(
-                "Run repo-lint check and confirm the old root is empty or separately owned.",
+                "Run repo-standards check and confirm the old root is empty or separately owned.",
             ),
         ),
         observed_value={
@@ -188,7 +188,7 @@ def _workspace_membership_lost(
                 "Keep exclusions at least as narrow as they were before the relocation.",
             ),
             validation=(
-                "Run the package manager's immutable workspace install and repo-lint check.",
+                "Run the package manager's immutable workspace install and repo-standards check.",
             ),
         ),
         observed_value={

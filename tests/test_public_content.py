@@ -17,7 +17,9 @@ PERSONAL_HOME_PATH = re.compile(
     rf"(?:/{'Users'}/|/{'home'}/|[A-Z]:\\\\{'Users'}\\\\)[a-z0-9._-]+",
     re.IGNORECASE,
 )
-ALLOWED_REPOSITORIES = frozenset({"sarj-repo-lint", "standards"})
+ALLOWED_REPOSITORIES = frozenset(
+    {"repo-standards", "sarj-repo-lint", "code-standards", "standards"}
+)
 ALLOWED_URL_USERINFO = frozenset(
     {"api.github.com@evil.example", "git@github.com", "token@github.com"}
 )

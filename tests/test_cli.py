@@ -30,7 +30,7 @@ def test_version_matches_installed_distribution() -> None:
     result = runner.invoke(app, ["--version"])
 
     assert result.exit_code == 0
-    assert result.stdout.strip() == version("sarj-repo-lint")
+    assert result.stdout.strip() == version("repo-standards")
 
 
 def test_gh_transport_preserves_api_contract_without_forwarding_authorization(
@@ -276,7 +276,7 @@ def test_text_diagnostics_do_not_invent_source_coordinates(tmp_path: Path) -> No
     result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "text"])
     assert result.exit_code == 0
     assert ":1:1:" not in result.stdout
-    assert result.stdout == "repo-lint: passed; 0 errors, 0 warnings\n"
+    assert result.stdout == "repo-standards: passed; 0 errors, 0 warnings\n"
 
 
 def test_pending_strict_errors_do_not_block(tmp_path: Path) -> None:

@@ -21,7 +21,7 @@ function parameterDetails(parameter: Parameter): string {
   </nav>
   {catalog.commands.map((command) => (
     <section class="command" id={command.command_id}>
-      <h2><code>repo-lint {command.path.join(' ')}</code></h2>
+      <h2><code>repo-standards {command.path.join(' ')}</code></h2>
       <p>{command.summary}</p>
       {[...command.arguments, ...command.options].length > 0 && (
         <dl class="parameters">

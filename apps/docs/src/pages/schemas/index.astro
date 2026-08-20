@@ -12,7 +12,7 @@ import { catalog } from '../../lib/catalog';
         <dl class="metadata">
           <dt>ID</dt><dd><code>{schema.schema_id}</code></dd>
           <dt>Version</dt><dd>{schema.schema_version}</dd>
-          <dt>CLI</dt><dd><code>repo-lint schema {schema.cli_selector}</code></dd>
+          <dt>CLI</dt><dd><code>repo-standards schema {schema.cli_selector}</code></dd>
         </dl>
         <a href={`/api/v4/schemas/${encodeURIComponent(schema.schema_id)}.schema.json`}>JSON Schema</a>
       </article>

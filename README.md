@@ -1,6 +1,6 @@
-# sarj-repo-lint
+# repo-standards
 
-`sarj-repo-lint` measures pull-request review size without executing repository code. Its
+`repo-standards` measures pull-request review size without executing repository code. Its
 repository rules are available for review but remain disabled until individually approved
 and explicitly activated by a consumer.
 
@@ -12,17 +12,17 @@ never enables a rule, and the option may be repeated for multiple approved rules
 Use the current release without installing it:
 
 ```bash
-uvx --from sarj-repo-lint repo-lint pull-request size . --base origin/main
+uvx --from repo-standards repo-standards pull-request size . --base origin/main
 ```
 
 For a persistent user installation:
 
 ```bash
-uv tool install sarj-repo-lint
-repo-lint pull-request size . --base origin/main
+uv tool install repo-standards
+repo-standards pull-request size . --base origin/main
 ```
 
-Upgrade with `uv tool upgrade sarj-repo-lint`. Automation should pin the package version or
+Upgrade with `uv tool upgrade repo-standards`. Automation should pin the package version or
 the GitHub Action's full commit SHA.
 
 ## GitHub Action
@@ -48,7 +48,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: sarj-ai/sarj-repo-lint@<full-commit-sha> # v0.8.0
+      - uses: sarj-ai/repo-standards@<full-commit-sha> # v1.0.0
 ```
 
 The Action emits counted, excluded, and total line counts plus canonical JSON. Tests are
@@ -69,7 +69,7 @@ metadata, branch protection, rulesets, and Actions settings:
 
 ```bash
 export SARJ_REPO_LINT_GITHUB_TOKEN=...
-repo-lint check . \
+repo-standards check . \
   --github-repository owner/repository \
   --require-github-evidence \
   --policy sarj \
@@ -99,8 +99,8 @@ uv run pytest
 uv run ruff check .
 uv run basedpyright
 uvx --no-config --isolated --python 3.14 \
-  --from sarj-standards-bootstrap==1.0.3 \
-  sarj-standards check --trust-repository-code
+  --from sarj-standards-bootstrap==2.0.0 \
+  code-standards check --trust-repository-code
 ```
 
 Build the same wheel and source distribution used by publishing:

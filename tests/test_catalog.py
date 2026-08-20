@@ -28,7 +28,7 @@ _JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
 
 
 def _catalog_payload() -> dict[str, JSONValue]:
-    catalog = build_catalog(app, package_version=version("sarj-repo-lint"))
+    catalog = build_catalog(app, package_version=version("repo-standards"))
     return _JSON_OBJECT.validate_python(catalog.model_dump(mode="json"), strict=True)
 
 
@@ -150,7 +150,7 @@ def test_catalog_rules_have_complete_clarity_taxonomy_and_examples() -> None:
 
 
 def test_catalog_and_every_embedded_schema_are_valid_json_schemas() -> None:
-    catalog = build_catalog(app, package_version=version("sarj-repo-lint"))
+    catalog = build_catalog(app, package_version=version("repo-standards"))
     payload = _catalog_payload()
     schema = catalog_schema()
 

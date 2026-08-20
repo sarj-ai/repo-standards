@@ -143,7 +143,7 @@ def render_json(report: AnalysisReport, *, pretty: bool = False) -> str:
 
 def render_text(report: AnalysisReport) -> str:
     lines = [
-        f"repo-lint: analysis incomplete: {issue.code}: {issue.message}"
+        f"repo-standards: analysis incomplete: {issue.code}: {issue.message}"
         for issue in report.execution_issues
     ]
     lines.extend(
@@ -153,7 +153,7 @@ def render_text(report: AnalysisReport) -> str:
         for item in report.diagnostics
     )
     lines.append(
-        f"repo-lint: {report.conclusion}; {report.summary.get('errors', 0)} errors, "
+        f"repo-standards: {report.conclusion}; {report.summary.get('errors', 0)} errors, "
         f"{report.summary.get('warnings', 0)} warnings"
     )
     return "\n".join(lines) + "\n"

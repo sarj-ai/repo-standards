@@ -1,4 +1,4 @@
-# Managed by sarj-standards; regenerate with `sarj-standards show ci --output .github/workflows/standards.yml`.
+# Managed by code-standards; regenerate with `code-standards show ci --output .github/workflows/standards.yml`.
 name: Standards
 
 on:
@@ -44,4 +44,4 @@ jobs:
       - name: Run standards
         env:
           SARJ_REACT_DOCTOR_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap==1.0.3 sarj-standards check --trust-repository-code --format github
+        run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap==2.0.0 code-standards check --trust-repository-code --format github

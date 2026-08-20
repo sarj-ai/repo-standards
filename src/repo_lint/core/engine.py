@@ -68,7 +68,7 @@ def _overlap_diagnostics(manifest: Manifest) -> tuple[Diagnostic, ...]:
                                 "the declarations."
                             ),
                         ),
-                        validation=("Run repo-lint check again.",),
+                        validation=("Run repo-standards check again.",),
                     ),
                 )
             )

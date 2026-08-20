@@ -64,22 +64,28 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Build distribution
-        run: uv build --no-sources --out-dir dist
+        run: |
+          uv build --no-sources --out-dir dist/repo-standards
+          uv build --project compat/sarj-repo-lint --out-dir dist/sarj-repo-lint
       - name: Verify public distribution boundary
-        run: uv run --frozen python verify_release_artifacts.py --distributions dist
+        run: >-
+          uv run --frozen python verify_release_artifacts.py
+          --distributions dist/repo-standards
+          --compatibility-distributions dist/sarj-repo-lint
       - name: Install wheels into a clean environment
         env:
           SMOKE_ENV: ${{ runner.temp }}/repo-lint-smoke
         run: |
           uv venv --python 3.12 "$SMOKE_ENV"
           uv pip install --python "$SMOKE_ENV/bin/python" \
-            --find-links dist sarj-repo-lint
+            --find-links dist/repo-standards --find-links dist/sarj-repo-lint sarj-repo-lint
       - name: Smoke-test installed interfaces
         env:
           FIXTURE_ROOT: ${{ runner.temp }}/repo-lint-fixture
           REPORT_PATH: ${{ runner.temp }}/repo-lint-report.json
           SMOKE_ENV: ${{ runner.temp }}/repo-lint-smoke
         run: |
+          "$SMOKE_ENV/bin/repo-standards" --help
           "$SMOKE_ENV/bin/repo-lint" --help
           "$SMOKE_ENV/bin/sarj-repo-lint" --help
           "$SMOKE_ENV/bin/repo-lint" --version
@@ -101,7 +107,7 @@ jobs:
           "$SMOKE_ENV/bin/repo-lint" report "$FIXTURE_ROOT" \
             --policy sarj --format json > "$REPORT_PATH"
           "$SMOKE_ENV/bin/python" -c \
-            'import json, os; from importlib.metadata import version; p=json.load(open(os.environ["REPORT_PATH"])); assert p["completion"] == "complete"; assert p["tool"]["version"] == version("sarj-repo-lint")'
+            'import json, os; from importlib.metadata import version; p=json.load(open(os.environ["REPORT_PATH"])); assert p["completion"] == "complete"; assert p["tool"]["version"] == version("repo-standards")'
       - name: Add consumer action size fixture
         env:
           FIXTURE_ROOT: ${{ runner.temp }}/repo-lint-fixture
