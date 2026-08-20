@@ -1,35 +1,35 @@
-name: Sarj repository lint
-description: Enforce Sarj repository architecture against the caller's exact checked-out tree
+name: Sarj pull-request size
+description: Measure review-sized pull-request churn without enabling repository lint rules
 
 inputs:
   operation:
-    description: Operation to run (check or pull-request-size)
+    description: Deprecated compatibility input; only pull-request-size is accepted
     required: false
-    default: check
+    default: ''
   root:
     description: Repository root to inspect
     required: false
     default: .
   policy:
-    description: Installed policy identifier
+    description: Removed repository-lint input; must remain empty
     required: false
-    default: sarj
+    default: ''
   mode:
-    description: Enforcement mode (report, ratchet, or strict)
+    description: Removed repository-lint input; must remain empty
     required: false
-    default: ratchet
+    default: ''
   format:
-    description: Output format
+    description: Removed repository-lint input; must remain empty
     required: false
-    default: text
+    default: ''
   base:
     description: Trusted base revision for pull-request-size
     required: false
     default: ''
   head:
-    description: Head revision for pull-request-size
+    description: Head revision; defaults to the pull-request head SHA
     required: false
-    default: HEAD
+    default: ''
   generated-attribute:
     description: Git attribute marking repository-specific excluded artifacts
     required: false
@@ -52,54 +52,49 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Validate operation inputs
+    - name: Validate compatibility inputs
       shell: bash
       env:
-        INPUT_BASE: ${{ inputs.base }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_MODE: ${{ inputs.mode }}
         INPUT_OPERATION: ${{ inputs.operation }}
+        INPUT_POLICY: ${{ inputs.policy }}
       run: |
-        case "$INPUT_OPERATION" in
-          check) ;;
-          pull-request-size)
-            test -n "$INPUT_BASE" || { echo "pull-request-size requires a trusted base revision" >&2; exit 2; }
-            ;;
-          *)
-            echo "Unsupported operation: $INPUT_OPERATION" >&2
-            exit 2
-            ;;
-        esac
+        if [[ "$INPUT_OPERATION" == "check" || -n "$INPUT_POLICY" || -n "$INPUT_MODE" || -n "$INPUT_FORMAT" ]]; then
+          echo "Repository lint rules are disabled pending review. Remove operation/policy/mode/format; this Action now measures pull-request size only. Pin v0.6.0 to retain the previous check behavior." >&2
+          exit 2
+        fi
+        if [[ -n "$INPUT_OPERATION" && "$INPUT_OPERATION" != "pull-request-size" ]]; then
+          echo "Unsupported legacy operation: $INPUT_OPERATION" >&2
+          exit 2
+        fi
     - name: Install uv
       uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         version: '0.12.5'
         enable-cache: true
         cache-dependency-glob: ${{ github.action_path }}/uv.lock
-    - name: Install locked repository-lint environment
+    - name: Install locked pull-request-size environment
       shell: bash
-      run: uv sync --project "$GITHUB_ACTION_PATH" --locked --no-dev --python 3.14
-    - name: Enforce repository architecture
-      if: inputs.operation == 'check'
-      shell: bash
-      env:
-        INPUT_FORMAT: ${{ inputs.format }}
-        INPUT_MODE: ${{ inputs.mode }}
-        INPUT_POLICY: ${{ inputs.policy }}
-        INPUT_ROOT: ${{ inputs.root }}
-      run: >-
-        uv run --project "$GITHUB_ACTION_PATH" --no-sync repo-lint check "$INPUT_ROOT"
-        --policy "$INPUT_POLICY" --mode "$INPUT_MODE" --format "$INPUT_FORMAT"
+      run: uv sync --project "$GITHUB_ACTION_PATH" --locked --no-dev --python 3.12
     - name: Analyze pull-request size
       id: pull-request-size
-      if: inputs.operation == 'pull-request-size'
       shell: bash
       env:
         INPUT_BASE: ${{ inputs.base }}
         INPUT_GENERATED_ATTRIBUTE: ${{ inputs.generated-attribute }}
         INPUT_HEAD: ${{ inputs.head }}
         INPUT_ROOT: ${{ inputs.root }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        EVENT_SHA: ${{ github.sha }}
       run: |
+        base=${INPUT_BASE:-$PR_BASE_SHA}
+        head=${INPUT_HEAD:-${PR_HEAD_SHA:-$EVENT_SHA}}
+        test -n "$base" || { echo "A base revision is required outside pull_request events; pass base explicitly." >&2; exit 2; }
+        test -n "$head" || { echo "A head revision is required." >&2; exit 2; }
         report=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync repo-lint pull-request size "$INPUT_ROOT" \
-          --base "$INPUT_BASE" --head "$INPUT_HEAD" \
+          --base "$base" --head "$head" \
           --generated-attribute "$INPUT_GENERATED_ATTRIBUTE" --format json)
         counted=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(sys.stdin)["summary"]["counted_lines"])' <<< "$report")
         excluded=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(sys.stdin)["summary"]["excluded_lines"])' <<< "$report")

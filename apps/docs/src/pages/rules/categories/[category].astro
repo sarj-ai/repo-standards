@@ -1,7 +1,7 @@
 ---
 import Breadcrumbs from '../../../components/Breadcrumbs.astro';
 import ReferencePage from '../../../components/ReferencePage.astro';
-import { referenceCatalog, type CategoryView } from '../../../lib/catalog';
+import { approvedRules, referenceCatalog, type CategoryView } from '../../../lib/catalog';
 
 export function getStaticPaths() {
   return referenceCatalog.map((category) => ({
@@ -12,16 +12,19 @@ export function getStaticPaths() {
 
 interface Props { category: CategoryView }
 const { category } = Astro.props;
+const approvedIds = new Set(approvedRules.map((rule) => rule.rule_id));
+const topics = category.topics
+  .map(({ topic, rules }) => ({ topic, rules: rules.filter(({ rule }) => approvedIds.has(rule.rule_id)) }))
+  .filter(({ rules }) => rules.length > 0);
+const approvedCount = topics.reduce((total, topic) => total + topic.rules.length, 0);
 ---
 
-<ReferencePage title={category.category.label} description={`${category.ruleCount} repository rules.`}>
+<ReferencePage title={category.category.label} description={`${approvedCount} approved repository rules.`}>
   <Breadcrumbs items={[{ label: 'Rules', href: '/rules/' }, { label: category.category.label }]} />
-  <header class="section-heading">
-    <h1>{category.category.label}</h1>
-    <p class="lede">{category.ruleCount} rules</p>
-  </header>
+  <h1 class="sr-only">{category.category.label}</h1>
   <div class="rule-catalog" data-category-id={category.category.category_id}>
-    {category.topics.map(({ topic, rules }) => {
+    {topics.length === 0 && <div class="directory-empty-state"><p>No rules in this area are approved yet.</p><a href="/review/">Review pending rules</a></div>}
+    {topics.map(({ topic, rules }) => {
       return (
         <section class="rule-topic" aria-labelledby={`topic-${topic.topic_id}`}>
           <h2 id={`topic-${topic.topic_id}`}>{topic.label}</h2>

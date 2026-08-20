@@ -5,7 +5,6 @@ import Breadcrumbs from '../../../components/Breadcrumbs.astro';
 import ReferencePage from '../../../components/ReferencePage.astro';
 import {
   catalog,
-  categoryHref,
   rulePage,
   type Rule,
 } from '../../../lib/catalog';
@@ -24,25 +23,36 @@ const sourceUrl = `${catalog.product.repository_url}/blob/${sourceRevision}/${ru
 const page = rulePage(rule);
 const { category, topic, previous, next } = page;
 const limits = [...rule.non_goals, ...rule.false_positive_controls];
+const directoryHref = rule.review.status === 'pending' ? '/review/' : '/rules/';
 ---
 
 <ReferencePage title={rule.title} description={rule.summary}>
   <article class="rule-detail" data-rule-page data-rule-id={rule.rule_id} data-rule-category={rule.category_id} data-rule-topic={rule.topic_id}>
-    <Breadcrumbs items={[
-      { label: 'Rules', href: '/rules/' },
-      { label: category.category.label, href: categoryHref(category.category.category_id) },
-      { label: topic.topic.label, href: `${categoryHref(category.category.category_id)}#topic-${topic.topic.topic_id}` },
+    <header class="rule-detail__header">
+      <Breadcrumbs items={[
+      { label: rule.review.status === 'pending' ? 'Review' : 'Rules', href: directoryHref },
+      { label: category.category.label, href: directoryHref },
+      { label: topic.topic.label, href: directoryHref },
       { label: rule.title },
-    ]} />
-    <header class="section-heading">
+      ]} />
       <code class="rule-id">{rule.rule_id}</code>
       <h1>{rule.title}</h1>
       <p class="lede" data-rule-summary>{rule.summary}</p>
       <div class="rule-facts" aria-label="Rule classification">
         <span class:list={['rule-fact', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>
+        <span class="rule-fact">{rule.review.status}</span>
         {rule.lifecycle.status !== 'stable' && <span class="rule-fact">{rule.lifecycle.status}</span>}
       </div>
     </header>
+
+    {rule.review.status === 'pending' && (
+      <section class="review-checklist" aria-labelledby="review-checklist">
+        <h2 id="review-checklist">Review checklist</h2>
+        <ul>
+          {['Name', 'Description', 'Trigger', 'Impact', 'Remediation', 'Flagged case', 'Passing case'].map((item) => <li>{item}</li>)}
+        </ul>
+      </section>
+    )}
 
     <section aria-labelledby="examples">
       <h2 id="examples">Examples</h2>
@@ -60,28 +70,17 @@ const limits = [...rule.non_goals, ...rule.false_positive_controls];
       ))}
     </section>
 
-    <section><h2>Why it matters</h2><p>{rule.impact}</p></section>
-
-    <section>
-      <h2>How detection works</h2>
-      <p>{rule.detects}</p>
-      <h3>What is inspected</h3>
-      <ul>{rule.evidence_required.map((value) => <li>{value}</li>)}</ul>
-      {limits.length > 0 && <><h3>Limits</h3><ul>{limits.map((value) => <li>{value}</li>)}</ul></>}
-    </section>
-
-    <section>
-      <h2>How to fix it</h2>
-      <p>{rule.remediation.summary}</p>
-      <ol>{rule.remediation.steps.map((value) => <li>{value}</li>)}</ol>
-      <h3>Verify</h3>
-      <ul>{rule.remediation.validation.map((value) => <li>{value}</li>)}</ul>
-    </section>
+    <dl class="rule-explainer">
+      <div><dt>Why</dt><dd>{rule.impact}</dd></div>
+      <div><dt>Detects</dt><dd>{rule.detects}</dd></div>
+      <div><dt>Inspects</dt><dd><ul>{rule.evidence_required.map((value) => <li>{value}</li>)}</ul></dd></div>
+      {limits.length > 0 && <div><dt>Limits</dt><dd><ul>{limits.map((value) => <li>{value}</li>)}</ul></dd></div>}
+      <div><dt>Fix</dt><dd><p>{rule.remediation.summary}</p><ol>{rule.remediation.steps.map((value) => <li>{value}</li>)}</ol></dd></div>
+      <div><dt>Verify</dt><dd><ul>{rule.remediation.validation.map((value) => <li>{value}</li>)}</ul></dd></div>
+    </dl>
 
     <nav class="rule-navigation" aria-label="Rule navigation" data-rule-nav>
-      {previous
-        ? <a rel="prev" href={previous.href}><span>Previous in {topic.topic.label}</span><strong>{previous.rule.title}</strong></a>
-        : <span></span>}
+      {previous && <a rel="prev" href={previous.href}><span>Previous in {topic.topic.label}</span><strong>{previous.rule.title}</strong></a>}
       {next && <a rel="next" href={next.href}><span>Next in {topic.topic.label}</span><strong>{next.rule.title}</strong></a>}
     </nav>
 

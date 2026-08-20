@@ -1,97 +1,16 @@
 ---
 import ReferencePage from '../../components/ReferencePage.astro';
-import { catalog, categoryHref, referenceCatalog } from '../../lib/catalog';
+import RuleDirectory from '../../components/RuleDirectory.astro';
+import { approvedRules, referenceCatalog } from '../../lib/catalog';
+
+const approvedIds = new Set(approvedRules.map((rule) => rule.rule_id));
+const rows = referenceCatalog.flatMap((category) => category.topics.flatMap((topic) => topic.rules))
+  .filter(({ rule }) => approvedIds.has(rule.rule_id));
 ---
 
-<ReferencePage title="Rules" description={`${catalog.rules.length} versioned repository rules.`}>
-  <header class="section-heading">
-    <h1>Rules</h1>
-    <p class="lede"><span data-result-count>{catalog.rules.length}</span> checks, grouped by area.</p>
-  </header>
-  <div class="rule-tools">
-    <label for="rule-search">Find a rule</label>
-    <div class="rule-search-row">
-      <input id="rule-search" type="search" autocomplete="off" placeholder="Search titles, summaries, or rule IDs" />
-      <button type="button" data-clear-search hidden>Clear</button>
-    </div>
-    <nav class="category-links" aria-label="Rule categories">
-      {referenceCatalog.map(({ category }) => (
-        <a href={`#category-${category.category_id}`}>{category.label}</a>
-      ))}
-    </nav>
-  </div>
-  <p class="empty-results" data-empty-results hidden>No matching rules. <button type="button">Clear search</button></p>
-  <div class="rule-catalog">
-    {referenceCatalog.map(({ category, topics, ruleCount }) => {
-      return (
-        <section class="rule-category" id={`category-${category.category_id}`} data-rule-category>
-          <div class="category-heading">
-            <h2><a href={categoryHref(category.category_id)}>{category.label}</a></h2>
-            <span>{ruleCount} rules</span>
-          </div>
-          {topics.map(({ topic, rules }) => {
-            return (
-              <section class="rule-topic" data-rule-topic>
-                <h3>{topic.label}</h3>
-                <div class="rule-list">
-                  {rules.map(({ rule, href, searchText }) => (
-                    <a
-                      class="rule-row"
-                      href={href}
-                      data-rule-id={rule.rule_id}
-                      data-search={searchText}
-                    >
-                      <strong>{rule.title}</strong>
-                      <span>{rule.summary}</span>
-                      <code>{rule.rule_id}</code>
-                      <span class:list={['severity', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>
-                    </a>
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </section>
-      );
-    })}
-  </div>
+<ReferencePage title="Rules" description="Reviewed repository rules available for explicit activation.">
+  <h1 class="sr-only">Rules</h1>
+  {rows.length > 0
+    ? <RuleDirectory rows={rows} mode="approved" />
+    : <div class="directory-empty-state"><p>No rules are approved yet.</p><a href="/review/">Review pending rules</a></div>}
 </ReferencePage>
-
-<script>
-  const input = document.querySelector<HTMLInputElement>('#rule-search');
-  const count = document.querySelector<HTMLElement>('[data-result-count]');
-  const clear = document.querySelector<HTMLButtonElement>('[data-clear-search]');
-  const empty = document.querySelector<HTMLElement>('[data-empty-results]');
-  const emptyClear = empty?.querySelector<HTMLButtonElement>('button');
-  const rows = [...document.querySelectorAll<HTMLElement>('[data-rule-id]')];
-
-  function filterRules() {
-    const query = input?.value.trim().toLocaleLowerCase('en') ?? '';
-    let visible = 0;
-    for (const row of rows) {
-      const matches = !query || (row.dataset.search ?? '').includes(query);
-      row.hidden = !matches;
-      if (matches) visible += 1;
-    }
-    for (const topic of document.querySelectorAll<HTMLElement>('[data-rule-topic]')) {
-      topic.hidden = !topic.querySelector('[data-rule-id]:not([hidden])');
-    }
-    for (const category of document.querySelectorAll<HTMLElement>('[data-rule-category]')) {
-      category.hidden = !category.querySelector('[data-rule-id]:not([hidden])');
-    }
-    if (count) count.textContent = String(visible);
-    if (clear) clear.hidden = !query;
-    if (empty) empty.hidden = visible !== 0;
-  }
-
-  function clearSearch() {
-    if (!input) return;
-    input.value = '';
-    filterRules();
-    input.focus();
-  }
-
-  input?.addEventListener('input', filterRules);
-  clear?.addEventListener('click', clearSearch);
-  emptyClear?.addEventListener('click', clearSearch);
-</script>

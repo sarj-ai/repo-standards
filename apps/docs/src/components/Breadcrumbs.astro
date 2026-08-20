@@ -1,4 +1,6 @@
 ---
+import SharedBreadcrumbs from '@sarj/docs-ui/Breadcrumbs.astro';
+
 interface Item {
   label: string;
   href?: string;
@@ -9,14 +11,12 @@ interface Props {
 }
 
 const { items } = Astro.props;
+const current = items.at(-1);
+if (current === undefined || current.href !== undefined) throw new TypeError('Breadcrumbs require one unlinked current item.');
+const ancestors = items.slice(0, -1).map((item) => {
+  if (item.href === undefined) throw new TypeError('Breadcrumb ancestors require links.');
+  return { label: item.label, href: item.href };
+});
 ---
 
-<nav class="breadcrumbs" aria-label="Breadcrumb">
-  <ol>
-    {items.map((item) => (
-      <li>
-        {item.href ? <a href={item.href}>{item.label}</a> : <span aria-current="page">{item.label}</span>}
-      </li>
-    ))}
-  </ol>
-</nav>
+<SharedBreadcrumbs ancestors={ancestors} current={current.label} />

@@ -25,6 +25,11 @@ _GIT_ENVIRONMENT = MappingProxyType(
 _TEST_COMPONENTS = frozenset({"test", "tests", "__tests__", "__snapshots__"})
 _PYTHON_TEST = re.compile(r"(?:test_.+|.+_test)\.py\Z")
 _JAVASCRIPT_TEST = re.compile(r".+\.(?:test|spec)\.(?:[cm]?[jt]sx?)\Z")
+_GO_TEST = re.compile(r".+_test\.go\Z")
+_JVM_TEST = re.compile(r".+(?:test|tests)\.(?:java|kt|kts|groovy|scala)\Z")
+_DOTNET_TEST = re.compile(r".+(?:test|tests)\.cs\Z")
+_RUBY_TEST = re.compile(r".+_(?:spec|test)\.rb\Z")
+_XCODE_TEST_COMPONENT = re.compile(r".+(?:ui)?tests\Z")
 _NUMSTAT_FIELDS = 3
 
 
@@ -73,12 +78,23 @@ class PullRequestSize:
 
 def is_test_path(path: str) -> bool:
     pure = PurePosixPath(path)
-    if any(component.casefold() in _TEST_COMPONENTS for component in pure.parts[:-1]):
+    components = tuple(component.casefold() for component in pure.parts[:-1])
+    if any(
+        component in _TEST_COMPONENTS
+        or component == "androidtest"
+        or _XCODE_TEST_COMPONENT.fullmatch(component) is not None
+        for component in components
+    ):
         return True
     basename = pure.name.casefold()
     return (
         _PYTHON_TEST.fullmatch(basename) is not None
         or _JAVASCRIPT_TEST.fullmatch(basename) is not None
+        or _GO_TEST.fullmatch(basename) is not None
+        or _JVM_TEST.fullmatch(basename) is not None
+        or _DOTNET_TEST.fullmatch(basename) is not None
+        or _RUBY_TEST.fullmatch(basename) is not None
+        or basename.endswith(".bats")
     )
 
 
@@ -127,7 +143,17 @@ def analyze_pull_request_size(
 
 
 def _numstat(root: Path, *, base: str, head: str) -> tuple[tuple[int, int, str, bool], ...]:
-    output = _git(root, "diff", "--numstat", "-z", "--no-renames", f"{base}...{head}", "--")
+    output = _git(
+        root,
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        "-z",
+        "--no-renames",
+        f"{base}...{head}",
+        "--",
+    )
     records: list[tuple[int, int, str, bool]] = []
     for raw_record in output.split(b"\0"):
         if not raw_record:

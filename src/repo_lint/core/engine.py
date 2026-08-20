@@ -205,22 +205,26 @@ def apply_exceptions(
     return tuple(result)
 
 
-def analyze(
+def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a safety boundary
     manifest: Manifest,
     policy: Policy,
     *,
     mode: Mode,
     as_of: date | None = None,
     additional_diagnostics: tuple[Diagnostic, ...] = (),
+    enabled_rule_ids: frozenset[RuleId] | None = None,
 ) -> AnalysisReport:
     if manifest.policy_id != policy.policy_id or manifest.policy_version != policy.policy_version:
         ConfigurationError.fail(
             f"manifest selects {manifest.policy_id}@{manifest.policy_version}; "
             f"installed policy is {policy.policy_id}@{policy.policy_version}"
         )
+    emitted = core_diagnostics(manifest) + policy.evaluate(manifest) + additional_diagnostics
+    if enabled_rule_ids is not None:
+        emitted = tuple(item for item in emitted if item.rule_id in enabled_rule_ids)
     findings = tuple(
         with_fingerprint(item)
-        for item in core_diagnostics(manifest) + policy.evaluate(manifest) + additional_diagnostics
+        for item in emitted
     )
     fingerprints = [item.fingerprint for item in findings]
     if len(fingerprints) != len(set(fingerprints)):

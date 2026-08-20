@@ -20,6 +20,8 @@ import typer
 from repo_lint.catalog import (
     build_catalog,
     catalog_schema,
+    catalog_v2_payload,
+    catalog_v2_schema,
     openapi_report_schema,
     report_schema,
 )
@@ -52,6 +54,7 @@ from repo_lint.core.models import (
 from repo_lint.core.pull_request_size import PullRequestSize, analyze_pull_request_size
 from repo_lint.core.registry import POLICY_API_VERSION, PolicyRegistry
 from repo_lint.core.render import diagnostic_dict, render_text, report_dict
+from repo_lint.core.rule_reviews import approved_rule_ids
 from repo_lint.github import GitHubAnalysisReport, GitHubClient, GitHubResponse
 from repo_lint.github import WorkflowDocument as GitHubWorkflowDocument
 from repo_lint.github import analyze as analyze_github
@@ -103,6 +106,8 @@ _OPENAPI_BASENAMES = frozenset({"openapi.json", "openapi.yaml", "openapi.yml"})
 _MAX_OPENAPI_DOCUMENTS = 100
 _MAX_OPENAPI_TOTAL_BYTES = 20 * 1024 * 1024
 _MAX_GIT_ORIGIN_BYTES = 4_096
+_CATALOG_V2 = 2
+_CATALOG_V3 = 3
 _GITHUB_SLUG = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?/"
     r"[A-Za-z0-9_.-]{1,100}"
@@ -161,6 +166,7 @@ class SchemaDocument(StrEnum):
     REPORT = "report"
     OPENAPI_ANALYSIS = "openapi-analysis"
     CATALOG = "catalog"
+    CATALOG_V2 = "catalog-v2"
 
 
 def _version_callback(value: object) -> None:
@@ -277,7 +283,9 @@ def capabilities_command() -> None:
 
 
 @app.command("catalog")
-def catalog_command() -> None:
+def catalog_command(
+    schema_version: Annotated[int, typer.Option(help="Catalog schema version (2 or 3).")] = 3,
+) -> None:
     """Export the deterministic public product, rule, command, and schema catalog."""
     try:
         payload = build_catalog(app, package_version=_installed_version())
@@ -288,7 +296,19 @@ def catalog_command() -> None:
             str(error),
             remediation="Repair the installed metadata before publishing its public catalog.",
         )
-    typer.echo(canonical_json(payload.model_dump(mode="json")))
+    if schema_version == _CATALOG_V3:
+        document = payload.model_dump(mode="json")
+    elif schema_version == _CATALOG_V2:
+        document = catalog_v2_payload(payload)
+    else:
+        _emit_command_error(
+            "catalog",
+            "catalog.version-unknown",
+            f"unsupported catalog schema version: {schema_version}",
+            phase="request",
+            remediation="Request catalog schema version 2 or 3.",
+        )
+    typer.echo(canonical_json(document))
 
 
 @pull_request_app.command("size")
@@ -378,6 +398,7 @@ def _render_pull_request_size(result: PullRequestSize, *, top_files: int) -> str
     lines = [
         f"Counted review size: {result.counted_lines} lines",
         f"Excluded churn: {result.excluded_lines} lines",
+        f"Total churn: {result.total_lines} lines",
         "Categories: " + ", ".join(f"{name}={value}" for name, value in categories.items()),
     ]
     largest = sorted(
@@ -484,7 +505,8 @@ def github_command(
         }
         typer.echo(_render_github_payload(payload, output_format), nl=False)
         raise typer.Exit(2) from None
-    diagnostics = report.diagnostics
+    enabled = approved_rule_ids()
+    diagnostics = tuple(item for item in report.diagnostics if item.rule_id in enabled)
     payload = {
         **_envelope(
             "github",
@@ -927,6 +949,8 @@ def rest_check_command(
         report = _analyze_rest_snapshot(resolved, identity, spec, semantics)
     except (ConfigurationError, OSError, RequestError) as error:
         _emit_rest_error("rest.check", "rest.analysis-incomplete", str(error), identity)
+    enabled = approved_rule_ids()
+    diagnostics = tuple(item for item in report.diagnostics if RuleId(item.rule_id) in enabled)
     payload = {
         **_envelope(
             "rest.check",
@@ -938,18 +962,18 @@ def rest_check_command(
         "application_code_executed": False,
         "entrypoint": report.entrypoint,
         "openapi_version": report.openapi_version,
-        "diagnostics": [asdict(item) for item in report.diagnostics],
+        "diagnostics": [asdict(item) for item in diagnostics],
         "summary": {
-            "diagnostics": len(report.diagnostics),
-            "errors": sum(item.severity == "error" for item in report.diagnostics),
-            "warnings": sum(item.severity == "warning" for item in report.diagnostics),
+            "diagnostics": len(diagnostics),
+            "errors": sum(item.severity == "error" for item in diagnostics),
+            "warnings": sum(item.severity == "warning" for item in diagnostics),
         },
     }
     typer.echo(canonical_json(payload))
     if report.completion != "complete":
         raise typer.Exit(2)
     if enforcement is RestEnforcement.STRICT and any(
-        item.severity == "error" for item in report.diagnostics
+        item.severity == "error" for item in diagnostics
     ):
         raise typer.Exit(1)
 
@@ -1290,6 +1314,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         mode=mode,
         as_of=_parse_date(as_of),
         additional_diagnostics=migration_diagnostics(snapshot) + github_diagnostics,
+        enabled_rule_ids=approved_rule_ids(),
     )
     report = replace(
         report,
@@ -1712,6 +1737,8 @@ def print_schema(
     match selected:
         case SchemaDocument.CATALOG:
             payload = catalog_schema()
+        case SchemaDocument.CATALOG_V2:
+            payload = catalog_v2_schema()
         case SchemaDocument.OPENAPI_ANALYSIS:
             payload = _openapi_report_schema()
         case SchemaDocument.REPORT:

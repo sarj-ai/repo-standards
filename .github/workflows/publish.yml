@@ -19,7 +19,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
+      build: ${{ steps.version.outputs.build }}
       publish: ${{ steps.version.outputs.publish }}
+      release: ${{ steps.version.outputs.release }}
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Harden the runner
@@ -32,21 +34,31 @@ jobs:
           persist-credentials: false
       - name: Detect registry state
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
           response=$(curl --silent --output /dev/null --write-out '%{http_code}' \
             "https://pypi.org/pypi/sarj-repo-lint/$version/json")
           case "$response" in
-            200) publish=false ;;
-            404) publish=true ;;
+            200) package_exists=true ;;
+            404) package_exists=false ;;
             *) echo "PyPI returned HTTP $response" >&2; exit 1 ;;
           esac
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            release_exists=true
+          else
+            release_exists=false
+          fi
+          if [[ "$package_exists" == true && "$release_exists" == true ]]; then build=false; else build=true; fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "publish=$([[ "$package_exists" == false ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "release=$([[ "$release_exists" == false ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build and verify release
-    if: needs.detect.outputs.publish == 'true'
+    if: needs.detect.outputs.build == 'true'
     needs: [detect]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -132,7 +144,11 @@ jobs:
 
   release:
     name: Create GitHub release
-    if: needs.detect.outputs.publish == 'true'
+    if: >-
+      always() &&
+      needs.detect.outputs.release == 'true' &&
+      needs.build.result == 'success' &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped')
     needs: [detect, build, publish]
     runs-on: ubuntu-24.04
     timeout-minutes: 5

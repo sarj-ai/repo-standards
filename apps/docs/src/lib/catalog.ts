@@ -1,8 +1,12 @@
 import rawCatalogJson from '../generated/catalog.json?raw';
+import rawCatalogV2Json from '../generated/catalog-v2.json?raw';
 import { generatedCatalog } from '../generated/catalog.generated';
+import { generatedCatalogV2 } from '../generated/catalog-v2.generated';
 
 export const catalog = generatedCatalog;
 export const catalogJson = rawCatalogJson;
+export const catalogV2Json = rawCatalogV2Json;
+export const catalogV2 = generatedCatalogV2;
 export type Catalog = typeof catalog;
 export type Rule = Catalog['rules'][number];
 export type Category = Catalog['categories'][number];
@@ -63,6 +67,14 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
     };
   });
 
+function hasReviewStatus(rule: { readonly review: { readonly status: string } }, status: string): boolean {
+  return rule.review.status === status;
+}
+
+export const approvedRules = catalog.rules.filter((rule) => hasReviewStatus(rule, 'approved'));
+export const pendingRules = catalog.rules.filter((rule) => hasReviewStatus(rule, 'pending'));
+const approvedRuleIds = new Set(approvedRules.map((rule) => rule.rule_id));
+
 export function rulePage(rule: Rule) {
   const categoryValue = referenceCatalog.find((item) => item.category.category_id === rule.category_id);
   const topicValue = categoryValue?.topics.find((item) => item.topic.topic_id === rule.topic_id);
@@ -85,11 +97,14 @@ export function referenceSidebar() {
     {
       label: 'Rules',
       items: [
-        { label: `All rules (${String(catalog.rules.length)})`, link: '/rules/' },
-        ...referenceCatalog.map((value) => ({
-          label: value.category.label,
-          link: categoryHref(value.category.category_id),
-        })),
+        { label: `Approved (${String(approvedRules.length)})`, link: '/rules/' },
+        { label: `Review (${String(pendingRules.length)})`, link: '/review/' },
+        ...referenceCatalog
+          .filter((value) => value.topics.some((topic) => topic.rules.some(({ rule }) => approvedRuleIds.has(rule.rule_id))))
+          .map((value) => ({
+            label: value.category.label,
+            link: categoryHref(value.category.category_id),
+          })),
       ],
     },
     { label: 'CLI', link: '/cli/' },

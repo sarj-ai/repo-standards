@@ -15,11 +15,7 @@ function parameterDetails(parameter: Parameter): string {
 ---
 
 <ReferencePage title="CLI" description={`${catalog.commands.length} cataloged commands.`}>
-  <header class="section-heading">
-    <p class="eyebrow">{catalog.product.executables.join(' · ')}</p>
-    <h1>CLI</h1>
-    <p class="lede">{catalog.commands.length} cataloged commands</p>
-  </header>
+  <h1 class="sr-only">CLI</h1>
   <nav class="command-index" aria-label="Commands">
     {catalog.commands.map((command) => <a href={`#${command.command_id}`}>{command.path.join(' ')}</a>)}
   </nav>

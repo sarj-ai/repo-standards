@@ -1,7 +1,7 @@
 [project]
 name = "sarj-repo-lint"
-version = "0.6.0"
-description = "Deterministic repository architecture, migration, and API contract linter"
+version = "0.7.0"
+description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
 license-files = ["LICENSE"]
