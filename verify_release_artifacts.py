@@ -52,7 +52,6 @@ SITE_SUFFIXES = frozenset(
         ".xml",
     }
 )
-PAGEFIND_SUFFIXES = frozenset({".pagefind", ".pf_fragment", ".pf_index", ".pf_meta"})
 REQUIRED_SITE_FILES = frozenset(
     {
         "api/v6/catalog.json",
@@ -318,14 +317,11 @@ def verify_site(directory: Path) -> list[str]:
         if path.is_symlink() or not path.is_file():
             violations.append(f"site:{artifact_path}: links are not publishable")
             continue
-        allowed_pagefind_artifact = (
-            artifact_path.parts[0] == "pagefind"
-            and artifact_path.suffix.casefold() in PAGEFIND_SUFFIXES
-        )
+        if artifact_path.parts[0] == "pagefind":
+            violations.append(f"site:{artifact_path}: search artifacts are not publishable")
         if (
             artifact_path.name != "_headers"
             and artifact_path.suffix.casefold() not in SITE_SUFFIXES
-            and not allowed_pagefind_artifact
         ):
             violations.append(f"site:{artifact_path}: unexpected static-site file type")
         if artifact_path.name.casefold().endswith(".map"):
@@ -333,7 +329,7 @@ def verify_site(directory: Path) -> list[str]:
         content = path.read_bytes()
         display_name = f"site:{artifact_path}"
         violations.extend(_scan_identity(display_name, content))
-        if artifact_path.parts[0] not in {"_astro", "pagefind"}:
+        if artifact_path.parts[0] != "_astro":
             violations.extend(_scan_emails(display_name, content))
     violations.extend(
         f"site:{name}: required generated file is missing"

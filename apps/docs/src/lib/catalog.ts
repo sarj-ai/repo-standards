@@ -13,7 +13,6 @@ export type Parameter = Command['options'][number] | Command['arguments'][number
 export interface RuleView {
   readonly rule: Rule;
   readonly href: string;
-  readonly searchText: string;
   readonly category: string;
 }
 
@@ -49,7 +48,6 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
             rule,
             href: ruleHref(rule),
             category: categoryValue.label,
-            searchText: `${rule.slug} ${rule.title} ${rule.summary} ${rule.rule_id} ${categoryValue.label} ${topicValue.label} ${rule.tags.join(' ')}`.toLocaleLowerCase('en'),
           }));
         if (rules.length === 0) throw new TypeError(`Rule topic has no rules: ${topicValue.topic_id}`);
         return { topic: topicValue, rules };

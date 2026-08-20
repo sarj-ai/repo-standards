@@ -8,20 +8,16 @@ interface Props {
 }
 
 const { rows, mode } = Astro.props;
-const inputId = `rule-search-${mode}`;
 ---
 
-<div class="rule-directory" data-rule-directory>
+<div class="rule-directory">
   <div class="directory-toolbar">
-    <label class="sr-only" for={inputId}>Filter rules</label>
-    <input id={inputId} type="search" autocomplete="off" placeholder="Filter rules…" data-rule-search />
-    <span class="directory-status" role="status" aria-live="polite"><span data-result-count>{rows.length}</span> {mode === 'review' ? 'pending' : 'approved'}</span>
+    <span class="directory-status">{rows.length} {mode === 'review' ? 'pending' : 'approved'}</span>
   </div>
-  <p class="directory-empty" data-empty hidden>No matching rules.</p>
   <ul class="rule-table">
-    {rows.map(({ rule, href, searchText, category }) => (
+    {rows.map(({ rule, href, category }) => (
       <li>
-        <a class="rule-row" href={href} data-rule-id={rule.rule_id} data-search={searchText}>
+        <a class="rule-row" href={href} data-rule-id={rule.rule_id}>
           <RuleTypeMark categoryId={rule.category_id} label={category} />
           <span class="rule-row__main">
             <strong>{rule.title}</strong>
@@ -34,23 +30,3 @@ const inputId = `rule-search-${mode}`;
     ))}
   </ul>
 </div>
-
-<script>
-  for (const directory of document.querySelectorAll<HTMLElement>('[data-rule-directory]')) {
-    const input = directory.querySelector<HTMLInputElement>('[data-rule-search]');
-    const count = directory.querySelector<HTMLElement>('[data-result-count]');
-    const empty = directory.querySelector<HTMLElement>('[data-empty]');
-    const rows = [...directory.querySelectorAll<HTMLElement>('[data-rule-id]')];
-    input?.addEventListener('input', () => {
-      const query = input.value.trim().toLocaleLowerCase('en');
-      let visible = 0;
-      for (const row of rows) {
-        const matches = query === '' || (row.dataset.search ?? '').includes(query);
-        row.hidden = !matches;
-        if (matches) visible += 1;
-      }
-      if (count) count.textContent = String(visible);
-      if (empty) empty.hidden = visible !== 0;
-    });
-  }
-</script>

@@ -1,5 +1,6 @@
 ---
 import { Code } from '@astrojs/starlight/components';
+import RulePager from '@sarj/docs-ui/RulePager.astro';
 
 import ReferencePage from '../../components/ReferencePage.astro';
 import RuleTypeMark from '../../components/RuleTypeMark.astro';
@@ -35,7 +36,6 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
 <ReferencePage
   title={rule.slug}
   description={rule.summary}
-  pagefind={rule.review.status !== 'pending'}
   noindex={rule.review.status === 'pending'}
 >
   <article
@@ -55,37 +55,15 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
           <span aria-hidden="true">·</span>
           <span class="rule-breadcrumb__topic">{topic.topic.label}</span>
         </nav>
-        <nav class="rule-stepper" aria-label="Rule navigation" data-pagefind-ignore>
-          {previous && (
-            <a
-              href={previous.href}
-              rel="prev"
-              data-rule-previous
-              aria-keyshortcuts="ArrowLeft"
-              aria-label={`Previous rule: ${previous.rule.slug}`}
-              title={previous.rule.slug}
-            >
-              <kbd aria-hidden="true">←</kbd><span class="rule-stepper__label">Previous</span>
-            </a>
-          )}
-          {next && (
-            <a
-              href={next.href}
-              rel="next"
-              data-rule-next
-              aria-keyshortcuts="ArrowRight"
-              aria-label={`Next rule: ${next.rule.slug}`}
-              title={next.rule.slug}
-            >
-              <span class="rule-stepper__label">Next</span><kbd aria-hidden="true">→</kbd>
-            </a>
-          )}
-        </nav>
+        <RulePager
+          previous={previous ? { href: previous.href, label: previous.rule.slug } : null}
+          next={next ? { href: next.href, label: next.rule.slug } : null}
+        />
       </div>
 
       <h1>{rule.slug}</h1>
       <p class="lede" data-rule-summary>{rule.summary}</p>
-      <div class="rule-header-links" aria-label="Rule links" data-pagefind-ignore>
+      <div class="rule-header-links" aria-label="Rule links">
         <code>{rule.rule_id}</code>
         <a href={sourceUrl}>Rule source</a>
         <a href={ruleJsonUrl}>Rule JSON</a>
@@ -132,22 +110,3 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
     )}
   </article>
 </ReferencePage>
-
-<script>
-  document.addEventListener('keydown', (event) => {
-    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    const target = event.target;
-    if (target instanceof Element && target.closest('a, button, input, select, textarea, summary, [contenteditable]')) return;
-    const selector = event.key === 'ArrowLeft'
-      ? '[data-rule-previous]'
-      : event.key === 'ArrowRight'
-        ? '[data-rule-next]'
-        : null;
-    if (!selector) return;
-    const link = document.querySelector(selector);
-    if (link instanceof HTMLAnchorElement) {
-      event.preventDefault();
-      location.assign(link.href);
-    }
-  });
-</script>
