@@ -21,7 +21,6 @@ jobs:
     outputs:
       build: ${{ steps.version.outputs.build }}
       publish_primary: ${{ steps.version.outputs.publish_primary }}
-      publish_compat: ${{ steps.version.outputs.publish_compat }}
       release: ${{ steps.version.outputs.release }}
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -41,32 +40,23 @@ jobs:
           version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
           primary_response=$(curl --silent --output /dev/null --write-out '%{http_code}' \
             "https://pypi.org/pypi/repo-standards/$version/json")
-          compat_response=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            "https://pypi.org/pypi/sarj-repo-lint/$version/json")
           case "$primary_response" in
             200) primary_exists=true ;;
             404) primary_exists=false ;;
             *) echo "PyPI repo-standards returned HTTP $primary_response" >&2; exit 1 ;;
-          esac
-          case "$compat_response" in
-            200) compat_exists=true ;;
-            404) compat_exists=false ;;
-            *) echo "PyPI sarj-repo-lint returned HTTP $compat_response" >&2; exit 1 ;;
           esac
           if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             release_exists=true
           else
             release_exists=false
           fi
-          if [[ "$primary_exists" == true && "$compat_exists" == true && "$release_exists" == true ]]; then build=false; else build=true; fi
+          if [[ "$primary_exists" == true && "$release_exists" == true ]]; then build=false; else build=true; fi
           if [[ "$primary_exists" == false ]]; then publish_primary=true; else publish_primary=false; fi
-          if [[ "$compat_exists" == false ]]; then publish_compat=true; else publish_compat=false; fi
           if [[ "$release_exists" == false ]]; then release=true; else release=false; fi
           {
             echo "version=$version"
             echo "build=$build"
             echo "publish_primary=$publish_primary"
-            echo "publish_compat=$publish_compat"
             echo "release=$release"
           } >> "$GITHUB_OUTPUT"
 
@@ -100,28 +90,22 @@ jobs:
           uv run ruff check .
           uv run basedpyright
       - name: Build publishable artifacts
-        run: |
-          uv build --no-sources --out-dir dist/packages/repo-standards
-          uv build --project compat/sarj-repo-lint --out-dir dist/packages/sarj-repo-lint
+        run: uv build --no-sources --out-dir dist/packages/repo-standards
       - name: Verify public distribution boundary
         run: >-
           uv run --frozen python verify_release_artifacts.py
           --distributions dist/packages/repo-standards
-          --compatibility-distributions dist/packages/sarj-repo-lint
       - name: Verify installed wheel and source distribution
         env:
           RELEASE_VERSION: ${{ needs.detect.outputs.version }}
           SMOKE_ROOT: ${{ runner.temp }}/smoke
         run: |
-          test "$(find dist/packages -mindepth 2 -maxdepth 2 -name '*.whl' | wc -l)" -eq 2
-          test "$(find dist/packages -mindepth 2 -maxdepth 2 -name '*.tar.gz' | wc -l)" -eq 2
+          test "$(find dist/packages -mindepth 2 -maxdepth 2 -name '*.whl' | wc -l)" -eq 1
+          test "$(find dist/packages -mindepth 2 -maxdepth 2 -name '*.tar.gz' | wc -l)" -eq 1
           uv venv --python 3.14 "$SMOKE_ROOT/wheel"
           uv pip install --python "$SMOKE_ROOT/wheel/bin/python" \
-            --find-links dist/packages/repo-standards \
-            dist/packages/sarj-repo-lint/sarj_repo_lint-*.whl
+            dist/packages/repo-standards/repo_standards-*.whl
           "$SMOKE_ROOT/wheel/bin/repo-standards" --version | grep -Fx "$RELEASE_VERSION"
-          "$SMOKE_ROOT/wheel/bin/repo-lint" --version | grep -Fx "$RELEASE_VERSION"
-          "$SMOKE_ROOT/wheel/bin/sarj-repo-lint" --help >/dev/null
           "$SMOKE_ROOT/wheel/bin/python" -c 'import repo_lint, repo_lint.core, repo_lint.github, repo_lint.openapi, repo_lint.policy_sarj, repo_lint.rest'
           uv venv --python 3.14 "$SMOKE_ROOT/sdist"
           uv pip install --python "$SMOKE_ROOT/sdist/bin/python" \
@@ -165,43 +149,14 @@ jobs:
         with:
           packages-dir: dist/packages/repo-standards
 
-  publish_compat:
-    name: Publish sarj-repo-lint bridge to PyPI
-    if: needs.detect.outputs.publish_compat == 'true'
-    needs: [detect, build]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    environment: pypi-release
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Harden the runner
-        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
-        with:
-          egress-policy: audit
-      - name: Download verified artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: release-${{ needs.detect.outputs.version }}
-          path: dist
-      - name: Verify artifact checksums
-        working-directory: dist
-        run: sha256sum --check SHA256SUMS
-      - name: Publish compatibility bridge with trusted identity
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          packages-dir: dist/packages/sarj-repo-lint
-
   release:
     name: Create GitHub release
     if: >-
       always() &&
       needs.detect.outputs.release == 'true' &&
       needs.build.result == 'success' &&
-      (needs.publish_primary.result == 'success' || needs.publish_primary.result == 'skipped') &&
-      (needs.publish_compat.result == 'success' || needs.publish_compat.result == 'skipped')
-    needs: [detect, build, publish_primary, publish_compat]
+      (needs.publish_primary.result == 'success' || needs.publish_primary.result == 'skipped')
+    needs: [detect, build, publish_primary]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

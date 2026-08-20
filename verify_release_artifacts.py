@@ -34,9 +34,7 @@ PERSONAL_HOME_PATH = re.compile(
     re.IGNORECASE,
 )
 INLINE_SCRIPT: re.Pattern[bytes] = re.compile(rb"<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)</script>")
-ALLOWED_REPOSITORIES = frozenset(
-    {b"repo-standards", b"sarj-repo-lint", b"code-standards", b"standards"}
-)
+ALLOWED_REPOSITORIES = frozenset({b"repo-standards", b"code-standards", b"standards"})
 ALLOWED_EMAILS = frozenset({b"api.github.com@evil.example", b"git@github.com", b"token@github.com"})
 SITE_SUFFIXES = frozenset(
     {
@@ -245,9 +243,6 @@ def _metadata_values(content: bytes) -> dict[str, list[str]]:
 
 def verify_distributions(
     directory: Path,
-    *,
-    module_name: str = "repo_lint",
-    compatibility_bridge: bool = False,
 ) -> list[str]:
     wheels = tuple(directory.glob("*.whl"))
     sdists = tuple(directory.glob("*.tar.gz"))
@@ -260,8 +255,7 @@ def verify_distributions(
     allowed_wheel_names = {
         name
         for name in wheel_names
-        if name.startswith(f"{module_name}/")
-        and (name.endswith(".py") or name == f"{module_name}/py.typed")
+        if name.startswith("repo_lint/") and (name.endswith(".py") or name == "repo_lint/py.typed")
     }
     allowed_wheel_names.update(
         f"{wheel_metadata.dist_info}/{name}" for name in WHEEL_METADATA_FILES
@@ -277,8 +271,6 @@ def verify_distributions(
             f"{wheel_metadata.dist_info}/licenses/LICENSE",
         )
     )
-    if compatibility_bridge:
-        violations.extend(_verify_compatibility_dependency(wheel_metadata.values))
     violations.extend(_verify_common(wheel_members, wheels[0].name))
 
     sdist_members = _sdist_members(sdists[0])
@@ -291,8 +283,8 @@ def verify_distributions(
     allowed_sdist_names = {
         name
         for name in sdist_names
-        if name.startswith(f"{sdist_root}/src/{module_name}/")
-        and (name.endswith(".py") or name == f"{sdist_root}/src/{module_name}/py.typed")
+        if name.startswith(f"{sdist_root}/src/repo_lint/")
+        and (name.endswith(".py") or name == f"{sdist_root}/src/repo_lint/py.typed")
     }
     allowed_sdist_names.update(f"{sdist_root}/{name}" for name in SDIST_ROOT_FILES)
     violations.extend(
@@ -307,20 +299,8 @@ def verify_distributions(
     else:
         sdist_metadata = _metadata_values(package_info)
         violations.extend(_verify_license(sdist_metadata, sdist_names, f"{sdist_root}/LICENSE"))
-        if compatibility_bridge:
-            violations.extend(_verify_compatibility_dependency(sdist_metadata))
     violations.extend(_verify_common(sdist_members, sdists[0].name))
     return violations
-
-
-def _verify_compatibility_dependency(metadata: dict[str, list[str]]) -> list[str]:
-    versions = metadata.get("Version", [])
-    if len(versions) != 1:
-        return ["compatibility bridge must declare exactly one version"]
-    expected = f"repo-standards=={versions[0]}"
-    if metadata.get("Requires-Dist") != [expected]:
-        return [f"compatibility bridge must depend exactly on {expected}"]
-    return []
 
 
 def verify_site(directory: Path) -> list[str]:
@@ -386,9 +366,7 @@ def verify_site_catalog(directory: Path, observed: set[str]) -> list[str]:
     try:
         _validate_schema(Draft202012Validator(schema_document), catalog_document)
     except JsonSchemaValidationError as error:
-        violations.append(
-            f"site:api/v4/catalog.json: schema validation failed: {error.message}"
-        )
+        violations.append(f"site:api/v4/catalog.json: schema validation failed: {error.message}")
     embedded = next(
         (
             descriptor.document
@@ -565,29 +543,17 @@ def main(
         Path | None,
         typer.Option(help="Directory containing one wheel and one source distribution."),
     ] = None,
-    compatibility_distributions: Annotated[
-        Path | None,
-        typer.Option(help="Directory containing the legacy compatibility wheel and sdist."),
-    ] = None,
     site: Annotated[
         Path | None,
         typer.Option(help="Generated static-site directory."),
     ] = None,
 ) -> None:
-    if distributions is None and compatibility_distributions is None and site is None:
+    if distributions is None and site is None:
         typer.echo("at least one artifact path is required", err=True)
         raise typer.Exit(code=2)
     violations: list[str] = []
     if distributions is not None:
         violations.extend(verify_distributions(distributions))
-    if compatibility_distributions is not None:
-        violations.extend(
-            verify_distributions(
-                compatibility_distributions,
-                module_name="sarj_repo_lint_compat",
-                compatibility_bridge=True,
-            )
-        )
     if site is not None:
         violations.extend(verify_site(site))
     if violations:

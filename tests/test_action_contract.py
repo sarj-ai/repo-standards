@@ -20,14 +20,10 @@ def test_public_action_is_pull_request_size_only() -> None:
         "base",
         "head",
         "generated-attribute",
-        "operation",
-        "policy",
-        "mode",
-        "format",
     }
     assert source.count("repo-standards pull-request size") == 1
     assert "repo-lint check" not in source
-    assert "Repository lint rules are disabled pending review" in source
+    assert "Validate compatibility inputs" not in source
     assert "github.event.pull_request.base.sha" in source
     assert "github.event.pull_request.head.sha" in source
 

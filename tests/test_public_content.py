@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import tomllib
 
 from pydantic import TypeAdapter
+import yaml
 
 from repo_lint.core.models import JSONValue
 
@@ -17,9 +19,7 @@ PERSONAL_HOME_PATH = re.compile(
     rf"(?:/{'Users'}/|/{'home'}/|[A-Z]:\\\\{'Users'}\\\\)[a-z0-9._-]+",
     re.IGNORECASE,
 )
-ALLOWED_REPOSITORIES = frozenset(
-    {"repo-standards", "sarj-repo-lint", "code-standards", "standards"}
-)
+ALLOWED_REPOSITORIES = frozenset({"repo-standards", "code-standards", "standards"})
 ALLOWED_URL_USERINFO = frozenset(
     {"api.github.com@evil.example", "git@github.com", "token@github.com"}
 )
@@ -38,6 +38,28 @@ EXCLUDED_DIRECTORIES = frozenset(
     }
 )
 JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
+OBJECT_MAP = TypeAdapter(dict[str, object])
+STRING_MAP = TypeAdapter(dict[str, str])
+
+
+def test_public_distribution_has_no_legacy_compatibility_surface() -> None:
+    project_document = OBJECT_MAP.validate_python(
+        tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")),
+        strict=True,
+    )
+    project = OBJECT_MAP.validate_python(project_document["project"], strict=True)
+    scripts = STRING_MAP.validate_python(project["scripts"], strict=True)
+    assert scripts == {"repo-standards": "repo_lint.cli:main"}
+    assert not any(path.is_file() for path in (REPOSITORY_ROOT / "compat").rglob("*"))
+    publish_document = OBJECT_MAP.validate_python(
+        yaml.load(
+            (REPOSITORY_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8"),
+            Loader=yaml.BaseLoader,
+        ),
+        strict=True,
+    )
+    jobs = OBJECT_MAP.validate_python(publish_document["jobs"], strict=True)
+    assert "publish_compat" not in jobs
 
 
 def _public_files() -> tuple[Path, ...]:
