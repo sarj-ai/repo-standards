@@ -48,7 +48,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: sarj-ai/repo-standards@b759bb55775fd16729995e024ad4b4538d7c8c85 # v3.0.0
+      - uses: sarj-ai/repo-standards@51a3e338cf509f1523c6b812b1ddd27de5c3b46f # v3.0.1
 ```
 
 The Action emits counted, excluded, and total line counts plus canonical JSON. Tests are
