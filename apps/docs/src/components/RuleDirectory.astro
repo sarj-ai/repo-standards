@@ -1,0 +1,52 @@
+---
+import type { RuleView } from '../lib/catalog';
+
+interface Props {
+  rows: readonly RuleView[];
+  mode: 'approved' | 'review';
+}
+
+const { rows, mode } = Astro.props;
+const inputId = `rule-search-${mode}`;
+---
+
+<div class="rule-directory" data-rule-directory>
+  <div class="directory-toolbar">
+    <label for={inputId}>Filter</label>
+    <input id={inputId} type="search" autocomplete="off" placeholder="Name, description, or rule ID" data-rule-search />
+    <span class="directory-status" role="status" aria-live="polite"><span data-result-count>{rows.length}</span> {mode === 'review' ? 'pending' : 'approved'}</span>
+  </div>
+  <p class="directory-empty" data-empty hidden>No matching rules.</p>
+  <div class="rule-table" role="list">
+    {rows.map(({ rule, href, searchText }) => (
+      <a class="rule-row" role="listitem" href={href} data-rule-id={rule.rule_id} data-search={searchText}>
+        <span class="rule-row__main">
+          <strong>{rule.title}</strong>
+          <span>{rule.summary}</span>
+        </span>
+        <code>{rule.rule_id}</code>
+        <span class:list={['review-state', `review-state--${rule.review.status}`]}>{rule.review.status}</span>
+      </a>
+    ))}
+  </div>
+</div>
+
+<script>
+  for (const directory of document.querySelectorAll<HTMLElement>('[data-rule-directory]')) {
+    const input = directory.querySelector<HTMLInputElement>('[data-rule-search]');
+    const count = directory.querySelector<HTMLElement>('[data-result-count]');
+    const empty = directory.querySelector<HTMLElement>('[data-empty]');
+    const rows = [...directory.querySelectorAll<HTMLElement>('[data-rule-id]')];
+    input?.addEventListener('input', () => {
+      const query = input.value.trim().toLocaleLowerCase('en');
+      let visible = 0;
+      for (const row of rows) {
+        const matches = query === '' || (row.dataset.search ?? '').includes(query);
+        row.hidden = !matches;
+        if (matches) visible += 1;
+      }
+      if (count) count.textContent = String(visible);
+      if (empty) empty.hidden = visible !== 0;
+    });
+  }
+</script>

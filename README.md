@@ -1,84 +1,63 @@
 # sarj-repo-lint
 
-`sarj-repo-lint` performs deterministic, read-only analysis of repository architecture,
-API contracts, delivery policy, and pull-request size. It inspects committed data without
-executing or modifying the repository under review.
+`sarj-repo-lint` measures pull-request review size without executing repository code. Its
+repository rules are available for review but remain disabled until individually approved
+and explicitly activated by a consumer.
 
 ## Run it
 
 Use the current release without installing it:
 
 ```bash
-uvx sarj-repo-lint github . --format text
-uvx sarj-repo-lint pull-request size . --base origin/main
+uvx --from sarj-repo-lint repo-lint pull-request size . --base origin/main
 ```
 
 For a reproducible repository dependency, let uv record the resolved version:
 
 ```bash
-uv add --dev sarj-repo-lint
-uv run --frozen repo-lint github . --format text
+uv tool install sarj-repo-lint
+repo-lint pull-request size . --base origin/main
 ```
 
-The installed package provides both `repo-lint` and `sarj-repo-lint`. Run
-`repo-lint capabilities` for the machine-readable feature contract, `repo-lint rules` for
-the installed rule catalog, and `repo-lint --version` for the resolved release.
+Upgrade with `uv tool upgrade sarj-repo-lint`. Automation should pin the package version or
+the GitHub Action's full commit SHA.
 
 ## GitHub Action
 
-Organization repositories can run the exact source pinned by a full commit SHA. Private
-consumers must first be granted access under the action repository settings.
+The Action measures size only. It enables no repository lint rules and needs no inputs on a
+`pull_request` event.
 
 ```yaml
-name: Repository policy
+name: Pull-request size
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
-  repository-policy:
+  size:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: sarj-ai/sarj-repo-lint@<full-commit-sha>
-        with:
-          root: .
-          policy: sarj
-          mode: ratchet
+      - uses: sarj-ai/sarj-repo-lint@<full-commit-sha> # v0.7.0
 ```
 
-Pull-request sizing uses the same action and emits counted, excluded, and total line counts
-plus the canonical JSON report:
-
-```yaml
-- name: Calculate review size
-  id: size
-  uses: sarj-ai/sarj-repo-lint@<full-commit-sha>
-  with:
-    operation: pull-request-size
-    root: .
-    base: ${{ github.event.pull_request.base.sha }}
-    head: ${{ github.event.pull_request.head.sha }}
-- run: echo '${{ steps.size.outputs.counted-lines }} review lines'
-```
-
-Tests are recognized by conventional Python and JavaScript/TypeScript paths. Mark exact
-generated or machine-owned artifacts in the trusted base revision:
+The Action emits counted, excluded, and total line counts plus canonical JSON. Tests are
+recognized across Python, JavaScript/TypeScript, Go, JVM, Android, Xcode/Swift, .NET, Ruby,
+and Bats conventions. Mark generated or machine-owned artifacts in the trusted base revision:
 
 ```gitattributes
 path/to/generated/** pr-size-excluded
 ```
 
-The size report classifies all changed lines and lists the largest counted files. Thresholds,
-labels, comments, and approval requirements remain consumer policy.
+Thresholds, labels, comments, and approval requirements remain consumer policy. Use
+`pull_request`, never `pull_request_target`; this metric is not a security gate.
 
 ## Live GitHub evidence
 
@@ -127,6 +106,5 @@ Build the same wheel and source distribution used by publishing:
 uv build --no-sources
 ```
 
-Releases are atomic. Update the root manifest with `uv version`, merge the reviewed change to
-`main`, and the protected publish workflow builds and verifies both artifacts, publishes them
-through PyPI Trusted Publishing, then creates the matching GitHub Release.
+Releases are reconcilable. The protected workflow independently repairs a missing PyPI
+publication or GitHub Release from the same verified source revision.

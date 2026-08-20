@@ -10,7 +10,12 @@ from jsonschema import Draft202012Validator, validate
 from pydantic import TypeAdapter
 from typer.testing import CliRunner
 
-from repo_lint.catalog import build_catalog, catalog_schema
+from repo_lint.catalog import (
+    build_catalog,
+    catalog_schema,
+    catalog_v2_payload,
+    catalog_v2_schema,
+)
 from repo_lint.cli import app
 from repo_lint.core.canonical import canonical_json
 from repo_lint.core.catalog import core_rules
@@ -58,7 +63,39 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
 
-    assert catalog.schema_version == 2
+    assert catalog.schema_version == 3
+    assert {rule.review.status for rule in catalog.rules} == {"pending"}
+    assert rule_ids == sorted(expected_rule_ids)
+    assert len(rule_ids) == len(set(rule_ids)) == 43
+    assert {
+        binding.default_activation
+        for policy in catalog.policies
+        for binding in policy.bindings
+    } == {"disabled"}
+
+
+def test_catalog_v2_projection_remains_strict_and_review_free() -> None:
+    catalog = build_catalog(app, package_version="9.8.7")
+    registry = PolicyRegistry.from_installed()
+    expected_rule_ids = {str(rule.rule_id) for rule in core_rules()}
+    expected_rule_ids.update(
+        str(rule.rule_id) for policy in registry.policies for rule in policy.rules()
+    )
+    expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
+    rule_ids = [rule.rule_id for rule in catalog.rules]
+    payload = catalog_v2_payload(catalog)
+    validate(instance=payload, schema=catalog_v2_schema())
+    assert payload["schema_version"] == 2
+    provenance = payload["provenance"]
+    assert isinstance(provenance, dict)
+    digest = provenance["content_digest"]
+    assert isinstance(digest, str)
+    provenance["content_digest"] = ""
+    assert digest == sha256(canonical_json(payload).encode()).hexdigest()
+    provenance["content_digest"] = digest
+    rules = payload["rules"]
+    assert isinstance(rules, list)
+    assert all(isinstance(rule, dict) and "review" not in rule for rule in rules)
     assert rule_ids == sorted(expected_rule_ids)
     assert len(rule_ids) == len(set(rule_ids)) == 43
     assert {policy.policy_id for policy in catalog.policies} == {
@@ -160,7 +197,12 @@ def test_catalog_schema_descriptor_versions_match_public_contracts() -> None:
         for descriptor in build_catalog(app, package_version="9.8.7").schemas
     }
 
-    assert versions == {"catalog": 2, "openapi-analysis": 1, "report": 1}
+    assert versions == {
+        "catalog": 3,
+        "catalog-v2": 2,
+        "openapi-analysis": 1,
+        "report": 1,
+    }
 
 
 def test_tombstone_history_does_not_change_with_catalog_version() -> None:

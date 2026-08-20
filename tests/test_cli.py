@@ -242,17 +242,13 @@ def test_report_json_is_one_deterministic_value(tmp_path: Path) -> None:
     assert dirty.stdout == first.stdout
 
 
-def test_report_findings_are_nonblocking(tmp_path: Path) -> None:
+def test_pending_report_findings_are_disabled(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"))
     result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
     report = _json_object(result.stdout)
     assert result.exit_code == 0
-    assert report["conclusion"] == "findings"
-    diagnostics = _object_list(report["diagnostics"])
-    assert diagnostics[0]["rule_id"] == "sarj/layout/component-path"
-    remediation = _object(diagnostics[0]["remediation"])
-    assert remediation["steps"]
-    assert remediation["validation"]
+    assert report["conclusion"] == "passed"
+    assert _object_list(report["diagnostics"]) == []
 
 
 def test_text_diagnostics_do_not_invent_source_coordinates(tmp_path: Path) -> None:
@@ -260,15 +256,15 @@ def test_text_diagnostics_do_not_invent_source_coordinates(tmp_path: Path) -> No
     result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "text"])
     assert result.exit_code == 0
     assert ":1:1:" not in result.stdout
-    assert "anchor=components.alpha.agent.path" in result.stdout
+    assert result.stdout == "repo-lint: passed; 0 errors, 0 warnings\n"
 
 
-def test_strict_errors_block(tmp_path: Path) -> None:
+def test_pending_strict_errors_do_not_block(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"))
     result = runner.invoke(
         app, ["check", str(tmp_path), "--policy", "sarj", "--mode", "strict", "--format", "json"]
     )
-    assert result.exit_code == 1
+    assert result.exit_code == 0
 
 
 def test_strict_operational_layout_guidance_is_nonblocking(tmp_path: Path) -> None:
@@ -288,9 +284,7 @@ path = "iac/alpha"''',
     )
     report = _json_object(result.stdout)
     assert result.exit_code == 0
-    diagnostics = _object_list(report["diagnostics"])
-    assert diagnostics[0]["rule_id"] == "sarj/layout/operational-path"
-    assert diagnostics[0]["severity"] == "warning"
+    assert _object_list(report["diagnostics"]) == []
 
 
 def test_malformed_manifest_is_incomplete(tmp_path: Path) -> None:
@@ -337,11 +331,7 @@ def test_incomplete_report_and_anchor_locations_validate_against_schema(tmp_path
     )
     _commit_changes(tmp_path)
     findings = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
-    diagnostic = _object_list(_json_object(findings.stdout)["diagnostics"])[0]
-    location = _object(diagnostic["location"])
-    assert location["path"] == "python/agent"
-    assert location["manifest_anchor"] == "components.alpha.agent.path"
-    assert "start" not in location
+    assert _object_list(_json_object(findings.stdout)["diagnostics"]) == []
 
 
 def test_neutral_core_contains_no_sarj_policy_vocabulary() -> None:
@@ -424,8 +414,7 @@ def test_github_audit_bootstraps_without_a_repository_manifest(tmp_path: Path) -
     assert result.exit_code == 0
     assert report["command"] == "github"
     assert report["completion"] == "complete"
-    diagnostics = _object_list(report["diagnostics"])
-    assert [item["rule_id"] for item in diagnostics] == ["sarj/github/actions-sha-pinning"]
+    assert _object_list(report["diagnostics"]) == []
 
     workflow.write_text(
         workflow.read_text(encoding="utf-8").replace(
@@ -592,7 +581,7 @@ def test_workflow_analysis_reads_exact_committed_tree(tmp_path: Path) -> None:
     result = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     diagnostics = _object_list(_json_object(result.stdout)["diagnostics"])
     assert result.exit_code == 0
-    assert any(item["rule_id"] == "sarj/github/actions-sha-pinning" for item in diagnostics)
+    assert diagnostics == []
 
 
 def test_rules_are_filterable_and_paginated() -> None:
@@ -752,7 +741,7 @@ def test_rest_check_is_zero_config_and_reads_only_committed_bytes(tmp_path: Path
     validate(instance=payload, schema=_json_object(schema_result.stdout))
 
 
-def test_rest_strict_blocks_objective_http_contradiction(tmp_path: Path) -> None:
+def test_pending_rest_rule_does_not_block(tmp_path: Path) -> None:
     (tmp_path / "openapi.json").write_text(
         json.dumps(
             {
@@ -776,10 +765,9 @@ def test_rest_strict_blocks_objective_http_contradiction(tmp_path: Path) -> None
     _commit_fixture(tmp_path)
     strict = runner.invoke(app, ["rest", "check", str(tmp_path)])
     report = runner.invoke(app, ["rest", "check", str(tmp_path), "--enforcement", "report"])
-    assert strict.exit_code == 1
+    assert strict.exit_code == 0
     assert report.exit_code == 0
-    diagnostic = _object_list(_json_object(strict.stdout)["diagnostics"])[0]
-    assert diagnostic["rule_id"] == "rest/http/forbidden-content"
+    assert _object_list(_json_object(strict.stdout)["diagnostics"]) == []
 
 
 def test_rest_check_reads_only_exact_local_reference_closure(tmp_path: Path) -> None:

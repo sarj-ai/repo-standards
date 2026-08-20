@@ -102,12 +102,6 @@ jobs:
             --policy sarj --format json > "$REPORT_PATH"
           "$SMOKE_ENV/bin/python" -c \
             'import json, os; from importlib.metadata import version; p=json.load(open(os.environ["REPORT_PATH"])); assert p["completion"] == "complete"; assert p["tool"]["version"] == version("sarj-repo-lint")'
-      - name: Smoke-test the consumer action
-        uses: ./
-        with:
-          root: ${{ runner.temp }}/repo-lint-fixture
-          policy: sarj
-          mode: report
       - name: Add consumer action size fixture
         env:
           FIXTURE_ROOT: ${{ runner.temp }}/repo-lint-fixture
@@ -122,7 +116,6 @@ jobs:
         id: size-action
         uses: ./
         with:
-          operation: pull-request-size
           root: ${{ runner.temp }}/repo-lint-fixture
           base: HEAD^
           head: HEAD
@@ -136,10 +129,47 @@ jobs:
           test "$EXCLUDED_LINES" = 1
           test "$TOTAL_LINES" = 2
 
+  docs:
+    name: Build documentation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+      - name: Check out tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.5'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/docs/package-lock.json
+      - name: Install locked toolchains
+        run: |
+          uv sync --locked --python 3.12
+          npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund
+      - name: Verify generated reference
+        env:
+          WORKERS_CI_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          npm --prefix apps/docs run lint
+          npm --prefix apps/docs run build
+          uv run python verify_release_artifacts.py --site apps/docs/dist
+
   gate:
     name: CI / gate
     if: always()
-    needs: [validate, package]
+    needs: [validate, package, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -147,6 +177,8 @@ jobs:
         env:
           VALIDATE_RESULT: ${{ needs.validate.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
         run: |
           test "$VALIDATE_RESULT" = success
           test "$PACKAGE_RESULT" = success
+          test "$DOCS_RESULT" = success

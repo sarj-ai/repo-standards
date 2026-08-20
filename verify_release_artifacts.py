@@ -49,7 +49,15 @@ SITE_SUFFIXES = frozenset(
 )
 PAGEFIND_SUFFIXES = frozenset({".pagefind", ".pf_fragment", ".pf_index", ".pf_meta"})
 REQUIRED_SITE_FILES = frozenset(
-    {"api/v2/catalog.json", "api/v2/catalog.schema.json", "health.json", "index.html"}
+    {
+        "api/v2/catalog.json",
+        "api/v2/catalog.schema.json",
+        "api/v3/catalog.json",
+        "api/v3/catalog.schema.json",
+        "health.json",
+        "index.html",
+        "review/index.html",
+    }
 )
 WHEEL_METADATA_FILES = frozenset(
     {"METADATA", "RECORD", "WHEEL", "entry_points.txt", "licenses/LICENSE"}

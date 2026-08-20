@@ -1,0 +1,19 @@
+---
+import ReferencePage from '../../components/ReferencePage.astro';
+import RuleDirectory from '../../components/RuleDirectory.astro';
+import { pendingRules, referenceCatalog } from '../../lib/catalog';
+
+const pendingIds = new Set(pendingRules.map((rule) => rule.rule_id));
+const rows = referenceCatalog.flatMap((category) => category.topics.flatMap((topic) => topic.rules))
+  .filter(({ rule }) => pendingIds.has(rule.rule_id));
+---
+
+<ReferencePage
+  title="Rule review"
+  description="Rules awaiting individual editorial and executable-case approval."
+  pagefind={false}
+  noindex
+>
+  <h1 class="sr-only">Rule review</h1>
+  <RuleDirectory rows={rows} mode="review" />
+</ReferencePage>

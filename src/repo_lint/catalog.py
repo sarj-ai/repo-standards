@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from enum import Enum, StrEnum
 from hashlib import sha256
 import inspect
@@ -35,6 +36,12 @@ from repo_lint.core.models import (
 )
 from repo_lint.core.registry import POLICY_API_VERSION, PolicyRegistry
 from repo_lint.core.render import output_schema
+from repo_lint.core.rule_reviews import (
+    REQUIRED_RULE_REVIEW_CHECKS,
+    ApprovedRuleReview,
+    ReviewCheck,
+    review_for,
+)
 from repo_lint.core.taxonomy import CATEGORIES
 from repo_lint.openapi import analysis_schema
 from repo_lint.openapi import rules as rest_rules
@@ -47,7 +54,7 @@ if TYPE_CHECKING:
 
 
 _CATALOG_KIND = "repo-lint.catalog"
-_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v2.schema.json"
+_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v3.schema.json"
 _PUBLIC_REFERENCE_HOSTS = frozenset(
     {
         "docs.github.com",
@@ -152,6 +159,31 @@ class RemediationDescriptor(CatalogModel):
     validation: Annotated[tuple[NonEmptyText, ...], Field(min_length=1)]
 
 
+class PendingRuleReviewDescriptor(CatalogModel):
+    status: Literal["pending"] = "pending"
+    completed_checks: tuple[ReviewCheck, ...] = ()
+    reviewed_in: None = None
+
+
+class ApprovedRuleReviewDescriptor(CatalogModel):
+    status: Literal["approved"] = "approved"
+    completed_checks: tuple[ReviewCheck, ...]
+    reviewed_in: NonEmptyText
+
+    @model_validator(mode="after")
+    def validate_complete(self) -> Self:
+        if self.completed_checks != REQUIRED_RULE_REVIEW_CHECKS:
+            message = "approved rules require every canonical review check"
+            raise ValueError(message)
+        return self
+
+
+RuleReviewDescriptor = Annotated[
+    PendingRuleReviewDescriptor | ApprovedRuleReviewDescriptor,
+    Field(discriminator="status"),
+]
+
+
 class TopicDescriptor(CatalogModel):
     topic_id: RuleTopicId
     label: str
@@ -186,6 +218,7 @@ class RuleDescriptor(CatalogModel):
     examples: Annotated[tuple[ExampleDescriptor, ...], Field(min_length=1)]
     false_positive_controls: tuple[str, ...]
     source: SourcePointer
+    review: RuleReviewDescriptor
 
     @model_validator(mode="after")
     def validate_clarity(self) -> Self:
@@ -228,6 +261,8 @@ class PolicyRuleBinding(CatalogModel):
     classification: str | None = None
     evidence_level: str | None = None
     precedence: int | None = None
+    review_status: Literal["pending", "approved"]
+    default_activation: Literal["disabled"] = "disabled"
 
 
 class PolicyDescriptor(CatalogModel):
@@ -281,7 +316,7 @@ class TombstoneDescriptor(CatalogModel):
 
 class Catalog(CatalogModel):
     kind: Literal["repo-lint.catalog"] = _CATALOG_KIND
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     catalog_version: str
     product: ProductDescriptor
     provenance: ProvenanceDescriptor
@@ -413,6 +448,80 @@ def catalog_schema() -> dict[str, JSONValue]:
     schema = _JSON_OBJECT.validate_python(Catalog.model_json_schema(), strict=True)
     schema["$id"] = _CATALOG_SCHEMA_ID
     return schema
+
+
+def catalog_v2_payload(catalog: Catalog) -> dict[str, JSONValue]:
+    payload = _JSON_OBJECT.validate_python(catalog.model_dump(mode="json"), strict=True)
+    payload["schema_version"] = 2
+    _remove_payload_fields(payload.get("rules"), ("review",))
+    policies = payload.get("policies")
+    if isinstance(policies, list):
+        for policy in policies:
+            if isinstance(policy, dict):
+                _remove_payload_fields(
+                    policy.get("bindings"),
+                    ("review_status", "default_activation"),
+                )
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, dict):
+        message = "catalog provenance is missing"
+        raise TypeError(message)
+    provenance["content_digest"] = ""
+    provenance["content_digest"] = sha256(canonical_json(payload).encode()).hexdigest()
+    return payload
+
+
+def _remove_payload_fields(value: JSONValue | None, fields: tuple[str, ...]) -> None:
+    if not isinstance(value, list):
+        return
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        for field in fields:
+            item.pop(field, None)
+
+
+def catalog_v2_schema() -> dict[str, JSONValue]:
+    schema = deepcopy(catalog_schema())
+    schema["$id"] = "https://repo-standards.sarj.ai/schema/catalog-v2.schema.json"
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        message = "catalog schema definitions are missing"
+        raise TypeError(message)
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        message = "catalog schema properties are missing"
+        raise TypeError(message)
+    properties["schema_version"] = {
+        "const": 2,
+        "default": 2,
+        "title": "Schema Version",
+        "type": "integer",
+    }
+    _remove_schema_fields(definitions, "RuleDescriptor", ("review",))
+    _remove_schema_fields(
+        definitions,
+        "PolicyRuleBinding",
+        ("review_status", "default_activation"),
+    )
+    return _JSON_OBJECT.validate_python(schema, strict=True)
+
+
+def _remove_schema_fields(
+    definitions: dict[str, JSONValue], definition_name: str, fields: tuple[str, ...]
+) -> None:
+    definition = definitions.get(definition_name)
+    if not isinstance(definition, dict):
+        message = f"catalog schema definition is missing: {definition_name}"
+        raise TypeError(message)
+    properties = definition.get("properties")
+    required = definition.get("required")
+    if not isinstance(properties, dict) or not isinstance(required, list):
+        message = f"catalog schema definition is malformed: {definition_name}"
+        raise TypeError(message)
+    for field in fields:
+        properties.pop(field, None)
+    definition["required"] = [item for item in required if item not in fields]
 
 
 def report_schema() -> dict[str, JSONValue]:
@@ -561,6 +670,7 @@ def _policies(registry: PolicyRegistry) -> tuple[PolicyDescriptor, ...]:
         bindings: list[PolicyRuleBinding] = []
         for rule in sorted(policy.rules(), key=lambda item: str(item.rule_id)):
             item = governance.get(str(rule.rule_id))
+            review = review_for(RuleId(str(rule.rule_id)), rule.version)
             bindings.append(
                 PolicyRuleBinding(
                     rule_id=RuleId(str(rule.rule_id)),
@@ -570,6 +680,7 @@ def _policies(registry: PolicyRegistry) -> tuple[PolicyDescriptor, ...]:
                     classification=item.classification.value if item else None,
                     evidence_level=item.evidence if item else None,
                     precedence=item.precedence if item else None,
+                    review_status=review.status,
                 )
             )
         descriptors.append(
@@ -611,6 +722,16 @@ def _add_rule(
 
 
 def _rule_descriptor(rule: Rule, source_path: str) -> RuleDescriptor:
+    review = review_for(RuleId(str(rule.rule_id)), rule.version)
+    if isinstance(review, ApprovedRuleReview):
+        review_descriptor: RuleReviewDescriptor = ApprovedRuleReviewDescriptor(
+            completed_checks=review.completed_checks,
+            reviewed_in=review.reviewed_in,
+        )
+    else:
+        review_descriptor = PendingRuleReviewDescriptor(
+            completed_checks=review.completed_checks,
+        )
     return RuleDescriptor(
         rule_id=RuleId(str(rule.rule_id)),
         rule_version=rule.version,
@@ -643,6 +764,7 @@ def _rule_descriptor(rule: Rule, source_path: str) -> RuleDescriptor:
         ),
         false_positive_controls=rule.false_positive_controls,
         source=SourcePointer(path=source_path, symbol=str(rule.rule_id)),
+        review=review_descriptor,
     )
 
 
@@ -854,7 +976,8 @@ def _schemas() -> tuple[SchemaDescriptor, ...]:
             "openapi-analysis",
             openapi_report_schema(),
         ),
-        ("catalog", "Repo-lint public catalog", 2, "catalog", catalog_schema()),
+        ("catalog-v2", "Repo-lint public catalog v2", 2, "catalog-v2", catalog_v2_schema()),
+        ("catalog", "Repo-lint public catalog", 3, "catalog", catalog_schema()),
     )
     return tuple(
         SchemaDescriptor(
