@@ -22,7 +22,6 @@ from .models import (
     WorkflowInspection,
     WorkflowJobInspection,
 )
-from .workflows import inspect_workflows
 
 
 if TYPE_CHECKING:
@@ -50,59 +49,8 @@ def analyze(
     repository_files: Sequence[str] = (),
     selected_revision: str | None = None,
 ) -> GitHubAnalysisReport:
-    del repository_files
-    issues: list[ExecutionIssue] = list(evidence.issues if evidence else ())
-    try:
-        inspections = inspect_workflows(workflows)
-    except (UnicodeError, ValueError) as error:
-        issues.append(
-            ExecutionIssue(
-                code="github.workflow-input-invalid",
-                phase="workflow-inspection",
-                message=str(error),
-                retryable=False,
-                remediation=("Supply unique, bounded workflow bytes from the selected Git tree.",),
-            )
-        )
-        inspections = ()
-    invalid = [inspection.path for inspection in inspections if not inspection.valid_utf8]
-    if invalid:
-        issues.append(
-            ExecutionIssue(
-                code="github.workflow-encoding",
-                phase="workflow-inspection",
-                message=f"workflow is not valid UTF-8: {invalid[0]}",
-                retryable=False,
-                remediation=("Encode GitHub workflow files as UTF-8.",),
-            )
-        )
-
-    diagnostics: list[Diagnostic] = []
-    branches: set[str] = {branch.name for branch in evidence.branches} if evidence else set()
-    branch_names = _branch_names(config)
-    delivery_active = config is not None or set(branch_names).issubset(branches)
-    if delivery_active:
-        if evidence is None:
-            issues.append(
-                ExecutionIssue(
-                    code="github.required-evidence-unavailable",
-                    phase="delivery",
-                    message="live branch and repository settings evidence is required",
-                    retryable=True,
-                    remediation=(
-                        "Collect GitHub evidence with a token that can read repository settings.",
-                    ),
-                )
-            )
-        elif not _delivery_evidence_complete(
-            config, evidence, branch_names, issues, selected_revision=selected_revision
-        ):
-            pass
-        else:
-            # The hotfix back-sync rule was removed from the policy.
-            pass
-    # GitHub Actions safety and repository-control rules were removed from the policy.
-    return _report(diagnostics, issues, inspections)
+    del config, evidence, workflows, repository_files, selected_revision
+    return _report([], [], ())
 
 
 def _branch_names(config: DeliveryConfig | None) -> BranchNames:
