@@ -192,9 +192,10 @@ h2 { margin-top: 1.5rem; }
 
 @media (max-width: 52rem) {
   .page > header.header { width: 100dvw; max-width: 100dvw; }
-  [data-pagefind-body], .hero, .section-heading, .capability-grid, .rule-catalog, .rule-tools, .rule-detail, .two-column, .install {
-    width: calc(100dvw - 2 * var(--sl-content-pad-x));
-    max-width: calc(100dvw - 2 * var(--sl-content-pad-x));
+  [data-pagefind-body], .hero, .section-heading, .capability-grid, .rule-catalog, .rule-tools, .rule-directory, .rule-detail, .two-column, .install {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
   .capability-grid, .two-column, .schema-list { grid-template-columns: 1fr; }
   .category-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -220,6 +221,7 @@ h2 { margin-top: 1.5rem; }
   .rule-detail__toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
   .rule-detail__toolbar .breadcrumbs { grid-column: 1 / -1; }
   .rule-detail__toolbar .rule-stepper { grid-column: 2; justify-self: end; }
+  .rule-header-links > *, .rule-fact { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 }
 
 @media (prefers-reduced-motion: reduce) {
