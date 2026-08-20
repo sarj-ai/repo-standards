@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from importlib.metadata import version
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import TypeAdapter
 
@@ -20,7 +20,12 @@ if TYPE_CHECKING:
 _JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
 
 
-def _site(directory: Path) -> tuple[dict[str, JSONValue], dict[str, JSONValue]]:
+class _SiteDocuments(NamedTuple):
+    catalog: dict[str, JSONValue]
+    schema: dict[str, JSONValue]
+
+
+def _site(directory: Path) -> _SiteDocuments:
     api = directory / "api" / "v4"
     api.mkdir(parents=True)
     catalog = _JSON_OBJECT.validate_python(
@@ -30,7 +35,7 @@ def _site(directory: Path) -> tuple[dict[str, JSONValue], dict[str, JSONValue]]:
     schema = _JSON_OBJECT.validate_python(catalog_schema(), strict=True)
     (api / "catalog.json").write_text(canonical_json(catalog), encoding="utf-8")
     (api / "catalog.schema.json").write_text(canonical_json(schema), encoding="utf-8")
-    return catalog, schema
+    return _SiteDocuments(catalog, schema)
 
 
 def _write(directory: Path, name: str, value: dict[str, JSONValue]) -> None:

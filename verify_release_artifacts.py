@@ -136,10 +136,6 @@ class _SchemaValidator(Protocol):
     def validate(self, instance: JSONValue) -> None: ...
 
 
-def _validate_schema(validator: _SchemaValidator, instance: JSONValue) -> None:
-    validator.validate(instance)
-
-
 class HTMLTag(StrEnum):
     H1 = "h1"
     MAIN = "main"
@@ -392,6 +388,10 @@ def verify_site_catalog(directory: Path, observed: set[str]) -> list[str]:
     if catalog.provenance.content_digest != expected_digest:
         violations.append("site:api/v4/catalog.json: content digest does not match catalog bytes")
     return violations
+
+
+def _validate_schema(validator: _SchemaValidator, instance: JSONValue) -> None:
+    validator.validate(instance)
 
 
 def _verify_site_csp(directory: Path) -> list[str]:

@@ -172,11 +172,8 @@ _ALLOWED_CODE_TARGETS: Mapping[ComponentKind, frozenset[ComponentKind]] = Mappin
     }
 )
 
-
-def _example(
-    fixture_id: str, language: ExampleLanguage, flagged: str, passes: str
-) -> tuple[RuleExamplePair, ...]:
-    warning_examples = {
+_WARNING_EXAMPLE_FIXTURES = frozenset(
+    {
         "sarj-graph-code-cycle",
         "sarj-reuse-vague-capability",
         "sarj-naming-application-role",
@@ -188,6 +185,12 @@ def _example(
         "sarj-github-merge-queue-trigger",
         "sarj-github-repository-governance",
     }
+)
+
+
+def _example(
+    fixture_id: str, language: ExampleLanguage, flagged: str, passes: str
+) -> tuple[RuleExamplePair, ...]:
     title_source = fixture_id.removeprefix("sarj-").partition("-")[2]
     title = " ".join(
         {"github": "GitHub", "sha": "SHA", "id": "ID"}.get(word, word.title())
@@ -200,7 +203,7 @@ def _example(
             flagged=flagged,
             passes=passes,
             title=title,
-            severity="warning" if fixture_id in warning_examples else "error",
+            severity="warning" if fixture_id in _WARNING_EXAMPLE_FIXTURES else "error",
         ),
     )
 
