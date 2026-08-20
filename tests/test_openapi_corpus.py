@@ -35,14 +35,14 @@ def _object_list(value: object) -> list[dict[str, object]]:
 
 
 def _manifest() -> dict[str, object]:
-    text = (_ROOT / "corpus" / "openapi-public-v1.json").read_text(encoding="utf-8")
+    text = (_ROOT / "corpus" / "openapi-public-v2.json").read_text(encoding="utf-8")
     parsed: object = json.loads(text)  # pyright: ignore[reportAny]
     return _object(parsed)
 
 
 def test_openapi_corpus_is_exact_pinned_and_not_downloaded() -> None:
     manifest = _manifest()
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert _object(manifest["selection"])["seed"]
     protocol = _object(manifest["protocol"])
     assert _object(protocol["no_substitution"])["enabled"] is True

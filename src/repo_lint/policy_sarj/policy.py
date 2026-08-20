@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from enum import StrEnum
 import re
 from types import MappingProxyType
@@ -100,10 +101,8 @@ EDGE_KINDS = frozenset(
     }
 )
 CODE_EDGES = frozenset({"source-import", "package-dependency"})
-VAGUE_CAPABILITIES = frozenset({"common", "core", "helpers", "shared", "utils"})
 _MIN_CYCLE_COMPONENTS = 2
 _PATH_TOKEN = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"  # ruff: ignore[hardcoded-password-string] - regex, not a secret
-_APPLICATION_ROLE = rf"(?:api|agent|worker|web|{_PATH_TOKEN}-(?:api|agent|worker|web))"
 _COMPONENT_FIELDS: Mapping[ComponentKind, tuple[frozenset[str], frozenset[str]]] = MappingProxyType(
     {
         ComponentKind.APPLICATION: (frozenset({"product"}), frozenset({"capability"})),
@@ -173,16 +172,38 @@ _ALLOWED_CODE_TARGETS: Mapping[ComponentKind, frozenset[ComponentKind]] = Mappin
     }
 )
 
+_WARNING_EXAMPLE_FIXTURES = frozenset(
+    {
+        "sarj-graph-code-cycle",
+        "sarj-reuse-vague-capability",
+        "sarj-naming-application-role",
+        "sarj-github-actions-sha-pinning",
+        "sarj-github-explicit-permissions",
+        "sarj-github-job-timeouts",
+        "sarj-github-immutable-installs",
+        "sarj-github-vulnerability-gate",
+        "sarj-github-merge-queue-trigger",
+        "sarj-github-repository-governance",
+    }
+)
+
 
 def _example(
     fixture_id: str, language: ExampleLanguage, flagged: str, passes: str
 ) -> tuple[RuleExamplePair, ...]:
+    title_source = fixture_id.removeprefix("sarj-").partition("-")[2]
+    title = " ".join(
+        {"github": "GitHub", "sha": "SHA", "id": "ID"}.get(word, word.title())
+        for word in title_source.split("-")
+    )
     return (
         RuleExamplePair(
             fixture_id=FixtureId(fixture_id),
             language=language,
             flagged=flagged,
             passes=passes,
+            title=title,
+            severity="warning" if fixture_id in _WARNING_EXAMPLE_FIXTURES else "error",
         ),
     )
 
@@ -195,7 +216,7 @@ def _rule_remediation(summary: str, *steps: str) -> RuleRemediation:
     )
 
 
-RULES = (
+_RULE_PARTS = (
     Rule(
         rule_id=RuleId("sarj/layout/component-path"),
         version=1,
@@ -795,60 +816,228 @@ RULES = (
     ),
 )
 
+
+def _consolidated_rules(parts: tuple[Rule, ...]) -> tuple[Rule, ...]:
+    by_id = {str(rule.rule_id): rule for rule in parts}
+    groups = (
+        (
+            "architecture/layout/component-paths",
+            ("sarj/layout/component-path", "sarj/layout/operational-path"),
+            "Use canonical component paths",
+            "Every component has one canonical ownership root.",
+            "Reports a component path that violates its kind template or overlaps another root.",
+            "Canonical disjoint roots make ownership and impact analysis deterministic.",
+            "error",
+        ),
+        (
+            "architecture/schema/component",
+            (
+                "sarj/schema/component-fields",
+                "sarj/naming/capability-token",
+                "sarj/naming/component-id",
+            ),
+            "Keep component identity consistent",
+            "Component kind, ownership fields, identifiers, and capability tokens agree.",
+            (
+                "Reports missing or forbidden fields, invalid capability tokens, or "
+                "ownership-ID mismatches."
+            ),
+            "Trustworthy component identity prevents cascading layout and dependency mistakes.",
+            "error",
+        ),
+        (
+            "architecture/dependencies/policy",
+            (
+                "sarj/graph/edge-endpoints",
+                "sarj/graph/application-imports-application",
+                "sarj/graph/library-imports-application",
+                "sarj/graph/self-dependency",
+                "sarj/graph/cross-product-import",
+                "sarj/graph/shared-imports-product",
+                "sarj/graph/contract-imports-implementation",
+                "sarj/graph/disallowed-code-dependency",
+            ),
+            "Enforce dependency boundaries",
+            "Every dependency edge has legal endpoint kinds and ownership direction.",
+            (
+                "Reports self edges, forbidden code coupling, cross-product imports, or "
+                "invalid typed endpoints."
+            ),
+            "A single dependency policy keeps ownership and release boundaries explicit.",
+            "error",
+        ),
+        (
+            "architecture/dependencies/acyclic",
+            ("sarj/graph/code-cycle",),
+            "Keep production code dependencies acyclic",
+            "Accepted production code dependencies form a directed acyclic graph.",
+            "Reports each strongly connected component containing two or more components.",
+            "Acyclic dependencies keep build, ownership, and extraction direction clear.",
+            "warning",
+        ),
+        (
+            "delivery/branches/hotfix-back-sync",
+            ("sarj/delivery/hotfix-backsync",),
+            "Back-sync production hotfixes",
+            "Production changes flow back through preview and development branches.",
+            "Reports a missing guarded pull-request back-sync edge or repository control.",
+            "Reliable back-sync prevents production fixes from disappearing in later releases.",
+            "error",
+        ),
+        (
+            "delivery/actions/safety",
+            (
+                "sarj/github/actions-sha-pinning",
+                "sarj/github/explicit-permissions",
+                "sarj/github/job-timeouts",
+                "sarj/github/immutable-installs",
+                "sarj/github/vulnerability-gate",
+            ),
+            "Harden GitHub Actions",
+            (
+                "Workflow jobs are pinned, least-privileged, time-bounded, reproducible, "
+                "and fail closed."
+            ),
+            (
+                "Reports mutable dependencies or installs, implicit permissions, missing "
+                "timeouts, or bypassed scanners."
+            ),
+            "A hardened workflow baseline limits supply-chain and unbounded-execution risk.",
+            "warning",
+        ),
+        (
+            "delivery/repository/controls",
+            ("sarj/github/repository-governance", "sarj/github/merge-queue-trigger"),
+            "Configure repository delivery controls",
+            (
+                "Repository ownership, updates, protection, token defaults, and merge-queue "
+                "coverage are explicit."
+            ),
+            "Reports missing repository safeguards or workflows that omit active merge queues.",
+            "Repository controls provide a consistent, reviewable delivery boundary.",
+            "warning",
+        ),
+    )
+    compact_content = {
+        "architecture/layout/component-paths": (
+            _rule_remediation(
+                "Move the component to one canonical, disjoint ownership root.",
+                "Declare the old and new paths before moving tracked files.",
+            ),
+            ("component kinds, ownership fields, and declared paths",),
+            (),
+        ),
+        "architecture/schema/component": (
+            _rule_remediation(
+                "Align component fields and identifiers with its kind and ownership.",
+                "Add required fields, remove forbidden fields, and correct IDs and tokens.",
+            ),
+            ("component kind, ownership fields, stable ID, and capability token",),
+            (),
+        ),
+        "architecture/dependencies/policy": (
+            _rule_remediation(
+                "Correct or remove the invalid dependency edge.",
+                "Use an allowed edge type and compatible source and target component kinds.",
+            ),
+            ("edge type, endpoint kinds, component IDs, and product ownership",),
+            (),
+        ),
+        "delivery/actions/safety": (
+            _rule_remediation(
+                "Apply the missing workflow safety control.",
+                "Pin dependencies, bound permissions and time, enforce lockfiles, and fail closed.",
+            ),
+            ("parsed workflow references, jobs, steps, permissions, installs, and scanners",),
+            (
+                "executing workflows or package managers",
+                "automatically updating workflow references",
+                "choosing repository vulnerability policy",
+            ),
+        ),
+        "delivery/branches/hotfix-back-sync": (
+            _rule_remediation(
+                "Add guarded PR back-syncs and protect all three branches.",
+                "Implement main-to-preview and preview-to-development pull requests.",
+            ),
+            ("delivery branches, guarded synchronization workflows, and live protections",),
+            (),
+        ),
+    }
+    merged: list[Rule] = []
+    for target, source_ids, title, summary, detects, impact, severity in groups:
+        sources = tuple(by_id[source_id] for source_id in source_ids)
+        representative = sources[0]
+        compact = compact_content.get(target)
+        examples = tuple(example for rule in sources for example in rule.examples)
+        if target == "architecture/layout/component-paths":
+            examples += (
+                RuleExamplePair(
+                    fixture_id=FixtureId("sarj-layout-overlapping-roots"),
+                    language="text",
+                    flagged="services/payments\nservices/payments/worker",
+                    passes="services/payments\nservices/worker",
+                    title="Overlapping component roots",
+                    severity="error",
+                ),
+            )
+        merged.append(
+            replace(
+                representative,
+                rule_id=RuleId(target),
+                default_severity=severity,
+                title=title,
+                summary=summary,
+                detects=detects,
+                impact=impact,
+                remediation=compact[0] if compact else representative.remediation,
+                examples=examples,
+                evidence_required=(
+                    compact[1]
+                    if compact
+                    else tuple(
+                        dict.fromkeys(item for rule in sources for item in rule.evidence_required)
+                    )
+                ),
+                non_goals=(
+                    compact[2]
+                    if compact
+                    else tuple(dict.fromkeys(item for rule in sources for item in rule.non_goals))
+                ),
+                false_positive_controls=tuple(
+                    dict.fromkeys(item for rule in sources for item in rule.false_positive_controls)
+                ),
+                upstream=tuple(dict.fromkeys(item for rule in sources for item in rule.upstream)),
+                references=tuple(
+                    dict.fromkeys(item for rule in sources for item in rule.references)
+                ),
+            )
+        )
+    return tuple(sorted(merged, key=lambda item: item.rule_id))
+
+
+RULES = _consolidated_rules(_RULE_PARTS)
+
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
     {
-        RuleId("sarj/layout/component-path"): RuleClassification.OBJECTIVE,
-        RuleId("sarj/layout/operational-path"): RuleClassification.OPERATIONAL,
-        RuleId("sarj/schema/component-fields"): RuleClassification.SCHEMA,
-        RuleId("sarj/graph/edge-endpoints"): RuleClassification.SCHEMA,
-        RuleId("sarj/graph/application-imports-application"): RuleClassification.OBJECTIVE,
-        RuleId("sarj/graph/library-imports-application"): RuleClassification.OBJECTIVE,
-        RuleId("sarj/graph/self-dependency"): RuleClassification.SCHEMA,
-        RuleId("sarj/graph/cross-product-import"): RuleClassification.OBJECTIVE,
-        RuleId("sarj/graph/shared-imports-product"): RuleClassification.OBJECTIVE,
-        RuleId("sarj/graph/contract-imports-implementation"): RuleClassification.OBJECTIVE,
-        RuleId("sarj/graph/disallowed-code-dependency"): RuleClassification.OBJECTIVE,
-        RuleId("sarj/graph/code-cycle"): RuleClassification.JUDGMENT,
-        RuleId("sarj/reuse/vague-capability"): RuleClassification.JUDGMENT,
-        RuleId("sarj/naming/application-role"): RuleClassification.JUDGMENT,
-        RuleId("sarj/naming/component-id"): RuleClassification.SCHEMA,
-        RuleId("sarj/naming/capability-token"): RuleClassification.SCHEMA,
-        RuleId("sarj/delivery/hotfix-backsync"): RuleClassification.OBJECTIVE,
-        RuleId("sarj/github/actions-sha-pinning"): RuleClassification.OPERATIONAL,
-        RuleId("sarj/github/explicit-permissions"): RuleClassification.OPERATIONAL,
-        RuleId("sarj/github/job-timeouts"): RuleClassification.OPERATIONAL,
-        RuleId("sarj/github/immutable-installs"): RuleClassification.OPERATIONAL,
-        RuleId("sarj/github/vulnerability-gate"): RuleClassification.OPERATIONAL,
-        RuleId("sarj/github/merge-queue-trigger"): RuleClassification.OPERATIONAL,
-        RuleId("sarj/github/repository-governance"): RuleClassification.JUDGMENT,
+        RuleId("architecture/layout/component-paths"): RuleClassification.OBJECTIVE,
+        RuleId("architecture/schema/component"): RuleClassification.SCHEMA,
+        RuleId("architecture/dependencies/policy"): RuleClassification.OBJECTIVE,
+        RuleId("architecture/dependencies/acyclic"): RuleClassification.JUDGMENT,
+        RuleId("delivery/branches/hotfix-back-sync"): RuleClassification.OBJECTIVE,
+        RuleId("delivery/actions/safety"): RuleClassification.OPERATIONAL,
+        RuleId("delivery/repository/controls"): RuleClassification.JUDGMENT,
     }
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
     {
-        RuleId("sarj/schema/component-fields"): 10,
-        RuleId("sarj/graph/self-dependency"): 30,
-        RuleId("sarj/graph/edge-endpoints"): 40,
-        RuleId("sarj/graph/application-imports-application"): 50,
-        RuleId("sarj/graph/contract-imports-implementation"): 60,
-        RuleId("sarj/graph/library-imports-application"): 70,
-        RuleId("sarj/graph/shared-imports-product"): 80,
-        RuleId("sarj/graph/cross-product-import"): 90,
-        RuleId("sarj/graph/disallowed-code-dependency"): 100,
-        RuleId("sarj/naming/capability-token"): 110,
-        RuleId("sarj/naming/component-id"): 120,
-        RuleId("sarj/layout/component-path"): 130,
-        RuleId("sarj/layout/operational-path"): 130,
-        RuleId("sarj/naming/application-role"): 140,
-        RuleId("sarj/reuse/vague-capability"): 150,
-        RuleId("sarj/graph/code-cycle"): 160,
-        RuleId("sarj/delivery/hotfix-backsync"): 170,
-        RuleId("sarj/github/actions-sha-pinning"): 180,
-        RuleId("sarj/github/explicit-permissions"): 190,
-        RuleId("sarj/github/job-timeouts"): 200,
-        RuleId("sarj/github/immutable-installs"): 210,
-        RuleId("sarj/github/vulnerability-gate"): 220,
-        RuleId("sarj/github/merge-queue-trigger"): 230,
-        RuleId("sarj/github/repository-governance"): 240,
+        RuleId("architecture/schema/component"): 10,
+        RuleId("architecture/dependencies/policy"): 20,
+        RuleId("architecture/layout/component-paths"): 30,
+        RuleId("architecture/dependencies/acyclic"): 40,
+        RuleId("delivery/branches/hotfix-back-sync"): 50,
+        RuleId("delivery/actions/safety"): 60,
+        RuleId("delivery/repository/controls"): 70,
     }
 )
 _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = MappingProxyType(
@@ -873,19 +1062,11 @@ _RULE_EVIDENCE: Mapping[RuleId, Literal["declared", "verified", "external"]] = M
             "external"
             if rule.rule_id
             in {
-                RuleId("sarj/delivery/hotfix-backsync"),
-                RuleId("sarj/github/merge-queue-trigger"),
-                RuleId("sarj/github/repository-governance"),
+                RuleId("delivery/branches/hotfix-back-sync"),
+                RuleId("delivery/repository/controls"),
             }
             else "verified"
-            if rule.rule_id
-            in {
-                RuleId("sarj/github/actions-sha-pinning"),
-                RuleId("sarj/github/explicit-permissions"),
-                RuleId("sarj/github/job-timeouts"),
-                RuleId("sarj/github/immutable-installs"),
-                RuleId("sarj/github/vulnerability-gate"),
-            }
+            if rule.rule_id == RuleId("delivery/actions/safety")
             else "declared"
         )
         for rule in RULES
@@ -907,7 +1088,7 @@ RULE_GOVERNANCE = tuple(
 )
 
 POLICY_SPEC = PolicySpec(
-    schema_version=1,
+    schema_version=2,
     policy_id=PolicyId("sarj"),
     policy_version=5,
     profile=ProfileDescriptor(
@@ -1069,14 +1250,9 @@ class SarjPolicy:
             diagnostics.extend(_naming_diagnostics(component, component_kind))
             template = PATH_TEMPLATE_BY_KIND[component_kind.value]
             if not _path_matches(template, component):
-                rule_id = (
-                    RuleId("sarj/layout/operational-path")
-                    if template.operational
-                    else RuleId("sarj/layout/component-path")
-                )
                 diagnostics.append(
                     _diagnostic(
-                        rule_id=rule_id,
+                        rule_id=RuleId("architecture/layout/component-paths"),
                         component_id=component.component_id,
                         subject_kind="component-path",
                         observed=component.path,
@@ -1092,26 +1268,6 @@ class SarjPolicy:
                         ),
                     )
                 )
-            if (
-                component_kind in {ComponentKind.PRODUCT_LIBRARY, ComponentKind.SHARED_LIBRARY}
-                and component.capability in VAGUE_CAPABILITIES
-            ):
-                diagnostics.append(
-                    _diagnostic(
-                        rule_id=RuleId("sarj/reuse/vague-capability"),
-                        component_id=component.component_id,
-                        subject_kind="capability",
-                        observed=component.capability,
-                        expected="a narrow capability name",
-                        message="reusable asset uses a vague capability name",
-                        path=component.path,
-                        anchor=f"components.{component.component_id}.capability",
-                        remediation=_remediation(
-                            "Name the stable capability rather than its generic utility role.",
-                            "Identify the cohesive public contract and choose its capability name.",
-                        ),
-                    )
-                )
         diagnostics.extend(_cycle_diagnostics(clean_code_edges, by_id))
         return tuple(diagnostics)
 
@@ -1121,7 +1277,7 @@ def _naming_diagnostics(component: Component, component_kind: ComponentKind) -> 
     if component.capability is not None and re.fullmatch(_PATH_TOKEN, component.capability) is None:
         diagnostics.append(
             _diagnostic(
-                rule_id=RuleId("sarj/naming/capability-token"),
+                rule_id=RuleId("architecture/schema/component"),
                 component_id=component.component_id,
                 subject_kind="capability",
                 observed=component.capability,
@@ -1139,7 +1295,7 @@ def _naming_diagnostics(component: Component, component_kind: ComponentKind) -> 
     if expected_prefix is not None and not component.component_id.startswith(expected_prefix):
         diagnostics.append(
             _diagnostic(
-                rule_id=RuleId("sarj/naming/component-id"),
+                rule_id=RuleId("architecture/schema/component"),
                 component_id=component.component_id,
                 subject_kind="component-id",
                 observed=component.component_id,
@@ -1153,31 +1309,6 @@ def _naming_diagnostics(component: Component, component_kind: ComponentKind) -> 
                 ),
             )
         )
-    if component_kind is ComponentKind.APPLICATION:
-        application_name = component.path.rsplit("/", maxsplit=1)[-1]
-        canonical_application_path = (
-            rf"applications/{re.escape(component.product or '')}/{_PATH_TOKEN}"
-        )
-        if (
-            re.fullmatch(canonical_application_path, component.path) is not None
-            and re.fullmatch(_APPLICATION_ROLE, application_name) is None
-        ):
-            diagnostics.append(
-                _diagnostic(
-                    rule_id=RuleId("sarj/naming/application-role"),
-                    component_id=component.component_id,
-                    subject_kind="application-role",
-                    observed=application_name,
-                    expected="api|agent|worker|web|<domain>-(api|agent|worker|web)",
-                    message="application name does not end in a controlled deployable role",
-                    path=component.path,
-                    anchor=f"components.{component.component_id}.path",
-                    remediation=_remediation(
-                        "Name the deployable by its role or domain and role.",
-                        "Use api, agent, worker, or web as the final role token.",
-                    ),
-                )
-            )
     return diagnostics
 
 
@@ -1198,7 +1329,7 @@ def _component_field_diagnostic(
     if forbidden:
         expected_parts.append(f"forbidden={','.join(sorted(forbidden))}")
     return _diagnostic(
-        rule_id=RuleId("sarj/schema/component-fields"),
+        rule_id=RuleId("architecture/schema/component"),
         component_id=component.component_id,
         subject_kind="component-fields",
         observed="; ".join(problems),
@@ -1278,38 +1409,40 @@ def _code_boundary(  # ruff: ignore[too-many-return-statements] - precedence is 
     target_kind: ComponentKind,
 ) -> _CodeBoundary | None:
     if source.component_id == target.component_id:
-        return _CodeBoundary(RuleId("sarj/graph/self-dependency"), "remove the self dependency")
+        return _CodeBoundary(
+            RuleId("architecture/dependencies/policy"), "remove the self dependency"
+        )
     if source_kind is ComponentKind.APPLICATION and target_kind is ComponentKind.APPLICATION:
         return _CodeBoundary(
-            RuleId("sarj/graph/application-imports-application"),
+            RuleId("architecture/dependencies/policy"),
             "depend on a library or use a runtime-call edge",
         )
     if source_kind is ComponentKind.CONTRACT and target_kind is not ComponentKind.CONTRACT:
         return _CodeBoundary(
-            RuleId("sarj/graph/contract-imports-implementation"),
+            RuleId("architecture/dependencies/policy"),
             "contracts may depend only on contracts",
         )
     if source_kind in {ComponentKind.PRODUCT_LIBRARY, ComponentKind.SHARED_LIBRARY} and (
         target_kind is ComponentKind.APPLICATION
     ):
         return _CodeBoundary(
-            RuleId("sarj/graph/library-imports-application"),
+            RuleId("architecture/dependencies/policy"),
             "applications may import libraries; libraries may not import applications",
         )
     if _is_shared_source(source, source_kind) and target.product is not None:
         return _CodeBoundary(
-            RuleId("sarj/graph/shared-imports-product"),
+            RuleId("architecture/dependencies/policy"),
             "shared components import no product implementation",
         )
     if source.product and target.product and source.product != target.product:
         return _CodeBoundary(
-            RuleId("sarj/graph/cross-product-import"),
+            RuleId("architecture/dependencies/policy"),
             "use a shared contract/library or runtime-call edge",
         )
     if target_kind not in _ALLOWED_CODE_TARGETS[source_kind]:
         allowed = ",".join(sorted(kind.value for kind in _ALLOWED_CODE_TARGETS[source_kind]))
         return _CodeBoundary(
-            RuleId("sarj/graph/disallowed-code-dependency"),
+            RuleId("architecture/dependencies/policy"),
             f"{source_kind.value} code targets one of: {allowed or '<none>'}",
         )
     return None
@@ -1385,7 +1518,7 @@ def _edge_endpoint_diagnostic(
     )
     targets = ",".join(sorted(kind.value for kind in allowed_targets))
     return _edge_diagnostic(
-        RuleId("sarj/graph/edge-endpoints"),
+        RuleId("architecture/dependencies/policy"),
         source,
         target,
         edge_kind,
@@ -1434,7 +1567,7 @@ def _cycle_diagnostics(
         anchor = members[0]
         diagnostics.append(
             _diagnostic(
-                rule_id=RuleId("sarj/graph/code-cycle"),
+                rule_id=RuleId("architecture/dependencies/acyclic"),
                 component_id=anchor,
                 subject_kind="code-cycle",
                 observed=" -> ".join((*members, members[0])),

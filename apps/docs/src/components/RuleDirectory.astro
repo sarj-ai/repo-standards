@@ -1,5 +1,6 @@
 ---
 import type { RuleView } from '../lib/catalog';
+import RuleTypeMark from './RuleTypeMark.astro';
 
 interface Props {
   rows: readonly RuleView[];
@@ -12,23 +13,26 @@ const inputId = `rule-search-${mode}`;
 
 <div class="rule-directory" data-rule-directory>
   <div class="directory-toolbar">
-    <label for={inputId}>Filter</label>
-    <input id={inputId} type="search" autocomplete="off" placeholder="Name, description, or rule ID" data-rule-search />
+    <label class="sr-only" for={inputId}>Filter rules</label>
+    <input id={inputId} type="search" autocomplete="off" placeholder="Filter rules…" data-rule-search />
     <span class="directory-status" role="status" aria-live="polite"><span data-result-count>{rows.length}</span> {mode === 'review' ? 'pending' : 'approved'}</span>
   </div>
   <p class="directory-empty" data-empty hidden>No matching rules.</p>
-  <div class="rule-table" role="list">
-    {rows.map(({ rule, href, searchText }) => (
-      <a class="rule-row" role="listitem" href={href} data-rule-id={rule.rule_id} data-search={searchText}>
-        <span class="rule-row__main">
-          <strong>{rule.title}</strong>
-          <span>{rule.summary}</span>
-        </span>
-        <code>{rule.rule_id}</code>
-        <span class:list={['review-state', `review-state--${rule.review.status}`]}>{rule.review.status}</span>
-      </a>
+  <ul class="rule-table">
+    {rows.map(({ rule, href, searchText, category }) => (
+      <li>
+        <a class="rule-row" href={href} data-rule-id={rule.rule_id} data-search={searchText}>
+          <RuleTypeMark categoryId={rule.category_id} label={category} />
+          <span class="rule-row__main">
+            <strong>{rule.title}</strong>
+            <span>{rule.summary}</span>
+          </span>
+          <code>{rule.rule_id}</code>
+          <span class:list={['severity', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>
+        </a>
+      </li>
     ))}
-  </div>
+  </ul>
 </div>
 
 <script>

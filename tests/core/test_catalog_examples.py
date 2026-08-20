@@ -39,7 +39,7 @@ from repo_lint.core.parser import parse_baseline_bytes, parse_manifest_bytes
 type ExampleRunner = Callable[[bytes], tuple[str, ...]]
 _STRING_MAPPING = TypeAdapter(dict[str, str])
 _SINGLE_MIGRATION = b"""\
-schema_version = 1
+schema_version = 2
 repository_id = "example-repository"
 policy = "example"
 policy_version = 1
@@ -218,36 +218,18 @@ def _run_baseline(content: bytes) -> tuple[str, ...]:
 
 
 _RUNNERS: dict[FixtureId, ExampleRunner] = {
-    FixtureId("core.layout.non-overlapping-root.v1"): _run_layout,
-    FixtureId("core.migration.batch-too-large.v1"): _run_batch,
-    FixtureId("core.migration.target-missing.v1"): _run_target,
-    FixtureId("core.migration.tracked-install-artifacts.v1"): _run_install_artifacts,
-    FixtureId("core.migration.source-retained.v1"): _run_source,
-    FixtureId("core.migration.workspace-membership-lost.v1"): _run_workspace,
-    FixtureId("core.exception.expired.v1"): _run_exception,
-    FixtureId("core.baseline.stale-entry.v1"): _run_baseline,
+    FixtureId("core.migration.target-missing.v2"): _run_target,
+    FixtureId("core.migration.source-retained.v2"): _run_source,
+    FixtureId("core.migration.workspace-membership-lost.v2"): _run_workspace,
 }
 
 _EXPECTED_FLAGGED: dict[FixtureId, tuple[str, ...]] = {
-    FixtureId("core.layout.non-overlapping-root.v1"): ("core/layout/non-overlapping-root",),
-    FixtureId("core.migration.batch-too-large.v1"): ("core/migration/batch-too-large",),
-    FixtureId("core.migration.target-missing.v1"): ("core/migration/target-missing",),
-    FixtureId("core.migration.tracked-install-artifacts.v1"): (
-        "core/migration/tracked-install-artifacts",
-    ),
-    FixtureId("core.migration.source-retained.v1"): ("core/migration/source-retained",),
-    FixtureId("core.migration.workspace-membership-lost.v1"): (
-        "core/migration/workspace-membership-lost",
-    ),
-    FixtureId("core.exception.expired.v1"): (
-        "core/exception/expired",
-        "core/layout/non-overlapping-root",
-    ),
-    FixtureId("core.baseline.stale-entry.v1"): ("core/baseline/stale-entry",),
+    FixtureId("core.migration.target-missing.v2"): ("repository/migration/consistency",),
+    FixtureId("core.migration.source-retained.v2"): ("repository/migration/consistency",),
+    FixtureId("core.migration.workspace-membership-lost.v2"): ("repository/migration/consistency",),
 }
 
 _EXPECTED_PASSES: dict[FixtureId, tuple[str, ...]] = dict.fromkeys(_RUNNERS, ())
-_EXPECTED_PASSES[FixtureId("core.exception.expired.v1")] = ("core/layout/non-overlapping-root",)
 
 _EXAMPLES: tuple[tuple[RuleDefinition, RuleExamplePair], ...] = tuple(
     (rule, example) for rule in core_rules() for example in rule.examples
@@ -278,5 +260,6 @@ def test_every_core_rule_has_one_registered_executable_example() -> None:
     rules = core_rules()
     fixture_ids = tuple(example.fixture_id for rule in rules for example in rule.examples)
 
-    assert len(rules) == len(_RUNNERS) == len(set(fixture_ids)) == 8
+    assert len(rules) == 1
+    assert len(_RUNNERS) == len(set(fixture_ids)) == 3
     assert set(fixture_ids) == set(_RUNNERS) == set(_EXPECTED_FLAGGED) == set(_EXPECTED_PASSES)

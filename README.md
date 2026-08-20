@@ -4,6 +4,9 @@
 repository rules are available for review but remain disabled until individually approved
 and explicitly activated by a consumer.
 
+After a rule is approved, opt in per run with `--enable-rule <rule-id>`. Approval alone
+never enables a rule, and the option may be repeated for multiple approved rules.
+
 ## Run it
 
 Use the current release without installing it:
@@ -12,7 +15,7 @@ Use the current release without installing it:
 uvx --from sarj-repo-lint repo-lint pull-request size . --base origin/main
 ```
 
-For a reproducible repository dependency, let uv record the resolved version:
+For a persistent user installation:
 
 ```bash
 uv tool install sarj-repo-lint
@@ -45,7 +48,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: sarj-ai/sarj-repo-lint@<full-commit-sha> # v0.7.0
+      - uses: sarj-ai/sarj-repo-lint@<full-commit-sha> # v0.8.0
 ```
 
 The Action emits counted, excluded, and total line counts plus canonical JSON. Tests are

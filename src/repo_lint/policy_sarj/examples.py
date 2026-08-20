@@ -5,6 +5,7 @@ import re
 import tomllib
 from typing import TYPE_CHECKING, NamedTuple, NoReturn
 
+from repo_lint.core.engine import core_diagnostics
 from repo_lint.core.models import (
     Component,
     ComponentId,
@@ -69,7 +70,11 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
     if identifier.startswith(("sarj-github-", "sarj-delivery-")):
         return _run_github(fixture_id=identifier, source=source)
     manifest = _manifest(fixture_id=identifier, source=source)
-    diagnostics = SarjPolicy().evaluate(manifest)
+    diagnostics = (
+        core_diagnostics(manifest)
+        if identifier == "sarj-layout-overlapping-roots"
+        else SarjPolicy().evaluate(manifest)
+    )
     return RuleExampleResult(
         tuple(sorted((item.rule_id for item in diagnostics), key=str)), complete=True
     )
@@ -95,6 +100,12 @@ def _manifest_components(*, fixture_id: str, source: str) -> tuple[Component, ..
 
 def _layout_components(*, fixture_id: str, source: str) -> tuple[Component, ...]:
     match fixture_id:
+        case "sarj-layout-overlapping-roots":
+            parent, child = source.splitlines()
+            return (
+                Component(ComponentId("parent"), "service", parent, "@example/team"),
+                Component(ComponentId("child"), "service", child, "@example/team"),
+            )
         case "sarj-layout-component-path":
             return (_application("agent", path=_value(source=source, key="path")),)
         case "sarj-layout-operational-path":

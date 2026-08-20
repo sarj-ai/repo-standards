@@ -10,11 +10,16 @@ import re
 import stat
 import sys
 import tarfile
-from typing import TYPE_CHECKING, Annotated, ClassVar, final
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Protocol, final
 import zipfile
 
-from pydantic import BaseModel, ConfigDict
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 import typer
+
+from repo_lint.core.canonical import canonical_json
+from repo_lint.core.models import JSONValue
 
 
 if TYPE_CHECKING:
@@ -50,10 +55,8 @@ SITE_SUFFIXES = frozenset(
 PAGEFIND_SUFFIXES = frozenset({".pagefind", ".pf_fragment", ".pf_index", ".pf_meta"})
 REQUIRED_SITE_FILES = frozenset(
     {
-        "api/v2/catalog.json",
-        "api/v2/catalog.schema.json",
-        "api/v3/catalog.json",
-        "api/v3/catalog.schema.json",
+        "api/v4/catalog.json",
+        "api/v4/catalog.schema.json",
         "health.json",
         "index.html",
         "review/index.html",
@@ -109,8 +112,28 @@ class SiteRule(SiteCatalogModel):
     examples: tuple[SiteExample, ...]
 
 
+class SiteProvenance(SiteCatalogModel):
+    content_digest: str
+
+
+class SiteSchema(SiteCatalogModel):
+    schema_id: str
+    document: dict[str, JSONValue]
+
+
 class SiteCatalog(SiteCatalogModel):
+    kind: Literal["repo-lint.catalog"]
+    schema_version: Literal[4]
+    provenance: SiteProvenance
     rules: tuple[SiteRule, ...]
+    schemas: tuple[SiteSchema, ...]
+
+
+_JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
+
+
+class _SchemaValidator(Protocol):
+    def validate(self, instance: JSONValue) -> None: ...
 
 
 class HTMLTag(StrEnum):
@@ -313,9 +336,62 @@ def verify_site(directory: Path) -> list[str]:
         f"site:{name}: required generated file is missing"
         for name in sorted(REQUIRED_SITE_FILES - observed)
     )
+    violations.extend(verify_site_catalog(directory, observed))
     violations.extend(_verify_site_semantics(directory))
     violations.extend(_verify_site_csp(directory))
     return violations
+
+
+def verify_site_catalog(directory: Path, observed: set[str]) -> list[str]:
+    violations = [
+        f"site:{name}: legacy API contract is not publishable"
+        for name in sorted(observed)
+        if name.startswith(("api/v2/", "api/v3/"))
+    ]
+    catalog_path = directory / "api/v4/catalog.json"
+    schema_path = directory / "api/v4/catalog.schema.json"
+    if not catalog_path.is_file() or not schema_path.is_file():
+        return violations
+    try:
+        catalog_document = _JSON_OBJECT.validate_json(catalog_path.read_bytes(), strict=True)
+        schema_document = _JSON_OBJECT.validate_json(schema_path.read_bytes(), strict=True)
+        catalog = SiteCatalog.model_validate(catalog_document)
+    except ValidationError as error:
+        violations.append(f"site:api/v4/catalog.json: invalid catalog v4: {error}")
+        return violations
+    if "tombstones" in catalog_document:
+        violations.append("site:api/v4/catalog.json: tombstones are not part of catalog v4")
+    try:
+        _validate_schema(Draft202012Validator(schema_document), catalog_document)
+    except JsonSchemaValidationError as error:
+        violations.append(
+            f"site:api/v4/catalog.json: schema validation failed: {error.message}"
+        )
+    embedded = next(
+        (
+            descriptor.document
+            for descriptor in catalog.schemas
+            if descriptor.schema_id == "catalog"
+        ),
+        None,
+    )
+    if embedded != schema_document:
+        violations.append("site:api/v4/catalog.schema.json: must equal the embedded catalog schema")
+    schema_id = schema_document.get("$id")
+    if not isinstance(schema_id, str) or not schema_id.endswith("/catalog-v4.schema.json"):
+        violations.append("site:api/v4/catalog.schema.json: must identify catalog-v4.schema.json")
+    unsigned = dict(catalog_document)
+    provenance = dict(_JSON_OBJECT.validate_python(catalog_document["provenance"], strict=True))
+    provenance["content_digest"] = ""
+    unsigned["provenance"] = provenance
+    expected_digest = hashlib.sha256(canonical_json(unsigned).encode()).hexdigest()
+    if catalog.provenance.content_digest != expected_digest:
+        violations.append("site:api/v4/catalog.json: content digest does not match catalog bytes")
+    return violations
+
+
+def _validate_schema(validator: _SchemaValidator, instance: JSONValue) -> None:
+    validator.validate(instance)
 
 
 def _verify_site_csp(directory: Path) -> list[str]:
@@ -339,7 +415,7 @@ def _verify_site_csp(directory: Path) -> list[str]:
 
 def _verify_site_semantics(directory: Path) -> list[str]:
     violations: list[str] = []
-    catalog_path = directory / "api/v2/catalog.json"
+    catalog_path = directory / "api/v4/catalog.json"
     if not catalog_path.is_file():
         return violations
     payload = SiteCatalog.model_validate_json(catalog_path.read_bytes())

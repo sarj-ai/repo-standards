@@ -1,10 +1,10 @@
 {
-  "schema_version": 1,
-  "corpus_id": "openapi-public-v1",
+  "schema_version": 2,
+  "corpus_id": "openapi-public-v2",
   "purpose": "Deterministic public-contract calibration for OpenAPI and HTTP policy rules.",
   "selection": {
     "rule": "Select exactly the six audit-9 source IDs; order lexicographically by source_id; use the seed only for deterministic sampling within selected documents.",
-    "seed": "sarj-repo-lint|openapi-public-v1|2026-08-09",
+    "seed": "sarj-repo-lint|openapi-public-v2|2026-08-09",
     "selected_at": "2026-08-09",
     "replacement_policy": "No substitution. A source, pin, role, or selected path may change only in a reviewed new corpus version."
   },

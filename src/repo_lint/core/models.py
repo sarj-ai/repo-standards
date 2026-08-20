@@ -25,6 +25,7 @@ RuleMaturity = Literal["experimental", "beta", "stable", "deprecated"]
 AdapterStatus = Literal["complete", "incomplete", "failed"]
 DeliveryProvider = Literal["github"]
 MAX_RULE_TITLE_LENGTH = 72
+MAX_RULE_EXAMPLE_TITLE_LENGTH = 56
 
 
 def _empty_json_mapping() -> dict[str, JSONValue]:
@@ -137,10 +138,28 @@ class RuleExamplePair:
     language: ExampleLanguage
     flagged: str
     passes: str
+    title: str
+    severity: Severity
 
     def __post_init__(self) -> None:
-        if not self.fixture_id or not self.language or not self.flagged or not self.passes:
-            message = "rule examples require an id, language, flagged input, and passing input"
+        if (
+            any(
+                not value
+                for value in (
+                    self.fixture_id,
+                    self.language,
+                    self.flagged,
+                    self.passes,
+                    self.title,
+                )
+            )
+            or "\n" in self.title
+            or len(self.title) > MAX_RULE_EXAMPLE_TITLE_LENGTH
+        ):
+            message = (
+                "rule examples require an id, concise title, severity, language, flagged "
+                "input, and passing input"
+            )
             raise ValueError(message)
         if self.flagged == self.passes:
             message = f"rule example inputs must differ: {self.fixture_id}"

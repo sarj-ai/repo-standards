@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 _MANIFEST = b"""\
-schema_version = 1
+schema_version = 2
 repository_id = "example-repository"
 policy = "example"
 policy_version = 1
@@ -174,16 +174,7 @@ def test_selected_blob_reader_rejects_absent_and_duplicate_paths(tmp_path: Path)
 
 
 def test_core_catalog_is_stable_and_complete() -> None:
-    assert tuple(rule.rule_id for rule in core_rules()) == (
-        "core/layout/non-overlapping-root",
-        "core/migration/batch-too-large",
-        "core/migration/target-missing",
-        "core/migration/tracked-install-artifacts",
-        "core/migration/source-retained",
-        "core/migration/workspace-membership-lost",
-        "core/exception/expired",
-        "core/baseline/stale-entry",
-    )
+    assert tuple(rule.rule_id for rule in core_rules()) == ("repository/migration/consistency",)
 
 
 def test_migration_diagnostics_verify_tree_and_workspace_state(tmp_path: Path) -> None:
@@ -214,8 +205,8 @@ def test_migration_diagnostics_verify_tree_and_workspace_state(tmp_path: Path) -
     diagnostics = migration_diagnostics(load_repository_snapshot(repository))
 
     assert [item.rule_id for item in diagnostics] == [
-        "core/migration/source-retained",
-        "core/migration/workspace-membership-lost",
+        "repository/migration/consistency",
+        "repository/migration/consistency",
     ]
     assert diagnostics[0].observed_value == {
         "count": 25,
@@ -244,8 +235,8 @@ def test_migration_target_must_exist_in_selected_tree(tmp_path: Path) -> None:
     diagnostics = migration_diagnostics(load_repository_snapshot(repository))
 
     assert [item.rule_id for item in diagnostics] == [
-        "core/migration/target-missing",
-        "core/migration/source-retained",
+        "repository/migration/consistency",
+        "repository/migration/consistency",
     ]
 
 
@@ -346,7 +337,7 @@ owner = "@example/alpha"
     assert diagnostics == ()
 
 
-def test_migration_reports_tracked_install_artifacts_once_with_bounded_evidence(
+def test_install_artifacts_are_not_a_migration_policy(
     tmp_path: Path,
 ) -> None:
     repository = _committed_repository(tmp_path)
@@ -377,19 +368,7 @@ def test_migration_reports_tracked_install_artifacts_once_with_bounded_evidence(
     )
 
     diagnostics = migration_diagnostics(load_repository_snapshot(repository))
-    artifact = next(
-        item for item in diagnostics if item.rule_id == "core/migration/tracked-install-artifacts"
-    )
-
-    assert artifact.observed_value == {
-        "count": 25,
-        "paths": [".yarn/install-state.gz"]
-        + [f"node_modules/dependency-{index:02d}/index.js" for index in range(19)],
-        "truncated": True,
-    }
-    assert (
-        sum(item.rule_id == "core/migration/tracked-install-artifacts" for item in diagnostics) == 1
-    )
+    assert all(item.subject_kind != "tracked-install-artifacts" for item in diagnostics)
 
 
 def test_install_artifacts_are_out_of_scope_without_a_declared_migration(tmp_path: Path) -> None:
@@ -415,7 +394,7 @@ def test_install_artifacts_are_out_of_scope_without_a_declared_migration(tmp_pat
     assert diagnostics == ()
 
 
-def test_multiple_declared_moves_produce_one_advisory_batch_finding(tmp_path: Path) -> None:
+def test_multiple_consistent_declared_moves_are_allowed(tmp_path: Path) -> None:
     repository = _committed_repository(tmp_path)
     manifest = _manifest_with_migration(
         source="apps/application", target="applications/alpha/api"
@@ -453,12 +432,4 @@ to = "applications/alpha/worker"
     )
 
     diagnostics = migration_diagnostics(load_repository_snapshot(repository))
-    batch = next(item for item in diagnostics if item.rule_id == "core/migration/batch-too-large")
-
-    assert batch.severity == "warning"
-    assert batch.observed_value == {
-        "count": 2,
-        "component_ids": ["application", "worker"],
-        "truncated": False,
-    }
-    assert sum(item.rule_id == "core/migration/batch-too-large" for item in diagnostics) == 1
+    assert all(item.subject_kind != "migration-batch" for item in diagnostics)

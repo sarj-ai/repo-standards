@@ -119,7 +119,7 @@ class RuntimeOperation:
 
 @dataclass(frozen=True, slots=True)
 class ApiOperationMap:
-    schema_version: Literal["api-operation-map.v1"]
+    schema_version: Literal["api-operation-map.v2"]
     openapi_sha256: str
     operations: tuple[RuntimeOperation, ...]
 
@@ -396,7 +396,7 @@ def detect_instrumentation(files: tuple[TrackedFile, ...]) -> InstrumentationDet
     )
     ordered_issues = tuple(sorted(issues, key=lambda item: (item.path, item.code, item.message)))
     return InstrumentationDetectionReport(
-        1,
+        2,
         "incomplete" if ordered_issues else "complete",
         candidates,
         ordered_issues,
@@ -724,9 +724,9 @@ def parse_api_operation_map(content: bytes) -> ApiOperationMap:
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
         InstrumentationInputError.fail("cannot parse operation map JSON", cause=error)
     if set(root) != {"schema_version", "openapi_sha256", "operations"}:
-        InstrumentationInputError.fail("operation map keys must match api-operation-map.v1")
-    if root["schema_version"] != "api-operation-map.v1":
-        InstrumentationInputError.fail("operation map schema_version must be api-operation-map.v1")
+        InstrumentationInputError.fail("operation map keys must match api-operation-map.v2")
+    if root["schema_version"] != "api-operation-map.v2":
+        InstrumentationInputError.fail("operation map schema_version must be api-operation-map.v2")
     digest = root["openapi_sha256"]
     if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
         InstrumentationInputError.fail("operation map openapi_sha256 must be lowercase SHA-256")
@@ -751,7 +751,7 @@ def parse_api_operation_map(content: bytes) -> ApiOperationMap:
         runtime_keys.add(runtime_key)
         operations.append(parsed)
     return ApiOperationMap(
-        "api-operation-map.v1",
+        "api-operation-map.v2",
         digest,
         tuple(
             sorted(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .models import (
     FixtureId,
     RuleDefinition,
@@ -49,9 +51,11 @@ _CORE_RULES = (
         ),
         examples=(
             RuleExamplePair(
-                fixture_id=FixtureId("core.layout.non-overlapping-root.v1"),
+                fixture_id=FixtureId("core.layout.non-overlapping-root.v2"),
+                title="Overlapping component roots",
+                severity="error",
                 language="toml",
-                flagged='''schema_version = 1
+                flagged='''schema_version = 2
 repository_id = "example-repository"
 policy = "example"
 policy_version = 1
@@ -67,7 +71,7 @@ id = "worker"
 kind = "worker"
 path = "services/payments/worker"
 owner = "@example/payments"''',
-                passes='''schema_version = 1
+                passes='''schema_version = 2
 repository_id = "example-repository"
 policy = "example"
 policy_version = 1
@@ -117,9 +121,11 @@ owner = "@example/payments"''',
         ),
         examples=(
             RuleExamplePair(
-                fixture_id=FixtureId("core.migration.batch-too-large.v1"),
+                fixture_id=FixtureId("core.migration.batch-too-large.v2"),
+                title="Multiple migrations",
+                severity="warning",
                 language="toml",
-                flagged='''schema_version = 1
+                flagged='''schema_version = 2
 repository_id = "example-repository"
 policy = "example"
 policy_version = 1
@@ -145,7 +151,7 @@ to = "applications/alpha/api"
 component_id = "worker"
 from = "apps/worker"
 to = "applications/alpha/worker"''',
-                passes='''schema_version = 1
+                passes='''schema_version = 2
 repository_id = "example-repository"
 policy = "example"
 policy_version = 1
@@ -191,7 +197,9 @@ to = "applications/alpha/api"''',
         ),
         examples=(
             RuleExamplePair(
-                fixture_id=FixtureId("core.migration.target-missing.v1"),
+                fixture_id=FixtureId("core.migration.target-missing.v2"),
+                title="Missing migration target",
+                severity="warning",
                 language="text",
                 flagged="README.md",
                 passes="applications/alpha/api/pyproject.toml",
@@ -231,7 +239,9 @@ to = "applications/alpha/api"''',
         ),
         examples=(
             RuleExamplePair(
-                fixture_id=FixtureId("core.migration.tracked-install-artifacts.v1"),
+                fixture_id=FixtureId("core.migration.tracked-install-artifacts.v2"),
+                title="Tracked install artifacts",
+                severity="warning",
                 language="text",
                 flagged="""applications/alpha/api/pyproject.toml
 node_modules/example/index.js
@@ -287,7 +297,9 @@ package-lock.json
         ),
         examples=(
             RuleExamplePair(
-                fixture_id=FixtureId("core.migration.source-retained.v1"),
+                fixture_id=FixtureId("core.migration.source-retained.v2"),
+                title="Retained migration source",
+                severity="warning",
                 language="text",
                 flagged="""apps/api/legacy.py
 applications/alpha/api/main.py""",
@@ -330,7 +342,9 @@ applications/alpha/api/main.py""",
         ),
         examples=(
             RuleExamplePair(
-                fixture_id=FixtureId("core.migration.workspace-membership-lost.v1"),
+                fixture_id=FixtureId("core.migration.workspace-membership-lost.v2"),
+                title="Lost workspace membership",
+                severity="warning",
                 language="json",
                 flagged='{"private":true,"workspaces":["apps/*"]}',
                 passes='{"private":true,"workspaces":["applications/*/*"]}',
@@ -377,7 +391,9 @@ applications/alpha/api/main.py""",
         ),
         examples=(
             RuleExamplePair(
-                fixture_id=FixtureId("core.exception.expired.v1"),
+                fixture_id=FixtureId("core.exception.expired.v2"),
+                title="Expired exception",
+                severity="error",
                 language="toml",
                 flagged="""rule_id = "core/layout/non-overlapping-root"
 component_id = "worker"
@@ -436,16 +452,18 @@ expires_on = "2029-04-01"
         ),
         examples=(
             RuleExamplePair(
-                fixture_id=FixtureId("core.baseline.stale-entry.v1"),
+                fixture_id=FixtureId("core.baseline.stale-entry.v2"),
+                title="Resolved baseline entry",
+                severity="error",
                 language="json",
                 flagged=(
-                    '{"schema_version":1,"repository_id":"example-repository",'
+                    '{"schema_version":2,"repository_id":"example-repository",'
                     '"policy":"example","policy_version":1,"scope_digest":"scope",'
                     '"fingerprints":['
                     '"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"]}'
                 ),
                 passes=(
-                    '{"schema_version":1,"repository_id":"example-repository",'
+                    '{"schema_version":2,"repository_id":"example-repository",'
                     '"policy":"example","policy_version":1,"scope_digest":"scope",'
                     '"fingerprints":[]}'
                 ),
@@ -460,4 +478,46 @@ expires_on = "2029-04-01"
 
 
 def core_rules() -> tuple[RuleDefinition, ...]:
-    return _CORE_RULES
+    by_id = {str(rule.rule_id): rule for rule in _CORE_RULES}
+    sources = tuple(
+        by_id[rule_id]
+        for rule_id in (
+            "core/migration/target-missing",
+            "core/migration/source-retained",
+            "core/migration/workspace-membership-lost",
+        )
+    )
+    representative = sources[0]
+    return (
+        replace(
+            representative,
+            rule_id=RuleId("repository/migration/consistency"),
+            title="Complete component migrations",
+            summary="A declared component move is complete in the selected Git tree.",
+            detects="Reports a missing target, retained source, or lost workspace membership.",
+            impact=(
+                "Incomplete moves split ownership and build discovery across old and new paths."
+            ),
+            remediation=RuleRemediation(
+                summary="Finish every declared relocation as one internally consistent move.",
+                steps=(
+                    "Commit the component at its declared target.",
+                    "Empty or explicitly reassign its former source root.",
+                    "Update native workspace membership for relocated packages.",
+                ),
+                validation=("Run repo-lint against the resulting commit.",),
+            ),
+            examples=tuple(example for rule in sources for example in rule.examples),
+            evidence_required=(
+                "tracked paths plus parsed package and workspace metadata from the selected tree",
+            ),
+            non_goals=(
+                "Checking untracked worktree files.",
+                "Executing repository build commands.",
+                "Forbidding separately owned compatibility components.",
+            ),
+            false_positive_controls=tuple(
+                dict.fromkeys(item for rule in sources for item in rule.false_positive_controls)
+            ),
+        ),
+    )

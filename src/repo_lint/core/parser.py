@@ -38,6 +38,7 @@ _MAX_MIGRATIONS = 10_000
 _MAX_EXCEPTIONS = 1_000
 _ASCII_CONTROL_LIMIT = 32
 _DELIVERY_BRANCH_COUNT = 3
+_INPUT_SCHEMA_VERSION = 2
 _OBJECT_MAPPING = TypeAdapter(dict[str, object])
 
 
@@ -304,8 +305,8 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
     }
     required = {"schema_version", "repository_id", "policy", "policy_version", "components"}
     _strict_keys(data, fields, required, "manifest")
-    if data["schema_version"] != 1:
-        ConfigurationError.fail("manifest.schema_version must be 1")
+    if data["schema_version"] != _INPUT_SCHEMA_VERSION:
+        ConfigurationError.fail(f"manifest.schema_version must be {_INPUT_SCHEMA_VERSION}")
     policy_version = data["policy_version"]
     if not isinstance(policy_version, int) or isinstance(policy_version, bool):
         ConfigurationError.fail("manifest.policy_version must be an integer")
@@ -355,8 +356,8 @@ def parse_baseline_bytes(content: bytes) -> Baseline:
         "fingerprints",
     }
     _strict_keys(data, fields, fields, "baseline")
-    if data["schema_version"] != 1:
-        ConfigurationError.fail("baseline.schema_version must be 1")
+    if data["schema_version"] != _INPUT_SCHEMA_VERSION:
+        ConfigurationError.fail(f"baseline.schema_version must be {_INPUT_SCHEMA_VERSION}")
     raw_fingerprints = _list(data["fingerprints"], "baseline.fingerprints")
     if not all(isinstance(item, str) for item in raw_fingerprints):
         ConfigurationError.fail("baseline fingerprints must be strings")

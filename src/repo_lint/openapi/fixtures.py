@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
@@ -36,11 +37,33 @@ class OpenApiRuleFixture:
     @property
     def example(self) -> RuleExamplePair:
         return RuleExamplePair(
-            self.fixture_id,
-            "json",
-            render_request(self.flagged),
-            render_request(self.passes),
+            fixture_id=self.fixture_id,
+            language="json",
+            flagged=render_request(self.flagged),
+            passes=render_request(self.passes),
+            title=_example_title(self.fixture_id),
+            severity=self.expected_findings[0].severity,
         )
+
+
+def _example_title(fixture_id: FixtureId) -> str:
+    suffix = str(fixture_id).rsplit("/", maxsplit=1)[-1]
+    return {
+        "remote": "Remote reference",
+        "response": "Forbidden response content",
+        "trace": "TRACE request body",
+        "304": "Method and status mismatch",
+        "literal-http": "Unencrypted server URL",
+        "password": "OAuth password flow",
+        "implicit": "OAuth implicit flow",
+        "public": "Public operation requires authentication",
+        "authenticated": "Authenticated operation allows anonymous access",
+        "media-type": "Problem Details media type",
+        "status-member": "Problem Details status member",
+        "reversed": "Sunset before deprecation",
+        "incomplete": "Incomplete provenance",
+        "digest-mismatch": "Contradictory provenance digest",
+    }[suffix]
 
 
 def _bytes(value: object) -> bytes:
@@ -75,7 +98,7 @@ def _spec(
 def _semantics(*, operations: Sequence[object] = (), artifacts: Sequence[object] = ()) -> bytes:
     return _bytes(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "operations": operations,
             "artifacts": artifacts,
         }
@@ -118,7 +141,7 @@ def _finding(rule_id: str, severity: Severity) -> tuple[ExpectedFinding, ...]:
 
 
 def _reference_fixture() -> OpenApiRuleFixture:
-    rule_id = "rest/source/nonhermetic-ref"
+    rule_id = "api/references/local-resolution"
     flagged = _request(
         _spec(components={"schemas": {"Widget": {"$ref": "https://example.invalid/schema.json"}}})
     )
@@ -140,7 +163,7 @@ def _reference_fixture() -> OpenApiRuleFixture:
 
 
 def _forbidden_response_fixture() -> OpenApiRuleFixture:
-    rule_id = "rest/http/forbidden-content"
+    rule_id = "api/http/message-semantics"
     flagged = _request(
         _spec(
             operation={
@@ -175,7 +198,7 @@ def _forbidden_response_fixture() -> OpenApiRuleFixture:
 
 
 def _forbidden_trace_fixture() -> OpenApiRuleFixture:
-    rule_id = "rest/http/forbidden-content"
+    rule_id = "api/http/message-semantics"
     flagged = _request(
         _spec(
             method="trace",
@@ -198,7 +221,7 @@ def _forbidden_trace_fixture() -> OpenApiRuleFixture:
 
 
 def _status_method_fixture() -> OpenApiRuleFixture:
-    rule_id = "rest/http/status-method-contradiction"
+    rule_id = "api/http/message-semantics"
     operation = {"responses": {"304": {"description": "cached"}}}
     return _fixture(
         fixture_id=f"{rule_id}/304",
@@ -210,7 +233,7 @@ def _status_method_fixture() -> OpenApiRuleFixture:
 
 
 def _server_fixture() -> OpenApiRuleFixture:
-    rule_id = "rest/security/insecure-server"
+    rule_id = "api/security/transport"
     return _fixture(
         fixture_id=f"{rule_id}/literal-http",
         rule_id=rule_id,
@@ -221,7 +244,7 @@ def _server_fixture() -> OpenApiRuleFixture:
 
 
 def _oauth_fixture(flow: str, replacement: str, severity: Severity) -> OpenApiRuleFixture:
-    rule_id = f"rest/security/oauth-{flow}-grant"
+    rule_id = "api/security/authentication"
 
     def request(selected_flow: str) -> AnalysisRequest:
         return _request(
@@ -246,7 +269,7 @@ def _exposure_fixture(
     flagged_security: list[object],
     passing_security: list[object],
 ) -> OpenApiRuleFixture:
-    rule_id = "rest/security/exposure-contradiction"
+    rule_id = "api/security/authentication"
     semantics = _semantics(
         operations=[
             {
@@ -267,7 +290,7 @@ def _exposure_fixture(
 def _problem_fixture(
     suffix: str, flagged_response: Mapping[str, object], passing_response: Mapping[str, object]
 ) -> OpenApiRuleFixture:
-    rule_id = "rest/errors/problem-contract"
+    rule_id = "api/errors/problem-details"
     semantics = _semantics(
         operations=[
             {
@@ -293,7 +316,7 @@ def _problem_fixture(
 
 
 def _sunset_fixture() -> OpenApiRuleFixture:
-    rule_id = "rest/lifecycle/sunset-order"
+    rule_id = "api/lifecycle/deprecation-window"
 
     def request(deprecation: str, sunset: str) -> AnalysisRequest:
         return _request(
@@ -319,11 +342,7 @@ def _sunset_fixture() -> OpenApiRuleFixture:
 
 
 def _artifact_fixture(suffix: str, *, incomplete: bool) -> OpenApiRuleFixture:
-    rule_id = (
-        "rest/artifact/provenance-incomplete"
-        if incomplete
-        else "rest/artifact/provenance-contradiction"
-    )
+    rule_id = "api/artifact/provenance"
     return _fixture(
         fixture_id=f"{rule_id}/{suffix}",
         rule_id=rule_id,
@@ -409,9 +428,26 @@ REST_RULE_FIXTURES: tuple[OpenApiRuleFixture, ...] = (
     _artifact_fixture("digest-mismatch", incomplete=False),
 )
 
+_CONSOLIDATED_RULE_TARGETS: Mapping[str, str] = MappingProxyType(
+    {
+        "rest/source/nonhermetic-ref": "api/references/local-resolution",
+        "rest/http/forbidden-content": "api/http/message-semantics",
+        "rest/http/status-method-contradiction": "api/http/message-semantics",
+        "rest/security/insecure-server": "api/security/transport",
+        "rest/security/oauth-password-grant": "api/security/authentication",
+        "rest/security/oauth-implicit-grant": "api/security/authentication",
+        "rest/security/exposure-contradiction": "api/security/authentication",
+        "rest/errors/problem-contract": "api/errors/problem-details",
+        "rest/lifecycle/sunset-order": "api/lifecycle/deprecation-window",
+        "rest/artifact/provenance-incomplete": "api/artifact/provenance",
+        "rest/artifact/provenance-contradiction": "api/artifact/provenance",
+    }
+)
+
 
 def examples_for_rule(rule_id: RuleId) -> tuple[RuleExamplePair, ...]:
-    return tuple(fixture.example for fixture in REST_RULE_FIXTURES if fixture.rule_id == rule_id)
+    selected = RuleId(_CONSOLIDATED_RULE_TARGETS.get(str(rule_id), str(rule_id)))
+    return tuple(fixture.example for fixture in REST_RULE_FIXTURES if fixture.rule_id == selected)
 
 
 def render_request(request: AnalysisRequest) -> str:

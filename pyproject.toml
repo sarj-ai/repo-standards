@@ -1,6 +1,6 @@
 [project]
 name = "sarj-repo-lint"
-version = "0.7.0"
+version = "0.8.0"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
@@ -33,7 +33,7 @@ Documentation = "https://repo-standards.sarj.ai"
 repo-lint = "repo_lint.cli:main"
 sarj-repo-lint = "repo_lint.cli:main"
 
-[project.entry-points."repo_lint.policies.v1"]
+[project.entry-points."repo_lint.policies.v2"]
 sarj = "repo_lint.policy_sarj:SarjPolicy"
 
 [dependency-groups]
@@ -53,6 +53,7 @@ module-name = "repo_lint"
 
 [tool.pytest.ini_options]
 addopts = "-q --import-mode=importlib"
+pythonpath = [".", "src"]
 testpaths = ["tests"]
 
 [tool.ruff]

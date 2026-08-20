@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from enum import Enum, StrEnum
 from hashlib import sha256
 import inspect
@@ -54,7 +53,7 @@ if TYPE_CHECKING:
 
 
 _CATALOG_KIND = "repo-lint.catalog"
-_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v3.schema.json"
+_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v4.schema.json"
 _PUBLIC_REFERENCE_HOSTS = frozenset(
     {
         "docs.github.com",
@@ -64,7 +63,6 @@ _PUBLIC_REFERENCE_HOSTS = frozenset(
     }
 )
 _JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
-_CATALOG_V2_INTRODUCED_IN = "0.6.0"
 _ANNOTATION_OBJECT = TypeAdapter(dict[str, object])
 
 CommandId = NewType("CommandId", str)
@@ -127,6 +125,8 @@ class SafetyDescriptor(CatalogModel):
 
 class ExampleDescriptor(CatalogModel):
     fixture_id: NonEmptyText
+    title: Annotated[str, Field(min_length=1, max_length=56)]
+    severity: Literal["warning", "error"]
     language: ExampleLanguage
     flagged: NonEmptyText
     passes: NonEmptyText
@@ -257,7 +257,6 @@ class PolicyRuleBinding(CatalogModel):
     rule_id: RuleId
     rule_version: int
     severity: Literal["warning", "error"]
-    enforcement_maturity: Literal["advisory", "enforced"]
     classification: str | None = None
     evidence_level: str | None = None
     precedence: int | None = None
@@ -308,15 +307,9 @@ class SchemaDescriptor(CatalogModel):
     document: JSONValue
 
 
-class TombstoneDescriptor(CatalogModel):
-    rule_id: RuleId
-    removed_in: str
-    replacement_rule_id: RuleId | None = None
-
-
 class Catalog(CatalogModel):
     kind: Literal["repo-lint.catalog"] = _CATALOG_KIND
-    schema_version: Literal[3] = 3
+    schema_version: Literal[4] = 4
     catalog_version: str
     product: ProductDescriptor
     provenance: ProvenanceDescriptor
@@ -327,7 +320,6 @@ class Catalog(CatalogModel):
     rules: tuple[RuleDescriptor, ...]
     commands: tuple[CommandDescriptor, ...]
     schemas: tuple[SchemaDescriptor, ...]
-    tombstones: tuple[TombstoneDescriptor, ...] = ()
 
     @model_validator(mode="after")
     def validate_taxonomy(self) -> Self:
@@ -384,17 +376,6 @@ def _validate_rule_graph(catalog: Catalog) -> None:
     if len(rules_by_id) != len(catalog.rules):
         message = "catalog active rule ids must be unique"
         raise ValueError(message)
-    tombstone_ids = {tombstone.rule_id for tombstone in catalog.tombstones}
-    if len(tombstone_ids) != len(catalog.tombstones) or set(rules_by_id) & tombstone_ids:
-        message = "catalog tombstone ids must be unique and inactive"
-        raise ValueError(message)
-    for tombstone in catalog.tombstones:
-        replacement = tombstone.replacement_rule_id
-        if replacement is not None and (
-            replacement == tombstone.rule_id or replacement not in rules_by_id
-        ):
-            message = f"catalog tombstone has an invalid replacement: {tombstone.rule_id}"
-            raise ValueError(message)
     policy_ids = {policy.policy_id for policy in catalog.policies}
     if len(policy_ids) != len(catalog.policies):
         message = "catalog policy ids must be unique"
@@ -448,80 +429,6 @@ def catalog_schema() -> dict[str, JSONValue]:
     schema = _JSON_OBJECT.validate_python(Catalog.model_json_schema(), strict=True)
     schema["$id"] = _CATALOG_SCHEMA_ID
     return schema
-
-
-def catalog_v2_payload(catalog: Catalog) -> dict[str, JSONValue]:
-    payload = _JSON_OBJECT.validate_python(catalog.model_dump(mode="json"), strict=True)
-    payload["schema_version"] = 2
-    _remove_payload_fields(payload.get("rules"), ("review",))
-    policies = payload.get("policies")
-    if isinstance(policies, list):
-        for policy in policies:
-            if isinstance(policy, dict):
-                _remove_payload_fields(
-                    policy.get("bindings"),
-                    ("review_status", "default_activation"),
-                )
-    provenance = payload.get("provenance")
-    if not isinstance(provenance, dict):
-        message = "catalog provenance is missing"
-        raise TypeError(message)
-    provenance["content_digest"] = ""
-    provenance["content_digest"] = sha256(canonical_json(payload).encode()).hexdigest()
-    return payload
-
-
-def _remove_payload_fields(value: JSONValue | None, fields: tuple[str, ...]) -> None:
-    if not isinstance(value, list):
-        return
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        for field in fields:
-            item.pop(field, None)
-
-
-def catalog_v2_schema() -> dict[str, JSONValue]:
-    schema = deepcopy(catalog_schema())
-    schema["$id"] = "https://repo-standards.sarj.ai/schema/catalog-v2.schema.json"
-    definitions = schema.get("$defs")
-    if not isinstance(definitions, dict):
-        message = "catalog schema definitions are missing"
-        raise TypeError(message)
-    properties = schema.get("properties")
-    if not isinstance(properties, dict):
-        message = "catalog schema properties are missing"
-        raise TypeError(message)
-    properties["schema_version"] = {
-        "const": 2,
-        "default": 2,
-        "title": "Schema Version",
-        "type": "integer",
-    }
-    _remove_schema_fields(definitions, "RuleDescriptor", ("review",))
-    _remove_schema_fields(
-        definitions,
-        "PolicyRuleBinding",
-        ("review_status", "default_activation"),
-    )
-    return _JSON_OBJECT.validate_python(schema, strict=True)
-
-
-def _remove_schema_fields(
-    definitions: dict[str, JSONValue], definition_name: str, fields: tuple[str, ...]
-) -> None:
-    definition = definitions.get(definition_name)
-    if not isinstance(definition, dict):
-        message = f"catalog schema definition is missing: {definition_name}"
-        raise TypeError(message)
-    properties = definition.get("properties")
-    required = definition.get("required")
-    if not isinstance(properties, dict) or not isinstance(required, list):
-        message = f"catalog schema definition is malformed: {definition_name}"
-        raise TypeError(message)
-    for field in fields:
-        properties.pop(field, None)
-    definition["required"] = [item for item in required if item not in fields]
 
 
 def report_schema() -> dict[str, JSONValue]:
@@ -592,6 +499,7 @@ def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
     commands = _commands(app)
     policies = _policies(registry)
     rules = _rules(registry)
+    used_taxonomy = {(rule.category_id, rule.topic_id) for rule in rules}
     schemas = _schemas()
     catalog = Catalog(
         catalog_version=package_version,
@@ -635,26 +543,16 @@ def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
                         order=topic.order,
                     )
                     for topic in category.topics
+                    if (category.category_id, topic.topic_id) in used_taxonomy
                 ),
             )
             for category in CATEGORIES
+            if any(category_id == category.category_id for category_id, _topic_id in used_taxonomy)
         ),
         policies=policies,
         rules=rules,
         commands=commands,
         schemas=schemas,
-        tombstones=(
-            TombstoneDescriptor(
-                rule_id=RuleId("rest/artifact/provenance"),
-                removed_in=_CATALOG_V2_INTRODUCED_IN,
-                replacement_rule_id=RuleId("rest/artifact/provenance-incomplete"),
-            ),
-            TombstoneDescriptor(
-                rule_id=RuleId("sarj/layout/unknown-product"),
-                removed_in=_CATALOG_V2_INTRODUCED_IN,
-                replacement_rule_id=RuleId("sarj/schema/component-fields"),
-            ),
-        ),
     )
     digest_payload = _JSON_OBJECT.validate_python(catalog.model_dump(mode="json"), strict=True)
     digest = sha256(canonical_json(digest_payload).encode()).hexdigest()
@@ -676,7 +574,6 @@ def _policies(registry: PolicyRegistry) -> tuple[PolicyDescriptor, ...]:
                     rule_id=RuleId(str(rule.rule_id)),
                     rule_version=rule.version,
                     severity=rule.severity,
-                    enforcement_maturity=("advisory" if rule.severity == "warning" else "enforced"),
                     classification=item.classification.value if item else None,
                     evidence_level=item.evidence if item else None,
                     precedence=item.precedence if item else None,
@@ -756,6 +653,8 @@ def _rule_descriptor(rule: Rule, source_path: str) -> RuleDescriptor:
         examples=tuple(
             ExampleDescriptor(
                 fixture_id=str(example.fixture_id),
+                title=example.title,
+                severity=example.severity,
                 language=example.language,
                 flagged=example.flagged,
                 passes=example.passes,
@@ -968,16 +867,15 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
 
 def _schemas() -> tuple[SchemaDescriptor, ...]:
     documents = (
-        ("report", "Repository analysis report", 1, "report", report_schema()),
+        ("report", "Repository analysis report", 2, "report", report_schema()),
         (
             "openapi-analysis",
             "OpenAPI analysis report",
-            1,
+            2,
             "openapi-analysis",
             openapi_report_schema(),
         ),
-        ("catalog-v2", "Repo-lint public catalog v2", 2, "catalog-v2", catalog_v2_schema()),
-        ("catalog", "Repo-lint public catalog", 3, "catalog", catalog_schema()),
+        ("catalog", "Repo-lint public catalog", 4, "catalog", catalog_schema()),
     )
     return tuple(
         SchemaDescriptor(

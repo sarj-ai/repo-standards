@@ -1,9 +1,9 @@
 {
-  "schema_version": 1,
-  "corpus_id": "public-oss-v1",
+  "schema_version": 2,
+  "corpus_id": "public-oss-v2",
   "selection": {
-    "rule": "stratified-anchor-v1",
-    "seed": "sarj-repo-lint|public-oss-v1|2026-08-09",
+    "rule": "stratified-anchor-v2",
+    "seed": "sarj-repo-lint|public-oss-v2|2026-08-09",
     "selected_at": "2026-08-09",
     "replacement_policy": "new-version-only"
   },

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
-
-if TYPE_CHECKING:
-    from .models import RuleId
+from .errors import ConfigurationError
+from .models import RuleId
 
 
 ReviewCheck = Literal[
@@ -62,6 +61,18 @@ class ApprovedRuleReview:
 
 type RuleReview = PendingRuleReview | ApprovedRuleReview
 
+
+@dataclass(frozen=True, slots=True)
+class RuleVersion:
+    rule_id: RuleId
+    version: int
+
+    def __post_init__(self) -> None:
+        if self.version < 1:
+            message = "rule versions must be positive"
+            raise ValueError(message)
+
+
 # Approval is deliberately version-bound. Adding an entry makes a reviewed rule
 # available to consumers; it never activates that rule in an existing repository.
 APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = ()
@@ -74,5 +85,22 @@ def review_for(rule_id: RuleId, version: int) -> RuleReview:
     return PendingRuleReview()
 
 
-def approved_rule_ids() -> frozenset[RuleId]:
-    return frozenset(rule_id for rule_id, _version, _review in APPROVED_RULE_REVIEWS)
+def approved_rule_versions() -> frozenset[RuleVersion]:
+    approved = frozenset(
+        RuleVersion(rule_id, version) for rule_id, version, _review in APPROVED_RULE_REVIEWS
+    )
+    if len(approved) != len(APPROVED_RULE_REVIEWS):
+        message = "approved rule reviews must have unique rule ID and version pairs"
+        raise ValueError(message)
+    return approved
+
+
+def activated_rule_versions(requested_rule_ids: tuple[str, ...]) -> frozenset[RuleVersion]:
+    if len(requested_rule_ids) != len(set(requested_rule_ids)):
+        ConfigurationError.fail("enabled rule IDs must be unique")
+    approved = approved_rule_versions()
+    approved_ids = {str(item.rule_id) for item in approved}
+    unavailable = sorted(set(requested_rule_ids) - approved_ids)
+    if unavailable:
+        ConfigurationError.fail(f"rules are not approved for activation: {', '.join(unavailable)}")
+    return frozenset(item for item in approved if str(item.rule_id) in requested_rule_ids)

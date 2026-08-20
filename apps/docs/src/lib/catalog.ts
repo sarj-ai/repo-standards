@@ -1,12 +1,8 @@
 import rawCatalogJson from '../generated/catalog.json?raw';
-import rawCatalogV2Json from '../generated/catalog-v2.json?raw';
 import { generatedCatalog } from '../generated/catalog.generated';
-import { generatedCatalogV2 } from '../generated/catalog-v2.generated';
 
 export const catalog = generatedCatalog;
 export const catalogJson = rawCatalogJson;
-export const catalogV2Json = rawCatalogV2Json;
-export const catalogV2 = generatedCatalogV2;
 export type Catalog = typeof catalog;
 export type Rule = Catalog['rules'][number];
 export type Category = Catalog['categories'][number];
@@ -18,6 +14,7 @@ export interface RuleView {
   readonly rule: Rule;
   readonly href: string;
   readonly searchText: string;
+  readonly category: string;
 }
 
 export interface TopicView {
@@ -55,6 +52,7 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
           .map((rule) => ({
             rule,
             href: ruleHref(rule),
+            category: categoryValue.label,
             searchText: `${rule.title} ${rule.summary} ${rule.rule_id} ${categoryValue.label} ${topicValue.label} ${rule.tags.join(' ')}`.toLocaleLowerCase('en'),
           }));
         if (rules.length === 0) throw new TypeError(`Rule topic has no rules: ${topicValue.topic_id}`);
@@ -78,22 +76,25 @@ const approvedRuleIds = new Set(approvedRules.map((rule) => rule.rule_id));
 export function rulePage(rule: Rule) {
   const categoryValue = referenceCatalog.find((item) => item.category.category_id === rule.category_id);
   const topicValue = categoryValue?.topics.find((item) => item.topic.topic_id === rule.topic_id);
-  const index = topicValue?.rules.findIndex((item) => item.rule.rule_id === rule.rule_id) ?? -1;
+  const peerRules = referenceCatalog.flatMap((category) => category.topics)
+    .flatMap((topic) => topic.rules)
+    .filter((item) => hasReviewStatus(item.rule, rule.review.status));
+  const index = peerRules.findIndex((item) => item.rule.rule_id === rule.rule_id);
   if (categoryValue === undefined || topicValue === undefined || index < 0) {
     throw new TypeError(`Rule is not present in the reference catalog: ${rule.rule_id}`);
   }
   return {
     category: categoryValue,
     topic: topicValue,
-    current: topicValue.rules[index],
-    previous: index > 0 ? topicValue.rules[index - 1] : undefined,
-    next: index < topicValue.rules.length - 1 ? topicValue.rules[index + 1] : undefined,
+    current: peerRules[index],
+    previous: index > 0 ? peerRules[index - 1] : undefined,
+    next: index < peerRules.length - 1 ? peerRules[index + 1] : undefined,
   };
 }
 
 export function referenceSidebar() {
   return [
-    { label: 'Overview', link: '/' },
+    { label: 'About', link: '/' },
     {
       label: 'Rules',
       items: [

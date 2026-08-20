@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from repo_lint.core.models import (
     RuleDefinition,
     RuleId,
@@ -194,7 +196,7 @@ RULES: tuple[RuleDefinition, ...] = (
         false_positive_controls=(
             "Only exact flow keys under a security scheme whose type is oauth2 are checked.",
             "Scheme names, descriptions, and non-OAuth scheme types are ignored.",
-            "The finding remains advisory.",
+            "Only the declared flow key is evaluated.",
         ),
         upstream=("OAuth security guidance", "OpenAPI conformance tooling"),
         references=(_OAS, _OAUTH_SECURITY),
@@ -327,7 +329,7 @@ RULES: tuple[RuleDefinition, ...] = (
         false_positive_controls=(
             "Only explicit non-source artifact declarations are checked.",
             "Paths do not imply generation, and repository code is never executed.",
-            "Missing fields remain advisory; contradictory evidence uses a separate error rule.",
+            "Missing and contradictory evidence remain distinguishable issue kinds.",
         ),
         upstream=("artifact provenance and OpenAPI bundling workflows",),
         references=(_OAS,),
@@ -358,7 +360,7 @@ RULES: tuple[RuleDefinition, ...] = (
         false_positive_controls=(
             "Only explicit non-source artifact declarations are checked.",
             "Digest comparisons use the exact supplied bytes without executing repository code.",
-            "Missing optional provenance fields use the separate advisory rule.",
+            "Missing and contradictory evidence remain distinguishable issue kinds.",
         ),
         upstream=("artifact provenance and OpenAPI bundling workflows",),
         references=(_OAS,),
@@ -367,4 +369,166 @@ RULES: tuple[RuleDefinition, ...] = (
 
 
 def rules() -> tuple[RuleDefinition, ...]:
-    return tuple(sorted(RULES, key=lambda item: item.rule_id))
+    by_id = {str(rule.rule_id): rule for rule in RULES}
+    groups = (
+        (
+            "api/references/local-resolution",
+            ("rest/source/nonhermetic-ref",),
+            "Resolve local references",
+            "Every OpenAPI reference resolves inside the supplied document set.",
+            "Reports non-string, remote, missing, or otherwise unresolvable references.",
+            "Hermetic reference resolution keeps contract analysis deterministic and complete.",
+            "error",
+        ),
+        (
+            "api/http/message-semantics",
+            ("rest/http/forbidden-content", "rest/http/status-method-contradiction"),
+            "Honor HTTP message semantics",
+            "Methods, statuses, request bodies, and response content agree with HTTP semantics.",
+            "Reports forbidden message content or a response status incompatible with its method.",
+            "Contradictory HTTP contracts generate clients and gateways with impossible behavior.",
+            "error",
+        ),
+        (
+            "api/security/transport",
+            ("rest/security/insecure-server",),
+            "Use secure API transport",
+            "Literal server URLs use encrypted transport.",
+            "Reports an OpenAPI server URL whose literal scheme is HTTP.",
+            "Unencrypted transport exposes credentials and payloads to interception.",
+            "warning",
+        ),
+        (
+            "api/security/authentication",
+            (
+                "rest/security/exposure-contradiction",
+                "rest/security/oauth-implicit-grant",
+                "rest/security/oauth-password-grant",
+            ),
+            "Keep authentication contracts safe",
+            "Declared exposure agrees with security requirements and avoids unsafe OAuth grants.",
+            "Reports contradictory anonymous access or OAuth implicit and password flows.",
+            "Ambiguous or obsolete authentication contracts expose endpoints and credentials.",
+            "error",
+        ),
+        (
+            "api/errors/problem-details",
+            ("rest/errors/problem-contract",),
+            "Publish valid Problem Details",
+            "Operations opting into RFC 9457 publish a compatible error contract.",
+            "Reports incompatible media types, schemas, member types, or response status values.",
+            (
+                "A stable error envelope lets clients handle failures without "
+                "endpoint-specific parsing."
+            ),
+            "warning",
+        ),
+        (
+            "api/lifecycle/deprecation-window",
+            ("rest/lifecycle/sunset-order",),
+            "Order deprecation before sunset",
+            "An explicit API sunset occurs strictly after deprecation.",
+            "Reports a sunset timestamp equal to or earlier than its deprecation timestamp.",
+            "A positive deprecation window gives consumers time to migrate safely.",
+            "error",
+        ),
+        (
+            "api/artifact/provenance",
+            (
+                "rest/artifact/provenance-incomplete",
+                "rest/artifact/provenance-contradiction",
+            ),
+            "Verify artifact provenance",
+            "Derived artifacts identify their source, producer, configuration, and exact bytes.",
+            "Reports missing provenance fields, absent bytes, or digest contradictions.",
+            "Complete provenance makes generated contracts reproducible and tamper-evident.",
+            "error",
+        ),
+    )
+    compact_content = {
+        "api/artifact/provenance": (
+            _remediation(
+                "Complete or correct the provenance record.",
+                "Identify the exact source, producer, configuration, and output bytes.",
+                "Record SHA-256 digests that match the supplied source and artifact.",
+            ),
+            ("explicit artifact metadata plus the supplied source and artifact bytes",),
+            ("compiling generated code", "inferring generated artifacts from paths"),
+            (
+                "Only explicitly declared derived artifacts are checked.",
+                "Digest comparisons use exact supplied bytes without executing repository code.",
+            ),
+        ),
+        "api/http/message-semantics": (
+            _remediation(
+                "Remove forbidden content or choose a compatible method and status.",
+                "Remove a TRACE request body or content forbidden for the response status.",
+                "Use 206 only with GET and 304 only with GET or HEAD.",
+            ),
+            ("parsed methods, statuses, request bodies, and response content",),
+            ("requiring response completeness", "recommending success statuses"),
+            (
+                "Headers and links are not treated as message content.",
+                "Missing, empty, range, and default responses are not inferred.",
+                "Only the closed TRACE, HEAD, 1xx, 204, 205, 206, and 304 cases are checked.",
+            ),
+        ),
+        "api/security/authentication": (
+            _remediation(
+                "Align exposure, effective security, and OAuth flows.",
+                "Make anonymous access agree with the explicit exposure declaration.",
+                "Replace implicit or password flows with a supported authorization flow.",
+            ),
+            ("effective operation security, explicit exposure, and exact OAuth flow keys",),
+            ("inferring exposure", "proving runtime authorization", "evaluating scopes"),
+            (
+                "Only explicitly declared exposure and exact OAuth flow keys are checked.",
+                "Security inheritance and anonymous alternatives are modeled.",
+                "Invalid security structures make analysis inconclusive.",
+            ),
+        ),
+    }
+    merged: list[RuleDefinition] = []
+    for target, source_ids, title, summary, detects, impact, severity in groups:
+        sources = tuple(by_id[source_id] for source_id in source_ids)
+        representative = sources[0]
+        compact = compact_content.get(target)
+        merged.append(
+            replace(
+                representative,
+                rule_id=RuleId(target),
+                default_severity=severity,
+                title=title,
+                summary=summary,
+                detects=detects,
+                impact=impact,
+                remediation=compact[0] if compact else representative.remediation,
+                examples=examples_for_rule(RuleId(target)),
+                evidence_required=(
+                    compact[1]
+                    if compact
+                    else tuple(
+                        dict.fromkeys(item for rule in sources for item in rule.evidence_required)
+                    )
+                ),
+                non_goals=(
+                    compact[2]
+                    if compact
+                    else tuple(dict.fromkeys(item for rule in sources for item in rule.non_goals))
+                ),
+                false_positive_controls=(
+                    compact[3]
+                    if compact
+                    else tuple(
+                        dict.fromkeys(
+                            item for rule in sources for item in rule.false_positive_controls
+                        )
+                    )
+                ),
+                upstream=tuple(dict.fromkeys(item for rule in sources for item in rule.upstream)),
+                references=tuple(
+                    dict.fromkeys(item for rule in sources for item in rule.references)
+                ),
+            )
+        )
+    return tuple(sorted(merged, key=lambda item: item.rule_id))

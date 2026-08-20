@@ -1,0 +1,20 @@
+---
+interface Props {
+  categoryId: string;
+  label: string;
+}
+
+const { categoryId, label } = Astro.props;
+---
+
+<span class="rule-type-mark" role="img" aria-label={label} title={label}>
+  {categoryId === 'architecture' ? (
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="12" cy="18" r="2"/><path d="m8 8 3 8m5-8-3 8M8 7h8"/></svg>
+  ) : categoryId === 'delivery' ? (
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v5c0 4 3 7 8 7h2M10 8l4-3-4-3"/></svg>
+  ) : categoryId === 'change-safety' ? (
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v5c0 4.8 3 8.2 7.5 10 4.5-1.8 7.5-5.2 7.5-10V6zM8.5 12l2.2 2.2 4.8-5"/></svg>
+  ) : (
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5-5 7 5 7m6-14 5 7-5 7"/></svg>
+  )}
+</span>

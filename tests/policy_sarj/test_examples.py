@@ -27,8 +27,9 @@ def test_canonical_rule_examples_execute(case: RuleExampleCase) -> None:
     assert passes.rule_ids == ()
 
 
-def test_every_sarj_rule_has_one_unique_executable_example() -> None:
+def test_every_sarj_rule_has_unique_executable_issue_examples() -> None:
     cases = rule_example_cases()
-    assert len(cases) == len(RULES) == 24
+    assert len(RULES) == 7
+    assert len(cases) >= len(RULES)
     assert len({case.fixture_id for case in cases}) == len(cases)
     assert {case.rule_id for case in cases} == {str(rule.rule_id) for rule in RULES}

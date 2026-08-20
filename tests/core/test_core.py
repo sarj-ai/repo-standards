@@ -66,7 +66,7 @@ def test_overlapping_roots_are_verified_errors() -> None:
         EmptyPolicy(),
         mode=Mode("strict"),
     )
-    assert [item.rule_id for item in report.diagnostics] == ["core/layout/non-overlapping-root"]
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/layout/component-paths"]
     assert report.diagnostics[0].evidence_level == "verified"
 
 
@@ -79,7 +79,7 @@ def test_duplicate_roots_are_verified_errors() -> None:
         EmptyPolicy(),
         mode=Mode.STRICT,
     )
-    assert [item.rule_id for item in report.diagnostics] == ["core/layout/non-overlapping-root"]
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/layout/component-paths"]
 
 
 def test_casefold_colliding_roots_are_verified_errors() -> None:
@@ -91,7 +91,7 @@ def test_casefold_colliding_roots_are_verified_errors() -> None:
         EmptyPolicy(),
         mode=Mode.STRICT,
     )
-    assert [item.rule_id for item in report.diagnostics] == ["core/layout/non-overlapping-root"]
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/layout/component-paths"]
 
 
 def test_migration_swap_fails_closed() -> None:
@@ -157,11 +157,8 @@ def test_ratchet_rejects_new_and_stale_findings() -> None:
         scope_digest=report.scope_digest,
         fingerprints=("f" * 64,),
     )
-    regressions = check_baseline(report, baseline)
-    assert {item.rule_id for item in regressions} == {
-        "core/layout/non-overlapping-root",
-        "core/baseline/stale-entry",
-    }
+    with pytest.raises(ConfigurationError, match="resolved fingerprints"):
+        check_baseline(report, baseline)
     comparison = classify_baseline(report, baseline)
     assert comparison.fingerprints(RatchetClassification.NEW) == (
         report.diagnostics[0].fingerprint,
@@ -193,7 +190,7 @@ def test_scope_digest_allows_inventory_changes_to_be_ratcheted() -> None:
     )
     assert changed.scope_digest == clean.scope_digest
     assert [item.rule_id for item in check_baseline(changed, baseline)] == [
-        "core/layout/non-overlapping-root"
+        "architecture/layout/component-paths"
     ]
 
 
@@ -207,7 +204,7 @@ def test_valid_exception_stays_visible_and_nonblocking() -> None:
         manifest,
         exceptions=(
             ExceptionRecord(
-                rule_id=RuleId("core/layout/non-overlapping-root"),
+                rule_id=RuleId("architecture/layout/component-paths"),
                 component_id=ComponentId("child"),
                 manifest_anchor=finding.manifest_anchor,
                 fingerprint=finding.fingerprint,
