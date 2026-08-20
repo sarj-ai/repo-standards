@@ -126,7 +126,7 @@ jobs:
           node -e "const base='https://repo-standards.sarj.ai/'; const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
           (async()=>{let lastError; for(let attempt=1;attempt<=10;attempt+=1){try{const query='?commit='+process.env.EXPECTED_COMMIT+'&attempt='+attempt;
           const [healthResponse,catalogResponse]=await Promise.all([fetch(base+'health.json'+query,{cache:'no-store'}),
-          fetch(base+'api/v4/catalog.json'+query,{cache:'no-store'})]); if(!healthResponse.ok||!catalogResponse.ok)throw new Error('reference endpoints are unavailable');
+          fetch(base+'api/v5/catalog.json'+query,{cache:'no-store'})]); if(!healthResponse.ok||!catalogResponse.ok)throw new Error('reference endpoints are unavailable');
           const health=await healthResponse.json(); const catalog=await catalogResponse.json(); if(health.commit!==process.env.EXPECTED_COMMIT)
           throw new Error('deployed commit does not match'); if(health.catalogDigest!==catalog.provenance.content_digest)
           throw new Error('deployed catalog digest does not match'); console.log('verified '+health.commit); return;}catch(error){lastError=error;

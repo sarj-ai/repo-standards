@@ -8,55 +8,21 @@ from .errors import ConfigurationError
 from .models import RuleId
 
 
-ReviewCheck = Literal[
-    "name",
-    "description",
-    "trigger",
-    "impact",
-    "remediation",
-    "flagged-case",
-    "passing-case",
-]
-
-REQUIRED_RULE_REVIEW_CHECKS: tuple[ReviewCheck, ...] = (
-    "name",
-    "description",
-    "trigger",
-    "impact",
-    "remediation",
-    "flagged-case",
-    "passing-case",
-)
-
 _IMMUTABLE_REVIEW_REFERENCE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
 
 @dataclass(frozen=True, slots=True)
 class PendingRuleReview:
     status: Literal["pending"] = "pending"
-    completed_checks: tuple[ReviewCheck, ...] = ()
     reviewed_in: None = None
-
-    def __post_init__(self) -> None:
-        allowed = set(REQUIRED_RULE_REVIEW_CHECKS)
-        if len(self.completed_checks) != len(set(self.completed_checks)):
-            message = "pending review checks must be unique"
-            raise ValueError(message)
-        if any(check not in allowed for check in self.completed_checks):
-            message = "pending review contains an unknown check"
-            raise ValueError(message)
 
 
 @dataclass(frozen=True, slots=True)
 class ApprovedRuleReview:
     status: Literal["approved"] = "approved"
-    completed_checks: tuple[ReviewCheck, ...] = REQUIRED_RULE_REVIEW_CHECKS
     reviewed_in: str = ""
 
     def __post_init__(self) -> None:
-        if self.completed_checks != REQUIRED_RULE_REVIEW_CHECKS:
-            message = "approved rules require every review check in canonical order"
-            raise ValueError(message)
         if _IMMUTABLE_REVIEW_REFERENCE.fullmatch(self.reviewed_in) is None:
             message = "approved rules require an immutable 40- or 64-character object ID"
             raise ValueError(message)

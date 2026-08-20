@@ -26,7 +26,7 @@ class _SiteDocuments(NamedTuple):
 
 
 def _site(directory: Path) -> _SiteDocuments:
-    api = directory / "api" / "v4"
+    api = directory / "api" / "v5"
     api.mkdir(parents=True)
     catalog = _JSON_OBJECT.validate_python(
         build_catalog(app, package_version=version("repo-standards")).model_dump(mode="json"),
@@ -39,15 +39,15 @@ def _site(directory: Path) -> _SiteDocuments:
 
 
 def _write(directory: Path, name: str, value: dict[str, JSONValue]) -> None:
-    (directory / "api" / "v4" / name).write_text(canonical_json(value), encoding="utf-8")
+    (directory / "api" / "v5" / name).write_text(canonical_json(value), encoding="utf-8")
 
 
-def test_release_site_accepts_the_exact_catalog_v4_contract(tmp_path: Path) -> None:
+def test_release_site_accepts_the_exact_catalog_v5_contract(tmp_path: Path) -> None:
     _site(tmp_path)
 
     assert verify_site_catalog(
         tmp_path,
-        {"api/v4/catalog.json", "api/v4/catalog.schema.json"},
+        {"api/v5/catalog.json", "api/v5/catalog.schema.json"},
     ) == []
 
 
@@ -58,7 +58,12 @@ def test_release_site_rejects_legacy_routes_and_tombstones(tmp_path: Path) -> No
 
     violations = verify_site_catalog(
         tmp_path,
-        {"api/v2/catalog.json", "api/v4/catalog.json", "api/v4/catalog.schema.json"},
+        {
+            "api/v2/catalog.json",
+            "api/v4/catalog.json",
+            "api/v5/catalog.json",
+            "api/v5/catalog.schema.json",
+        },
     )
 
     assert any("legacy API contract" in item for item in violations)
@@ -77,21 +82,21 @@ def test_release_site_rejects_a_forged_schema_or_catalog_digest(tmp_path: Path) 
 
     violations = verify_site_catalog(
         tmp_path,
-        {"api/v4/catalog.json", "api/v4/catalog.schema.json"},
+        {"api/v5/catalog.json", "api/v5/catalog.schema.json"},
     )
 
     assert any("embedded catalog schema" in item for item in violations)
     assert any("content digest" in item for item in violations)
 
 
-def test_release_site_rejects_a_non_v4_catalog(tmp_path: Path) -> None:
+def test_release_site_rejects_a_non_v5_catalog(tmp_path: Path) -> None:
     catalog, _schema = _site(tmp_path)
     catalog["schema_version"] = 3
     _write(tmp_path, "catalog.json", catalog)
 
     violations = verify_site_catalog(
         tmp_path,
-        {"api/v4/catalog.json", "api/v4/catalog.schema.json"},
+        {"api/v5/catalog.json", "api/v5/catalog.schema.json"},
     )
 
-    assert any("invalid catalog v4" in item for item in violations)
+    assert any("invalid catalog v5" in item for item in violations)

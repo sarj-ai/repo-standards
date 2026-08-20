@@ -11,6 +11,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local Gi
 from urllib.error import URLError
 from urllib.request import Request
 
+from jsonschema import ValidationError as JSONSchemaValidationError
 from jsonschema import validate
 import pytest
 from typer.testing import CliRunner
@@ -345,6 +346,21 @@ def test_report_validates_against_published_schema(tmp_path: Path) -> None:
     assert schema_result.exit_code == 0
     schema = _json_object(schema_result.stdout)
     validate(instance=report, schema=schema)
+
+
+def test_report_schema_rejects_incoherent_outcome_state(tmp_path: Path) -> None:
+    _manifest(tmp_path, GOOD_MANIFEST)
+    checked = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    assert checked.exit_code == 0
+    report = _json_object(checked.stdout)
+    report["completion"] = "complete"
+    report["conclusion"] = "inconclusive"
+    report["diagnostics"] = []
+    report["execution_issues"] = []
+    schema_result = runner.invoke(app, ["schema"])
+    assert schema_result.exit_code == 0
+    with pytest.raises(JSONSchemaValidationError):
+        validate(instance=report, schema=_json_object(schema_result.stdout))
 
 
 def test_incomplete_report_and_anchor_locations_validate_against_schema(tmp_path: Path) -> None:

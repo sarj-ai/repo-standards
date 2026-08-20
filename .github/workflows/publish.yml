@@ -185,6 +185,14 @@ jobs:
       - name: Verify artifact checksums
         working-directory: dist
         run: sha256sum --check SHA256SUMS
+      - name: Verify immutable version tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.detect.outputs.source_sha }}
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$RELEASE_VERSION" --jq .object.sha)"
+          test "$tag_sha" = "$RELEASE_SHA"
       - name: Publish with trusted identity
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:

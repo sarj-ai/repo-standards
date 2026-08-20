@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from repo_lint.core import DeliveryConfig, SourceLocation
 from repo_lint.github import (
     BranchEvidence,
@@ -10,6 +12,7 @@ from repo_lint.github import (
     WorkflowDocument,
     analyze,
 )
+from repo_lint.github.models import GitHubAnalysisReport
 
 
 def _config() -> DeliveryConfig:
@@ -21,6 +24,11 @@ def _config() -> DeliveryConfig:
         development_branch="dev",
         sync_workflows=(".github/workflows/sync.yml",),
     )
+
+
+def test_github_report_rejects_incoherent_outcome_states() -> None:
+    with pytest.raises(ValueError, match="complete GitHub reports cannot be inconclusive"):
+        GitHubAnalysisReport("complete", "inconclusive", (), (), ())
 
 
 def _evidence(*, protected: bool = True) -> RepositoryEvidence:

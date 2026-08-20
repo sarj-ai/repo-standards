@@ -71,8 +71,9 @@ const severities = [...new Set(rule.examples.map((value) => value.severity))];
 
     <section class="examples-section" aria-labelledby="examples">
       <h2 id="examples">Examples</h2>
-      <h3 class="example-pair-title">{example.title}</h3>
-      <div class="examples-grid" data-example-pair={example.fixture_id}>
+      <div class="primary-example-desktop">
+        <h3 class="example-pair-title">{example.title}</h3>
+        <div class="examples-grid" data-example-pair={example.fixture_id}>
           <figure class="example example--bad" data-example-kind="flagged">
             <figcaption><span>Before · {example.severity}</span></figcaption>
             <Code code={excerpt.flagged} lang={example.language} wrap />
@@ -81,16 +82,30 @@ const severities = [...new Set(rule.examples.map((value) => value.severity))];
             <figcaption><span>After</span></figcaption>
             <Code code={excerpt.passes} lang={example.language} wrap />
           </figure>
+        </div>
+        {excerpt.compacted && (
+          <details class="full-example-pair">
+            <summary>Full executable inputs</summary>
+            <div class="examples-grid">
+              <Code code={example.flagged} lang={example.language} wrap />
+              <Code code={example.passes} lang={example.language} wrap />
+            </div>
+          </details>
+        )}
       </div>
-      {excerpt.compacted && (
-        <details class="full-example-pair">
-          <summary>Full executable inputs</summary>
-          <div class="examples-grid">
-            <Code code={example.flagged} lang={example.language} wrap />
-            <Code code={example.passes} lang={example.language} wrap />
-          </div>
-        </details>
-      )}
+      <details class="primary-example-mobile" data-pagefind-ignore>
+        <summary>Example · {example.title}</summary>
+        <div class="examples-grid">
+          <figure class="example example--bad">
+            <figcaption><span>Before · {example.severity}</span></figcaption>
+            <Code code={excerpt.flagged} lang={example.language} wrap />
+          </figure>
+          <figure class="example example--good">
+            <figcaption><span>After</span></figcaption>
+            <Code code={excerpt.passes} lang={example.language} wrap />
+          </figure>
+        </div>
+      </details>
     </section>
 
     <details class="rule-more">

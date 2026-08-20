@@ -71,3 +71,19 @@ class AnalysisReport:
     openapi_version: str | None
     diagnostics: tuple[Diagnostic, ...]
     execution_issues: tuple[ExecutionIssue, ...]
+
+    def __post_init__(self) -> None:
+        if self.completion == "incomplete":
+            if self.conclusion != "inconclusive" or not self.execution_issues or self.diagnostics:
+                message = (
+                    "incomplete OpenAPI reports must be inconclusive, contain execution issues, "
+                    "and contain no diagnostics"
+                )
+                raise ValueError(message)
+            return
+        if self.conclusion == "inconclusive" or self.execution_issues:
+            message = "complete OpenAPI reports cannot be inconclusive or contain execution issues"
+            raise ValueError(message)
+        if (self.conclusion == "passed") == bool(self.diagnostics):
+            message = "passed reports need no diagnostics; findings reports need diagnostics"
+            raise ValueError(message)

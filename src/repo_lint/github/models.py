@@ -109,3 +109,20 @@ class GitHubAnalysisReport:
     diagnostics: tuple[Diagnostic, ...]
     execution_issues: tuple[ExecutionIssue, ...]
     workflow_inspections: tuple[WorkflowInspection, ...]
+
+    def __post_init__(self) -> None:
+        if self.completion == "incomplete":
+            if self.conclusion != "inconclusive" or not self.execution_issues:
+                message = (
+                    "incomplete GitHub reports must be inconclusive and contain execution issues"
+                )
+                raise ValueError(message)
+            return
+        if self.conclusion == "inconclusive" or self.execution_issues:
+            message = "complete GitHub reports cannot be inconclusive or contain execution issues"
+            raise ValueError(message)
+        if (self.conclusion == "passed") == bool(self.diagnostics):
+            message = (
+                "passed GitHub reports require no diagnostics; findings reports require diagnostics"
+            )
+            raise ValueError(message)
