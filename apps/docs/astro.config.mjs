@@ -36,7 +36,7 @@ export default defineConfig({
       disable404Route: true,
       customCss: ['./src/styles/global.css'],
       sidebar: [
-        { label: 'Overview', link: '/' },
+        { label: 'About', link: '/' },
         { label: 'Rules', link: '/rules/' },
         { label: 'CLI', link: '/cli/' },
         { label: 'Schemas', link: '/schemas/' },

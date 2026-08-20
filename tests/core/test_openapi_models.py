@@ -77,7 +77,7 @@ def test_structured_values_have_deterministic_fingerprints_and_stable_keys() -> 
     assert len(enriched.finding_key) == 64
 
 
-def test_rich_locations_are_additive_in_the_v1_diagnostic_shape() -> None:
+def test_rich_locations_are_additive_in_the_v2_diagnostic_shape() -> None:
     payload = diagnostic_dict(with_fingerprint(_diagnostic()))
 
     assert payload["observed"] == {"operationId": "getPet", "tags": ["pets"]}
@@ -129,7 +129,16 @@ def test_rule_metadata_is_complete_and_examples_expose_fixture_ids() -> None:
             ("Change the input.",),
             ("Run the rule again.",),
         ),
-        examples=(RuleExamplePair(FixtureId("example-rule"), "text", "invalid", "valid"),),
+        examples=(
+            RuleExamplePair(
+                FixtureId("example-rule"),
+                "text",
+                "invalid",
+                "valid",
+                "Example violation",
+                "error",
+            ),
+        ),
         evidence_required=("Example input",),
     )
 

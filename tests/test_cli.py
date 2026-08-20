@@ -206,7 +206,7 @@ def _object_list(value: object) -> list[dict[str, object]]:
 
 
 GOOD_MANIFEST = """
-schema_version = 1
+schema_version = 2
 repository_id = "example-repository"
 policy = "sarj"
 policy_version = 5
@@ -251,6 +251,26 @@ def test_pending_report_findings_are_disabled(tmp_path: Path) -> None:
     assert _object_list(report["diagnostics"]) == []
 
 
+def test_unapproved_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
+    _manifest(tmp_path, GOOD_MANIFEST)
+    result = runner.invoke(
+        app,
+        [
+            "report",
+            str(tmp_path),
+            "--enable-rule",
+            "architecture/dependencies/policy",
+            "--format",
+            "json",
+        ],
+    )
+
+    report = _json_object(result.stdout)
+    assert result.exit_code == 2
+    assert report["conclusion"] == "inconclusive"
+    assert "not approved for activation" in str(report)
+
+
 def test_text_diagnostics_do_not_invent_source_coordinates(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"))
     result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "text"])
@@ -288,7 +308,7 @@ path = "iac/alpha"''',
 
 
 def test_malformed_manifest_is_incomplete(tmp_path: Path) -> None:
-    _manifest(tmp_path, "schema_version = 1\nunknown = true\n")
+    _manifest(tmp_path, "schema_version = 2\nunknown = true\n")
     result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
     report = _json_object(result.stdout)
     assert result.exit_code == 2
@@ -302,7 +322,7 @@ def test_schema_is_machine_discoverable() -> None:
     schema = _json_object(result.stdout)
     properties = _object(schema["properties"])
     schema_version = _object(properties["schema_version"])
-    assert schema_version["const"] == 1
+    assert schema_version["const"] == 2
 
 
 def test_report_validates_against_published_schema(tmp_path: Path) -> None:
@@ -317,7 +337,7 @@ def test_report_validates_against_published_schema(tmp_path: Path) -> None:
 
 
 def test_incomplete_report_and_anchor_locations_validate_against_schema(tmp_path: Path) -> None:
-    _manifest(tmp_path, "schema_version = 1\nunknown = true\n")
+    _manifest(tmp_path, "schema_version = 2\nunknown = true\n")
     incomplete = runner.invoke(
         app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"]
     )
@@ -440,7 +460,7 @@ def test_capabilities_are_machine_discoverable() -> None:
     result = runner.invoke(app, ["capabilities"])
     assert result.exit_code == 0
     capabilities = _json_object(result.stdout)
-    assert capabilities["schema_version"] == 1
+    assert capabilities["schema_version"] == 2
     safety = _object(capabilities["safety"])
     assert safety["repository_code_execution"] is False
     assert safety["mutation"] is False
@@ -587,13 +607,13 @@ def test_workflow_analysis_reads_exact_committed_tree(tmp_path: Path) -> None:
 def test_rules_are_filterable_and_paginated() -> None:
     result = runner.invoke(
         app,
-        ["rules", "--rule-prefix", "core/", "--severity", "error", "--limit", "2"],
+        ["rules", "--rule-prefix", "architecture/", "--severity", "error", "--limit", "2"],
     )
     assert result.exit_code == 0
     payload = _json_object(result.stdout)
     rules = _object_list(payload["rules"])
     assert len(rules) == 2
-    assert all(str(item["rule_id"]).startswith("core/") for item in rules)
+    assert all(str(item["rule_id"]).startswith("architecture/") for item in rules)
     assert all(item["default_severity"] == "error" for item in rules)
     assert _object(payload["page"])["next_cursor"] == "2"
 
@@ -604,7 +624,7 @@ def test_ratchet_report_has_explicit_verified_baseline_status(tmp_path: Path) ->
     report = _json_object(initial.stdout)
     policy = _object(report["policy"])
     baseline: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "repository_id": report["repository_id"],
         "policy": policy["id"],
         "policy_version": policy["version"],
@@ -682,7 +702,7 @@ def test_unknown_rule_and_schema_are_structured() -> None:
 
 
 def test_public_corpus_is_six_immutable_not_downloaded_sources() -> None:
-    manifest_path = Path(__file__).parents[1] / "corpus" / "public-oss-v1.json"
+    manifest_path = Path(__file__).parents[1] / "corpus" / "public-oss-v2.json"
     corpus = _json_object(manifest_path.read_text(encoding="utf-8"))
     sources = _object_list(corpus["sources"])
     assert len(sources) == 6
@@ -829,7 +849,7 @@ def test_rest_discover_requires_explicit_selection_when_ambiguous(tmp_path: Path
 
 def test_rest_catalog_and_capability_handshake_are_offline() -> None:
     rules_result = runner.invoke(app, ["rest", "rules"])
-    explanation = runner.invoke(app, ["rest", "explain", "rest/http/forbidden-content"])
+    explanation = runner.invoke(app, ["rest", "explain", "api/http/message-semantics"])
     assert rules_result.exit_code == explanation.exit_code == 0
-    assert len(_object_list(_json_object(rules_result.stdout)["rules"])) == 11
+    assert len(_object_list(_json_object(rules_result.stdout)["rules"])) == 7
     assert _object(_json_object(explanation.stdout)["rule"])["detects"]

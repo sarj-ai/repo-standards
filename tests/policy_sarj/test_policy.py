@@ -85,7 +85,7 @@ def test_canonical_application_roles_are_clean(component_name: str) -> None:
         pytest.param("api-service", id="role-not-final"),
     ],
 )
-def test_noncanonical_application_roles_are_rejected(component_name: str) -> None:
+def test_application_roles_are_not_policy_keywords(component_name: str) -> None:
     report = _analyze(
         Component(
             ComponentId(f"alpha.{component_name}"),
@@ -95,8 +95,7 @@ def test_noncanonical_application_roles_are_rejected(component_name: str) -> Non
             product="alpha",
         )
     )
-    assert [item.rule_id for item in report.diagnostics] == ["sarj/naming/application-role"]
-    assert report.diagnostics[0].severity == "warning"
+    assert report.diagnostics == ()
 
 
 def test_invalid_application_path_does_not_cascade_into_role_warning() -> None:
@@ -109,7 +108,7 @@ def test_invalid_application_path_does_not_cascade_into_role_warning() -> None:
             product="alpha",
         )
     )
-    assert [item.rule_id for item in report.diagnostics] == ["sarj/layout/component-path"]
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/layout/component-paths"]
 
 
 def test_product_component_id_must_match_declared_product() -> None:
@@ -122,7 +121,7 @@ def test_product_component_id_must_match_declared_product() -> None:
             product="alpha",
         )
     )
-    assert [item.rule_id for item in report.diagnostics] == ["sarj/naming/component-id"]
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/schema/component"]
 
 
 def test_library_capability_must_be_one_kebab_case_token() -> None:
@@ -136,7 +135,7 @@ def test_library_capability_must_be_one_kebab_case_token() -> None:
             capability="request.signing",
         )
     )
-    assert [item.rule_id for item in report.diagnostics] == ["sarj/naming/capability-token"]
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/schema/component"]
 
 
 @pytest.mark.parametrize(
@@ -271,7 +270,7 @@ def test_library_capability_must_be_one_kebab_case_token() -> None:
 )
 def test_component_kind_fields_are_exact_without_cascades(component: Component) -> None:
     report = _analyze(component)
-    assert [item.rule_id for item in report.diagnostics] == ["sarj/schema/component-fields"]
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/schema/component"]
     assert report.diagnostics[0].severity == "error"
 
 
@@ -445,7 +444,7 @@ def test_every_canonical_component_kind_is_clean(component: Component) -> None:
 )
 def test_noncanonical_component_layouts_are_rejected(component: Component) -> None:
     assert [item.rule_id for item in _analyze(component).diagnostics] == [
-        "sarj/layout/component-path"
+        "architecture/layout/component-paths"
     ]
 
 
@@ -497,10 +496,10 @@ def test_noncanonical_component_layouts_are_rejected(component: Component) -> No
         ),
     ],
 )
-def test_operational_layout_targets_are_advisory(component: Component) -> None:
+def test_operational_layout_targets_use_the_component_path_contract(component: Component) -> None:
     report = _analyze(component)
-    assert [item.rule_id for item in report.diagnostics] == ["sarj/layout/operational-path"]
-    assert report.diagnostics[0].severity == "warning"
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/layout/component-paths"]
+    assert report.diagnostics[0].severity == "error"
 
 
 def test_product_contract_cannot_use_shared_path() -> None:
@@ -513,7 +512,7 @@ def test_product_contract_cannot_use_shared_path() -> None:
             product="alpha",
         )
     )
-    assert [item.rule_id for item in report.diagnostics] == ["sarj/layout/component-path"]
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/layout/component-paths"]
 
 
 def test_application_source_import_is_rejected_but_runtime_call_is_allowed() -> None:
@@ -533,7 +532,7 @@ def test_application_source_import_is_rejected_but_runtime_call_is_allowed() -> 
         product="alpha",
     )
     assert [item.rule_id for item in _analyze(source, target).diagnostics] == [
-        "sarj/graph/application-imports-application"
+        "architecture/dependencies/policy"
     ]
     runtime = replace_dependency(source, Dependency(ComponentId("alpha.worker"), "runtime-call"))
     assert _analyze(runtime, target).diagnostics == ()
@@ -569,12 +568,12 @@ def test_cross_product_import_is_rejected() -> None:
         "@example/alpha",
         product="alpha",
     )
-    assert "sarj/graph/cross-product-import" in {
+    assert "architecture/dependencies/policy" in {
         item.rule_id for item in _analyze(source, target).diagnostics
     }
 
 
-def test_vague_capability_stays_warning() -> None:
+def test_generic_but_valid_capability_is_allowed() -> None:
     report = _analyze(
         Component(
             ComponentId("alpha.utils"),
@@ -585,10 +584,7 @@ def test_vague_capability_stays_warning() -> None:
             capability="utils",
         )
     )
-    finding = next(
-        item for item in report.diagnostics if item.rule_id == "sarj/reuse/vague-capability"
-    )
-    assert finding.severity == "warning"
+    assert report.diagnostics == ()
 
 
 def test_shared_contract_and_migration_paths_are_canonical() -> None:
@@ -626,7 +622,7 @@ def test_library_importing_application_is_rejected() -> None:
         product="alpha",
     )
     assert [item.rule_id for item in _analyze(library, application).diagnostics] == [
-        "sarj/graph/library-imports-application"
+        "architecture/dependencies/policy"
     ]
 
 
@@ -663,26 +659,23 @@ def test_warning_rules_are_explicitly_judgment_or_operational() -> None:
 
 def test_delivery_rule_governance_keeps_only_the_objective_invariant_blocking() -> None:
     rules = {
-        rule.rule_id: rule
-        for rule in SarjPolicy.rules()
-        if rule.rule_id.startswith(("sarj/delivery/", "sarj/github/"))
+        rule.rule_id: rule for rule in SarjPolicy.rules() if rule.rule_id.startswith("delivery/")
     }
     assert set(rules) == {
-        "sarj/delivery/hotfix-backsync",
-        "sarj/github/actions-sha-pinning",
-        "sarj/github/explicit-permissions",
-        "sarj/github/job-timeouts",
-        "sarj/github/immutable-installs",
-        "sarj/github/vulnerability-gate",
-        "sarj/github/merge-queue-trigger",
-        "sarj/github/repository-governance",
+        "delivery/branches/hotfix-back-sync",
+        "delivery/actions/safety",
+        "delivery/repository/controls",
     }
-    assert rules[RuleId("sarj/delivery/hotfix-backsync")].severity == "error"
+    assert rules[RuleId("delivery/branches/hotfix-back-sync")].severity == "error"
     assert {
-        rule.severity for rule_id, rule in rules.items() if rule_id.startswith("sarj/github/")
+        rule.severity
+        for rule_id, rule in rules.items()
+        if rule_id != "delivery/branches/hotfix-back-sync"
     } == {"warning"}
     assert {
-        rule.maturity for rule_id, rule in rules.items() if rule_id.startswith("sarj/github/")
+        rule.maturity
+        for rule_id, rule in rules.items()
+        if rule_id != "delivery/branches/hotfix-back-sync"
     } == {"beta"}
 
 
@@ -720,7 +713,7 @@ def test_invalid_source_fields_precede_and_suppress_graph_rules() -> None:
         product="alpha",
     )
     assert [item.rule_id for item in _analyze(source, target).diagnostics] == [
-        "sarj/schema/component-fields"
+        "architecture/schema/component"
     ]
 
 
@@ -741,7 +734,7 @@ def test_invalid_target_fields_precede_and_suppress_graph_rules() -> None:
         "@example/alpha",
     )
     assert [item.rule_id for item in _analyze(source, target).diagnostics] == [
-        "sarj/schema/component-fields"
+        "architecture/schema/component"
     ]
 
 
@@ -837,25 +830,25 @@ def test_closed_code_matrix_allows_only_reviewed_layers(source_kind: str, target
         pytest.param(
             "application",
             "application",
-            "sarj/graph/application-imports-application",
+            "architecture/dependencies/policy",
             id="application-application",
         ),
         pytest.param(
             "contract",
             "product-library",
-            "sarj/graph/contract-imports-implementation",
+            "architecture/dependencies/policy",
             id="contract-implementation",
         ),
         pytest.param(
             "product-library",
             "application",
-            "sarj/graph/library-imports-application",
+            "architecture/dependencies/policy",
             id="library-application",
         ),
         pytest.param(
             "migration-set",
             "contract",
-            "sarj/graph/disallowed-code-dependency",
+            "architecture/dependencies/policy",
             id="closed-matrix",
         ),
     ],
@@ -869,7 +862,7 @@ def test_closed_code_matrix_emits_one_precedence_rule(
 
 def test_typed_edge_endpoints_reject_invalid_runtime_call() -> None:
     report = _analyze(*_edge_components("application", "product-library", edge_kind="runtime-call"))
-    assert [item.rule_id for item in report.diagnostics] == ["sarj/graph/edge-endpoints"]
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/dependencies/policy"]
 
 
 def test_typed_edge_endpoints_allow_application_runtime_call() -> None:
@@ -904,7 +897,7 @@ def test_boundary_clean_cycle_is_one_warning() -> None:
         dependencies=(Dependency(first.component_id, "package-dependency"),),
     )
     report = _analyze(first, second)
-    assert [item.rule_id for item in report.diagnostics] == ["sarj/graph/code-cycle"]
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/dependencies/acyclic"]
     assert report.diagnostics[0].severity == "warning"
 
 
@@ -920,8 +913,8 @@ def test_forbidden_edges_do_not_cascade_into_cycle_warning() -> None:
     )
     report = _analyze(first, second)
     assert [item.rule_id for item in report.diagnostics] == [
-        "sarj/graph/application-imports-application",
-        "sarj/graph/application-imports-application",
+        "architecture/dependencies/policy",
+        "architecture/dependencies/policy",
     ]
 
 

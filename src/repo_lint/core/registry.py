@@ -7,8 +7,8 @@ from .errors import ConfigurationError
 from .models import Policy, PolicyId
 
 
-POLICY_API_VERSION = 1
-_ENTRY_POINT_GROUP = "repo_lint.policies.v1"
+POLICY_API_VERSION = 2
+_ENTRY_POINT_GROUP = "repo_lint.policies.v2"
 
 
 @dataclass(frozen=True, slots=True)

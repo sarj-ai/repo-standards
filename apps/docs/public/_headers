@@ -10,7 +10,7 @@
 /_astro/*
   Cache-Control: public, max-age=31536000, immutable
 
-/api/v2/*
+/api/v4/*
   Access-Control-Allow-Origin: *
   Cache-Control: public, max-age=300, s-maxage=3600, stale-while-revalidate=86400
 

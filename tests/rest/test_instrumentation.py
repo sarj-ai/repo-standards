@@ -24,7 +24,7 @@ def _candidate_ids(files: tuple[TrackedFile, ...]) -> list[str]:
 def _operation_map(*operations: object, digest: str = "a" * 64) -> bytes:
     return _json(
         {
-            "schema_version": "api-operation-map.v1",
+            "schema_version": "api-operation-map.v2",
             "openapi_sha256": digest,
             "operations": list(operations),
         }
@@ -237,7 +237,7 @@ def test_operation_map_is_validated_and_canonicalized() -> None:
         {"operation_id": "widgets.get", "method": "GET", "route_template": "/widgets/{id}"},
     )
     parsed = parse_api_operation_map(content)
-    assert parsed.schema_version == "api-operation-map.v1"
+    assert parsed.schema_version == "api-operation-map.v2"
     assert parsed.openapi_sha256 == "a" * 64
     assert [item.operation_id for item in parsed.operations] == ["widgets.get", "widgets.create"]
     assert parsed == parse_api_operation_map(content)
@@ -297,7 +297,7 @@ def test_conventional_operation_map_is_detected_only_after_validation() -> None:
             id="duplicate-operation-id",
         ),
         pytest.param(
-            b'{"schema_version":"api-operation-map.v1","schema_version":"other",'
+            b'{"schema_version":"api-operation-map.v2","schema_version":"other",'
             b'"openapi_sha256":"' + b"a" * 64 + b'","operations":[]}',
             "duplicate object key",
             id="duplicate-json-key",

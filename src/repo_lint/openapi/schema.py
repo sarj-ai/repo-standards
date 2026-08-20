@@ -68,7 +68,7 @@ def analysis_schema() -> Mapping[str, object]:
     }
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://schemas.sarj.ai/repo-lint/openapi-analysis-v1.schema.json",
+        "$id": "https://schemas.sarj.ai/repo-lint/openapi-analysis-v2.schema.json",
         "type": "object",
         "additionalProperties": False,
         "required": [
@@ -81,7 +81,7 @@ def analysis_schema() -> Mapping[str, object]:
             "execution_issues",
         ],
         "properties": {
-            "schema_version": {"const": 1},
+            "schema_version": {"const": 2},
             "completion": {"enum": ["complete", "incomplete"]},
             "conclusion": {"enum": ["passed", "findings", "inconclusive"]},
             "entrypoint": {"type": "string"},

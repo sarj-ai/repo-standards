@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     )
 
 
-OUTPUT_SCHEMA_VERSION = 1
+OUTPUT_SCHEMA_VERSION = 2
 
 
 def diagnostic_dict(diagnostic: Diagnostic) -> Mapping[str, object]:
@@ -161,7 +161,7 @@ def render_text(report: AnalysisReport) -> str:
 
 def render_rules(rules: tuple[Rule, ...]) -> str:
     payload = [asdict(item) for item in sorted(rules, key=lambda item: item.rule_id)]
-    return canonical_json({"schema_version": 1, "rules": payload}) + "\n"
+    return canonical_json({"schema_version": 2, "rules": payload}) + "\n"
 
 
 def output_schema() -> Mapping[str, object]:
@@ -274,7 +274,7 @@ def output_schema() -> Mapping[str, object]:
     }
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "urn:repo-lint:schema:report:v1",
+        "$id": "urn:repo-lint:schema:report:v2",
         "type": "object",
         "additionalProperties": False,
         "required": [
@@ -290,7 +290,7 @@ def output_schema() -> Mapping[str, object]:
             "diagnostics",
         ],
         "properties": {
-            "schema_version": {"const": 1},
+            "schema_version": {"const": 2},
             "completion": {"enum": ["complete", "incomplete"]},
             "conclusion": {"enum": ["passed", "findings", "inconclusive"]},
             "mode": {"enum": ["report", "ratchet", "strict"]},

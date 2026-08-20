@@ -64,7 +64,7 @@ def semantic_fingerprint(diagnostic: Diagnostic) -> str:
 
 def semantic_finding_key(diagnostic: Diagnostic) -> str:
     parts = (
-        "finding-key-v1",
+        "finding-key-v2",
         diagnostic.rule_id,
         diagnostic.component_id,
         diagnostic.subject_kind,

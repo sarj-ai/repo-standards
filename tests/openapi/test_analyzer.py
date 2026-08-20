@@ -48,7 +48,7 @@ def _sidecar(
 ) -> bytes:
     return _bytes(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "operations": operations or [],
             "artifacts": artifacts or [],
         }
@@ -125,7 +125,7 @@ def test_reference_boundary_evaluation_cases(case: ReferenceCase) -> None:
     spec = _spec(components={"schemas": {"Widget": {"$ref": case.reference}}})
     report = analyze_bytes(_bytes(spec), additional_documents=case.additional)
     findings = [
-        item for item in report.diagnostics if item.rule_id == "rest/source/nonhermetic-ref"
+        item for item in report.diagnostics if item.rule_id == "api/references/local-resolution"
     ]
     assert len(findings) == case.expected
 
@@ -164,7 +164,7 @@ def test_forbidden_response_content(method: str, status: str) -> None:
         }
     }
     report = analyze_bytes(_bytes(_spec(operation=operation, method=method)))
-    assert "rest/http/forbidden-content" in _rule_ids(report)
+    assert "api/http/message-semantics" in _rule_ids(report)
 
 
 def test_headers_on_content_free_response_are_clean() -> None:
@@ -194,9 +194,7 @@ def test_referenced_response_is_checked_without_duplicate_diagnostic() -> None:
         },
     )
     report = analyze_bytes(_bytes(spec))
-    findings = [
-        item for item in report.diagnostics if item.rule_id == "rest/http/forbidden-content"
-    ]
+    findings = [item for item in report.diagnostics if item.rule_id == "api/http/message-semantics"]
     assert len(findings) == 1
 
 
@@ -206,7 +204,7 @@ def test_trace_request_body_is_forbidden() -> None:
         "responses": {"200": {"description": "trace"}},
     }
     report = analyze_bytes(_bytes(_spec(operation=operation, method="trace")))
-    assert _rule_ids(report) == ["rest/http/forbidden-content"]
+    assert _rule_ids(report) == ["api/http/message-semantics"]
 
 
 @pytest.mark.parametrize(
@@ -222,11 +220,7 @@ def test_method_status_contradictions(method: str, status: str, expected: int) -
     report = analyze_bytes(
         _bytes(_spec(operation={"responses": {status: {"description": "x"}}}, method=method))
     )
-    findings = [
-        item
-        for item in report.diagnostics
-        if item.rule_id == "rest/http/status-method-contradiction"
-    ]
+    findings = [item for item in report.diagnostics if item.rule_id == "api/http/message-semantics"]
     assert len(findings) == expected
 
 
@@ -245,7 +239,7 @@ def test_insecure_literal_server_and_templated_near_miss() -> None:
             )
         )
     )
-    assert _rule_ids(report) == ["rest/security/insecure-server"]
+    assert _rule_ids(report) == ["api/security/transport"]
     assert report.diagnostics[0].severity == "warning"
 
 
@@ -261,12 +255,10 @@ def test_oauth_flow_keys_are_checked_without_name_inference() -> None:
     }
     report = analyze_bytes(_bytes(_spec(components=components)))
     assert _rule_ids(report) == [
-        "rest/security/oauth-implicit-grant",
-        "rest/security/oauth-password-grant",
+        "api/security/authentication",
+        "api/security/authentication",
     ]
-    severities = {item.rule_id: item.severity for item in report.diagnostics}
-    assert severities["rest/security/oauth-password-grant"] == "error"
-    assert severities["rest/security/oauth-implicit-grant"] == "warning"
+    assert {item.severity for item in report.diagnostics} == {"error", "warning"}
 
 
 @pytest.mark.parametrize(
@@ -300,9 +292,7 @@ def test_effective_security_dnf_against_explicit_exposure(
         _bytes(_spec(operation=operation, security=root_security)), semantics=semantics
     )
     findings = [
-        item
-        for item in report.diagnostics
-        if item.rule_id == "rest/security/exposure-contradiction"
+        item for item in report.diagnostics if item.rule_id == "api/security/authentication"
     ]
     assert len(findings) == expected
 
@@ -357,9 +347,7 @@ def test_rfc9457_is_checked_only_after_opt_in(response: object, expected: int) -
         operations=[{"operation_ref": "#/paths/~1widgets/get", "error_profile": "rfc9457"}]
     )
     report = analyze_bytes(_bytes(spec), semantics=sidecar)
-    findings = [
-        item for item in report.diagnostics if item.rule_id == "rest/errors/problem-contract"
-    ]
+    findings = [item for item in report.diagnostics if item.rule_id == "api/errors/problem-details"]
     assert len(findings) == expected
 
 
@@ -382,12 +370,12 @@ def test_sunset_must_follow_deprecation() -> None:
         ]
     )
     assert _rule_ids(analyze_bytes(_bytes(_spec()), semantics=sidecar)) == [
-        "rest/lifecycle/sunset-order"
+        "api/lifecycle/deprecation-window"
     ]
 
 
 def test_malformed_semantics_is_incomplete_not_a_finding() -> None:
-    report = analyze_bytes(_bytes(_spec()), semantics=b'{"schema_version":1,"unknown":true}')
+    report = analyze_bytes(_bytes(_spec()), semantics=b'{"schema_version":2,"unknown":true}')
     assert report.completion == "incomplete"
     assert report.diagnostics == ()
     assert [item.code for item in report.execution_issues] == ["semantics.invalid"]
@@ -452,19 +440,17 @@ def test_artifact_provenance_missing_and_mismatch_are_distinct() -> None:
         semantics=sidecar,
         additional_documents=(DocumentInput("dist/bundle.json", bundle),),
     )
-    findings = [
-        item for item in report.diagnostics if item.rule_id.startswith("rest/artifact/provenance-")
-    ]
+    findings = [item for item in report.diagnostics if item.rule_id == "api/artifact/provenance"]
     assert {(item.rule_id, item.severity) for item in findings} == {
-        ("rest/artifact/provenance-contradiction", "error"),
-        ("rest/artifact/provenance-incomplete", "warning"),
+        ("api/artifact/provenance", "error"),
+        ("api/artifact/provenance", "warning"),
     }
 
 
 def test_rule_catalog_is_complete_unique_and_source_backed() -> None:
     catalog = rules()
     assert [item.rule_id for item in catalog] == sorted(item.rule_id for item in catalog)
-    assert len({item.rule_id for item in catalog}) == len(catalog) == 11
+    assert len({item.rule_id for item in catalog}) == len(catalog) == 7
     assert all(
         item.title and item.detects and item.impact and item.remediation.steps and item.references
         for item in catalog
@@ -511,8 +497,8 @@ def test_invalid_uri_and_huge_pointer_never_escape_as_exceptions() -> None:
     )
     assert invalid_server.completion == "incomplete"
     assert huge_pointer.completion == "complete"
-    assert "rest/source/nonhermetic-ref" in _rule_ids(huge_pointer)
-    assert "rest/source/nonhermetic-ref" in _rule_ids(invalid_ref)
+    assert "api/references/local-resolution" in _rule_ids(huge_pointer)
+    assert "api/references/local-resolution" in _rule_ids(invalid_ref)
 
 
 def test_ref_key_inside_example_payload_is_not_reference_evidence() -> None:

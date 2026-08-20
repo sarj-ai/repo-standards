@@ -3,12 +3,14 @@ import { Code } from '@astrojs/starlight/components';
 
 import Breadcrumbs from '../../../components/Breadcrumbs.astro';
 import ReferencePage from '../../../components/ReferencePage.astro';
+import RuleTypeMark from '../../../components/RuleTypeMark.astro';
 import {
   catalog,
   rulePage,
   type Rule,
 } from '../../../lib/catalog';
 import { sourceRevision } from '../../../lib/build';
+import { exampleExcerpt } from '../../../lib/example-excerpt';
 
 export function getStaticPaths() {
   return catalog.rules.map((rule) => {
@@ -22,71 +24,99 @@ const { rule } = Astro.props;
 const sourceUrl = `${catalog.product.repository_url}/blob/${sourceRevision}/${rule.source.path}`;
 const page = rulePage(rule);
 const { category, topic, previous, next } = page;
-const limits = [...rule.non_goals, ...rule.false_positive_controls];
 const directoryHref = rule.review.status === 'pending' ? '/review/' : '/rules/';
+const example = rule.examples[0];
+const excerpt = exampleExcerpt(example.flagged, example.passes, example.language);
+const limits = [...rule.non_goals, ...rule.false_positive_controls];
+const severities = [...new Set(rule.examples.map((value) => value.severity))];
 ---
 
-<ReferencePage title={rule.title} description={rule.summary}>
+<ReferencePage
+  title={rule.title}
+  description={rule.summary}
+  pagefind={rule.review.status !== 'pending'}
+  noindex={rule.review.status === 'pending'}
+>
   <article class="rule-detail" data-rule-page data-rule-id={rule.rule_id} data-rule-category={rule.category_id} data-rule-topic={rule.topic_id}>
     <header class="rule-detail__header">
-      <Breadcrumbs items={[
-      { label: rule.review.status === 'pending' ? 'Review' : 'Rules', href: directoryHref },
-      { label: category.category.label, href: directoryHref },
-      { label: topic.topic.label, href: directoryHref },
-      { label: rule.title },
-      ]} />
-      <code class="rule-id">{rule.rule_id}</code>
-      <h1>{rule.title}</h1>
+      <div class="rule-detail__toolbar">
+        <Breadcrumbs items={[
+          { label: rule.review.status === 'pending' ? 'Review' : 'Rules', href: directoryHref },
+          { label: rule.title },
+        ]} />
+        <nav class="rule-stepper" aria-label="Rule navigation" data-rule-nav>
+          {previous && <a rel="prev" href={previous.href} aria-label={`Previous rule: ${previous.rule.title}`} title={previous.rule.title}>←</a>}
+          {next && <a rel="next" href={next.href} aria-label={`Next rule: ${next.rule.title}`} title={next.rule.title}>→</a>}
+        </nav>
+      </div>
+      <div class="rule-title-row">
+        <RuleTypeMark categoryId={rule.category_id} label={category.category.label} />
+        <h1>{rule.title}</h1>
+      </div>
       <p class="lede" data-rule-summary>{rule.summary}</p>
-      <div class="rule-facts" aria-label="Rule classification">
-        <span class:list={['rule-fact', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>
-        <span class="rule-fact">{rule.review.status}</span>
-        {rule.lifecycle.status !== 'stable' && <span class="rule-fact">{rule.lifecycle.status}</span>}
+      <div class="rule-header-links" aria-label="Rule classification">
+        <code class="rule-id">{rule.rule_id}</code>
+        <span class="rule-fact">{topic.topic.label}</span>
+        <span class:list={['rule-fact', `severity--${rule.default_severity}`]}>default {rule.default_severity}</span>
+        {severities.length > 1 && <span class="rule-fact">cases {severities.join(' + ')}</span>}
+        <a href={sourceUrl}>Rule source</a>
       </div>
     </header>
 
-    {rule.review.status === 'pending' && (
-      <section class="review-checklist" aria-labelledby="review-checklist">
-        <h2 id="review-checklist">Review checklist</h2>
-        <ul>
-          {['Name', 'Description', 'Trigger', 'Impact', 'Remediation', 'Flagged case', 'Passing case'].map((item) => <li>{item}</li>)}
-        </ul>
-      </section>
-    )}
-
-    <section aria-labelledby="examples">
-      <h2 id="examples">Examples</h2>
-      {rule.examples.map((example) => (
-        <div class="examples" data-example-pair={example.fixture_id}>
-          <figure class="example example--bad" data-example-kind="flagged">
-            <figcaption><strong>Flagged</strong><span>Fails</span></figcaption>
-            <Code code={example.flagged} lang={example.language} wrap />
-          </figure>
-          <figure class="example example--good" data-example-kind="passes">
-            <figcaption><strong>Passes</strong><span>Clean</span></figcaption>
-            <Code code={example.passes} lang={example.language} wrap />
-          </figure>
-        </div>
-      ))}
+    <section class="rule-prose" aria-label="Rule explanation">
+      <div><h2>Detects</h2><p>{rule.detects}</p></div>
+      <div><h2>Why</h2><p>{rule.impact}</p></div>
+      <div><h2>Fix</h2><p>{rule.remediation.summary}</p></div>
     </section>
 
-    <dl class="rule-explainer">
-      <div><dt>Why</dt><dd>{rule.impact}</dd></div>
-      <div><dt>Detects</dt><dd>{rule.detects}</dd></div>
-      <div><dt>Inspects</dt><dd><ul>{rule.evidence_required.map((value) => <li>{value}</li>)}</ul></dd></div>
-      {limits.length > 0 && <div><dt>Limits</dt><dd><ul>{limits.map((value) => <li>{value}</li>)}</ul></dd></div>}
-      <div><dt>Fix</dt><dd><p>{rule.remediation.summary}</p><ol>{rule.remediation.steps.map((value) => <li>{value}</li>)}</ol></dd></div>
-      <div><dt>Verify</dt><dd><ul>{rule.remediation.validation.map((value) => <li>{value}</li>)}</ul></dd></div>
-    </dl>
+    <section class="examples-section" aria-labelledby="examples">
+      <h2 id="examples">Examples</h2>
+      <h3 class="example-pair-title">{example.title}</h3>
+      <div class="examples-grid" data-example-pair={example.fixture_id}>
+          <figure class="example example--bad" data-example-kind="flagged">
+            <figcaption><span>Before · {example.severity}</span></figcaption>
+            <Code code={excerpt.flagged} lang={example.language} wrap />
+          </figure>
+          <figure class="example example--good" data-example-kind="passes">
+            <figcaption><span>After</span></figcaption>
+            <Code code={excerpt.passes} lang={example.language} wrap />
+          </figure>
+      </div>
+      {excerpt.compacted && (
+        <details class="full-example-pair">
+          <summary>Full executable inputs</summary>
+          <div class="examples-grid">
+            <Code code={example.flagged} lang={example.language} wrap />
+            <Code code={example.passes} lang={example.language} wrap />
+          </div>
+        </details>
+      )}
+    </section>
 
-    <nav class="rule-navigation" aria-label="Rule navigation" data-rule-nav>
-      {previous && <a rel="prev" href={previous.href}><span>Previous in {topic.topic.label}</span><strong>{previous.rule.title}</strong></a>}
-      {next && <a rel="next" href={next.href}><span>Next in {topic.topic.label}</span><strong>{next.rule.title}</strong></a>}
-    </nav>
-
-    <footer class="rule-footer">
-      {rule.references.length > 0 && <p>{rule.references.map((value, index) => <><a href={value}>Reference {index + 1}</a>{index < rule.references.length - 1 ? ' · ' : ''}</>)}</p>}
-      <p><a href={sourceUrl}>Source</a> · Rule version {rule.rule_version}</p>
-    </footer>
+    <details class="rule-more">
+      <summary>More examples and evidence</summary>
+      {rule.examples.slice(1).map((additional) => (
+        <section class="additional-example" aria-label={additional.title}>
+          <h3 class="example-pair-title">{additional.title}</h3>
+          <div class="examples-grid" data-example-pair={additional.fixture_id}>
+            <figure class="example example--bad" data-example-kind="flagged">
+              <figcaption><span>Before · {additional.severity}</span></figcaption>
+              <Code code={additional.flagged} lang={additional.language} wrap />
+            </figure>
+            <figure class="example example--good" data-example-kind="passes">
+              <figcaption><span>After</span></figcaption>
+              <Code code={additional.passes} lang={additional.language} wrap />
+            </figure>
+          </div>
+        </section>
+      ))}
+      <dl>
+        <div><dt>Inspects</dt><dd><ul>{rule.evidence_required.map((value) => <li>{value}</li>)}</ul></dd></div>
+        {limits.length > 0 && <div><dt>Limits</dt><dd><ul>{limits.map((value) => <li>{value}</li>)}</ul></dd></div>}
+        <div><dt>Steps</dt><dd><ol>{rule.remediation.steps.map((value) => <li>{value}</li>)}</ol></dd></div>
+        <div><dt>Verify</dt><dd><ul>{rule.remediation.validation.map((value) => <li>{value}</li>)}</ul></dd></div>
+      </dl>
+      {rule.references.length > 0 && <p>{rule.references.map((value, index) => <><a href={value}>{new URL(value).hostname}</a>{index < rule.references.length - 1 ? ' · ' : ''}</>)}</p>}
+    </details>
   </article>
 </ReferencePage>

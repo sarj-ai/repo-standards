@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from .models import (
-    ComponentId,
     Diagnostic,
     MigrationPath,
     PackageEvidence,
@@ -17,7 +16,7 @@ from .models import (
 
 
 _PATH_SAMPLE_LIMIT = 20
-_MAX_MIGRATION_PATHS_PER_TREE = 1
+_MIGRATION_RULE = RuleId("repository/migration/consistency")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,10 +31,6 @@ def migration_diagnostics(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...
         component.path: component.component_id for component in snapshot.manifest.components
     }
     diagnostics: list[Diagnostic] = []
-    if snapshot.manifest.migration_paths:
-        diagnostics.extend(_tracked_install_artifact_diagnostics(tracked))
-        if len(snapshot.manifest.migration_paths) > _MAX_MIGRATION_PATHS_PER_TREE:
-            diagnostics.append(_migration_batch_too_large(snapshot))
     for migration in snapshot.manifest.migration_paths:
         target_files = _within(tracked, migration.new_path)
         source_files = _within(tracked, migration.old_path)
@@ -50,84 +45,6 @@ def migration_diagnostics(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...
             diagnostics,
             key=lambda item: (item.path, item.rule_id, item.component_id, item.manifest_anchor),
         )
-    )
-
-
-def _tracked_install_artifact_diagnostics(
-    tracked: tuple[str, ...],
-) -> tuple[Diagnostic, ...]:
-    artifacts = tuple(path for path in tracked if _is_install_artifact(path))
-    if not artifacts:
-        return ()
-    sample = artifacts[:_PATH_SAMPLE_LIMIT]
-    return (
-        Diagnostic(
-            rule_id=RuleId("core/migration/tracked-install-artifacts"),
-            rule_version=1,
-            severity="warning",
-            evidence_level="verified",
-            component_id=ComponentId("repository"),
-            subject_kind="tracked-install-artifacts",
-            observed=f"{len(artifacts)} generated install artifact(s) are tracked",
-            expected="dependency installation artifacts remain untracked",
-            message="path migration commit tracks generated dependency installation state",
-            path=sample[0],
-            manifest_anchor="migration_paths",
-            remediation=Remediation(
-                summary="Remove generated installation outputs from the migration commit.",
-                steps=(
-                    "Untrack node_modules trees and Yarn installation state.",
-                    "Add or repair ignore rules before reinstalling dependencies.",
-                ),
-                validation=("Inspect the exact committed tree and rerun repo-lint check.",),
-            ),
-            observed_value={
-                "count": len(artifacts),
-                "paths": list(sample),
-                "truncated": len(artifacts) > len(sample),
-            },
-            expected_value={"count": 0},
-        ),
-    )
-
-
-def _is_install_artifact(path: str) -> bool:
-    return (
-        path == ".yarn/install-state.gz"
-        or path.startswith("node_modules/")
-        or "/node_modules/" in path
-    )
-
-
-def _migration_batch_too_large(snapshot: RepositorySnapshot) -> Diagnostic:
-    migrations = snapshot.manifest.migration_paths
-    sample = tuple(item.component_id for item in migrations[:_PATH_SAMPLE_LIMIT])
-    return Diagnostic(
-        rule_id=RuleId("core/migration/batch-too-large"),
-        rule_version=1,
-        severity="warning",
-        evidence_level="declared",
-        component_id=ComponentId("repository"),
-        subject_kind="migration-batch",
-        observed=f"{len(migrations)} migration paths are declared in one tree",
-        expected=f"at most {_MAX_MIGRATION_PATHS_PER_TREE} migration path per tree",
-        message="migration batch exceeds the independently reversible component slice",
-        path=".repo-lint/repository.toml",
-        manifest_anchor="migration_paths",
-        remediation=Remediation(
-            summary="Split the migration into independently reversible component slices.",
-            steps=(
-                "Keep one component path relocation in the selected tree.",
-                "Verify and merge that slice before declaring the next relocation.",
-            ),
-            validation=("Run repo-lint check and confirm one migration path remains.",),
-        ),
-        observed_value={
-            "count": len(migrations),
-            "component_ids": list(sample),
-            "truncated": len(migrations) > len(sample),
-        },
-        expected_value={"maximum": _MAX_MIGRATION_PATHS_PER_TREE},
     )
 
 
@@ -147,7 +64,7 @@ def _within(paths: tuple[str, ...], root: str) -> _PathMatch:
 
 def _missing_target(migration: MigrationPath) -> Diagnostic:
     return Diagnostic(
-        rule_id=RuleId("core/migration/target-missing"),
+        rule_id=_MIGRATION_RULE,
         rule_version=1,
         severity="warning",
         evidence_level="verified",
@@ -171,7 +88,7 @@ def _missing_target(migration: MigrationPath) -> Diagnostic:
 
 def _retained_source(migration: MigrationPath, source_files: _PathMatch) -> Diagnostic:
     return Diagnostic(
-        rule_id=RuleId("core/migration/source-retained"),
+        rule_id=_MIGRATION_RULE,
         rule_version=1,
         severity="warning",
         evidence_level="verified",
@@ -253,7 +170,7 @@ def _workspace_membership_lost(
     workspace: WorkspaceEvidence,
 ) -> Diagnostic:
     return Diagnostic(
-        rule_id=RuleId("core/migration/workspace-membership-lost"),
+        rule_id=_MIGRATION_RULE,
         rule_version=1,
         severity="warning",
         evidence_level="verified",

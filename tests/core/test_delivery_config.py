@@ -11,7 +11,7 @@ from repo_lint.core.parser import parse_manifest_bytes
 
 
 _MANIFEST = b"""
-schema_version = 1
+schema_version = 2
 repository_id = "example-repository"
 policy = "example"
 policy_version = 1

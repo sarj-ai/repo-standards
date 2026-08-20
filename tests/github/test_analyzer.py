@@ -139,14 +139,14 @@ jobs:
     report = analyze(_config(), _evidence(), (workflow,), selected_revision="a" * 40)
     errors = [item for item in report.diagnostics if item.severity == "error"]
     assert len(errors) == 1
-    assert str(errors[0].rule_id) == "sarj/delivery/hotfix-backsync"
+    assert str(errors[0].rule_id) == "delivery/branches/hotfix-back-sync"
     assert "preview->dev" in errors[0].observed
     assert "automatic PR edge main->preview" in errors[0].observed
 
 
 def test_branch_trio_auto_detects_without_toml_config() -> None:
     report = analyze(None, _evidence(), (), repository_files=(), selected_revision="a" * 40)
-    assert "sarj/delivery/hotfix-backsync" in _rule_ids(report)
+    assert "delivery/branches/hotfix-back-sync" in _rule_ids(report)
 
 
 def test_selected_non_default_revision_is_inconclusive_for_delivery() -> None:
@@ -172,7 +172,7 @@ def test_selected_non_default_revision_is_inconclusive_for_delivery() -> None:
     report = analyze(None, evidence, (), selected_revision="c" * 40)
 
     assert report.completion == "incomplete"
-    assert "sarj/delivery/hotfix-backsync" not in _rule_ids(report)
+    assert "delivery/branches/hotfix-back-sync" not in _rule_ids(report)
     assert "not the live main branch head" in report.execution_issues[0].message
     assert report.execution_issues[0].code == "github.default-branch-revision-mismatch"
     assert report.execution_issues[0].retryable
@@ -183,7 +183,7 @@ def test_live_delivery_without_selected_revision_is_inconclusive() -> None:
     report = analyze(_config(), _evidence(), (_safe_workflow(),))
 
     assert report.completion == "incomplete"
-    assert "sarj/delivery/hotfix-backsync" not in _rule_ids(report)
+    assert "delivery/branches/hotfix-back-sync" not in _rule_ids(report)
     assert "selected Git revision" in report.execution_issues[0].message
 
 
@@ -205,7 +205,7 @@ def test_canonical_repository_and_requested_case_match_declared_identity() -> No
 
     assert report.completion == "complete"
     assert not report.execution_issues
-    assert "sarj/delivery/hotfix-backsync" in _rule_ids(report)
+    assert "delivery/branches/hotfix-back-sync" in _rule_ids(report)
 
 
 def test_no_branch_trio_does_not_infer_delivery_intent() -> None:
@@ -219,14 +219,14 @@ def test_no_branch_trio_does_not_infer_delivery_intent() -> None:
         actions_can_approve_pull_requests=None,
     )
     report = analyze(None, evidence, ())
-    assert "sarj/delivery/hotfix-backsync" not in _rule_ids(report)
+    assert "delivery/branches/hotfix-back-sync" not in _rule_ids(report)
 
 
 def test_missing_external_evidence_is_inconclusive_not_a_false_finding() -> None:
     report = analyze(_config(), None, (_safe_workflow(),))
     assert report.completion == "incomplete"
     assert report.conclusion == "inconclusive"
-    assert "sarj/delivery/hotfix-backsync" not in _rule_ids(report)
+    assert "delivery/branches/hotfix-back-sync" not in _rule_ids(report)
     assert report.execution_issues[0].code == "github.required-evidence-unavailable"
 
 
@@ -251,16 +251,11 @@ jobs:
     )
     report = analyze(None, evidence, (workflow,))
     assert _rule_ids(report) == {
-        "sarj/github/actions-sha-pinning",
-        "sarj/github/explicit-permissions",
-        "sarj/github/job-timeouts",
-        "sarj/github/merge-queue-trigger",
-        "sarj/github/repository-governance",
+        "delivery/actions/safety",
+        "delivery/repository/controls",
     }
     assert all(item.severity == "warning" for item in report.diagnostics)
-    queue = next(
-        item for item in report.diagnostics if str(item.rule_id).endswith("merge-queue-trigger")
-    )
+    queue = next(item for item in report.diagnostics if item.manifest_anchor == "merge-queue")
     assert "merge_group" in queue.expected
 
 
@@ -283,9 +278,7 @@ jobs:
 
     report = analyze(None, None, (workflow,))
     findings = [
-        item
-        for item in report.diagnostics
-        if str(item.rule_id) == "sarj/github/actions-sha-pinning"
+        item for item in report.diagnostics if str(item.rule_id) == "delivery/actions/safety"
     ]
 
     assert len(findings) == 1
@@ -316,11 +309,10 @@ jobs:
     report = analyze(None, None, (workflow,))
 
     assert _rule_ids(report) == {
-        "sarj/github/immutable-installs",
-        "sarj/github/vulnerability-gate",
+        "delivery/actions/safety",
     }
     immutable = next(
-        item for item in report.diagnostics if str(item.rule_id).endswith("immutable-installs")
+        item for item in report.diagnostics if item.manifest_anchor.endswith("immutable-installs")
     )
     assert "audit: uv sync" in immutable.observed
     assert "frontend: pnpm install" in immutable.observed
@@ -349,8 +341,8 @@ jobs:
 
     report = analyze(None, None, (workflow,))
 
-    assert "sarj/github/immutable-installs" not in _rule_ids(report)
-    assert "sarj/github/vulnerability-gate" not in _rule_ids(report)
+    assert "delivery/actions/safety" not in _rule_ids(report)
+    assert "delivery/actions/safety" not in _rule_ids(report)
 
 
 def test_global_tool_installs_are_outside_lockfile_rule_scope() -> None:
@@ -370,7 +362,7 @@ jobs:
 
     report = analyze(None, None, (workflow,))
 
-    assert "sarj/github/immutable-installs" not in _rule_ids(report)
+    assert "delivery/actions/safety" not in _rule_ids(report)
 
 
 def test_distinct_workflow_findings_have_distinct_finding_keys() -> None:
@@ -404,7 +396,7 @@ def test_decoy_text_and_one_real_edge_cannot_prove_backsync() -> None:
     )
 
     finding = next(
-        item for item in report.diagnostics if str(item.rule_id).endswith("hotfix-backsync")
+        item for item in report.diagnostics if item.rule_id == "delivery/branches/hotfix-back-sync"
     )
     assert "preview->dev" in finding.observed
 
@@ -426,7 +418,7 @@ def test_wrong_push_branch_and_unrelated_secret_do_not_satisfy_safety() -> None:
     )
 
     finding = next(
-        item for item in report.diagnostics if str(item.rule_id).endswith("hotfix-backsync")
+        item for item in report.diagnostics if item.rule_id == "delivery/branches/hotfix-back-sync"
     )
     assert "safety controls for main->preview" in finding.observed
     assert "safety controls for preview->dev" in finding.observed
@@ -450,6 +442,6 @@ def test_ignored_source_branch_and_negative_condition_do_not_satisfy_safety() ->
     )
 
     finding = next(
-        item for item in report.diagnostics if str(item.rule_id).endswith("hotfix-backsync")
+        item for item in report.diagnostics if item.rule_id == "delivery/branches/hotfix-back-sync"
     )
     assert "safety controls for main->preview" in finding.observed

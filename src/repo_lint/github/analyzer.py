@@ -33,14 +33,14 @@ DeliveryConfiguration = DeliveryConfig
 
 
 _COMPONENT = ComponentId("repository")
-_CRITICAL = "sarj/delivery/hotfix-backsync"
-_SHA_PINS = "sarj/github/actions-sha-pinning"
-_EXPLICIT_PERMISSIONS = "sarj/github/explicit-permissions"
-_JOB_TIMEOUTS = "sarj/github/job-timeouts"
-_IMMUTABLE_INSTALLS = "sarj/github/immutable-installs"
-_VULNERABILITY_GATE = "sarj/github/vulnerability-gate"
-_MERGE_QUEUE_TRIGGER = "sarj/github/merge-queue-trigger"
-_GOVERNANCE = "sarj/github/repository-governance"
+_CRITICAL = "delivery/branches/hotfix-back-sync"
+_SHA_PINS = "delivery/actions/safety"
+_EXPLICIT_PERMISSIONS = "delivery/actions/safety"
+_JOB_TIMEOUTS = "delivery/actions/safety"
+_IMMUTABLE_INSTALLS = "delivery/actions/safety"
+_VULNERABILITY_GATE = "delivery/actions/safety"
+_MERGE_QUEUE_TRIGGER = "delivery/repository/controls"
+_GOVERNANCE = "delivery/repository/controls"
 
 
 class BranchNames(NamedTuple):

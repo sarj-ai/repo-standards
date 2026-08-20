@@ -49,6 +49,7 @@ _PARTIAL_CONTENT = 206
 _NOT_MODIFIED = 304
 _CLIENT_ERROR_START = 400
 _SHA256_HEX_LENGTH = 64
+_SEMANTICS_SCHEMA_VERSION = 2
 _RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 _OAS_VERSION = re.compile(r"^3\.(?:0|1|2)\.\d+$")
 _METHODS = frozenset({"get", "put", "post", "delete", "options", "head", "patch", "trace", "query"})
@@ -334,7 +335,7 @@ def _report(entrypoint: str, version: str | None, collector: _Collector) -> Anal
         conclusion = "findings"
     else:
         conclusion = "passed"
-    return AnalysisReport(1, completion, conclusion, entrypoint, version, diagnostics, issues)
+    return AnalysisReport(2, completion, conclusion, entrypoint, version, diagnostics, issues)
 
 
 def _prepare_documents(request: AnalysisRequest, collector: _Collector) -> dict[str, bytes] | None:
@@ -524,7 +525,7 @@ def _preflight_references(
             ref_pointer = f"{pointer}/$ref"
             if not isinstance(reference, str):
                 collector.finding(
-                    rule_id="rest/source/nonhermetic-ref",
+                    rule_id="api/references/local-resolution",
                     severity="error",
                     message="$ref must be a string URI reference",
                     observed=repr(reference),
@@ -538,7 +539,7 @@ def _preflight_references(
             target = _reference_target(source_name, reference)
             if target is None:
                 collector.finding(
-                    rule_id="rest/source/nonhermetic-ref",
+                    rule_id="api/references/local-resolution",
                     severity="error",
                     message="$ref crosses the bounded local-document graph",
                     observed=reference,
@@ -555,7 +556,7 @@ def _preflight_references(
             target_name, fragment = target
             if target_name not in documents:
                 collector.finding(
-                    rule_id="rest/source/nonhermetic-ref",
+                    rule_id="api/references/local-resolution",
                     severity="error",
                     message="$ref target was not supplied",
                     observed=target_name,
@@ -573,7 +574,7 @@ def _preflight_references(
                 parsed[target_name] = parsed_target
             if fragment and _resolve_pointer(parsed[target_name], fragment) is None:
                 collector.finding(
-                    rule_id="rest/source/nonhermetic-ref",
+                    rule_id="api/references/local-resolution",
                     severity="error",
                     message="$ref JSON Pointer does not resolve",
                     observed=fragment,
@@ -687,7 +688,7 @@ def _check_http(
     for method, pointer, operation, _path_item in _operations(root):
         if method == "trace" and operation.get("requestBody") is not None:
             collector.finding(
-                rule_id="rest/http/forbidden-content",
+                rule_id="api/http/message-semantics",
                 severity="error",
                 message="TRACE must not declare a request body",
                 observed="requestBody is present",
@@ -721,7 +722,7 @@ def _check_http(
             ):
                 content_count = len(content)
                 collector.finding(
-                    rule_id="rest/http/forbidden-content",
+                    rule_id="api/http/message-semantics",
                     severity="error",
                     message="response content is forbidden by HTTP semantics",
                     observed=(
@@ -744,7 +745,7 @@ def _status_contradiction(
 ) -> None:
     allowed = "GET or HEAD" if status == _NOT_MODIFIED else "GET"
     collector.finding(
-        rule_id="rest/http/status-method-contradiction",
+        rule_id="api/http/message-semantics",
         severity="error",
         message=f"status {status} cannot describe a {method.upper()} response",
         observed=f"{method.upper()} {status}",
@@ -777,7 +778,7 @@ def _check_servers(name: str, root: JsonObject, collector: _Collector) -> None:
             continue
         if scheme == "http":
             collector.finding(
-                rule_id="rest/security/insecure-server",
+                rule_id="api/security/transport",
                 severity="warning",
                 message="literal server URL uses cleartext HTTP",
                 observed=url,
@@ -825,7 +826,7 @@ def _check_oauth(name: str, root: JsonObject, collector: _Collector) -> None:
         base = f"/components/securitySchemes/{_pointer_token(str(scheme_name))}/flows"
         if "password" in flows:
             collector.finding(
-                rule_id="rest/security/oauth-password-grant",
+                rule_id="api/security/authentication",
                 severity="error",
                 message="OAuth password flow is declared",
                 observed="flows.password",
@@ -839,7 +840,7 @@ def _check_oauth(name: str, root: JsonObject, collector: _Collector) -> None:
             )
         if "implicit" in flows:
             collector.finding(
-                rule_id="rest/security/oauth-implicit-grant",
+                rule_id="api/security/authentication",
                 severity="warning",
                 message="OAuth implicit flow is declared",
                 observed="flows.implicit",
@@ -871,7 +872,7 @@ def _parse_semantics(content: bytes | None, collector: _Collector) -> _Semantics
             "semantics.invalid",
             "semantics",
             str(error),
-            "Correct the closed contract-semantics v1 JSON sidecar.",
+            "Correct the closed contract-semantics v2 JSON sidecar.",
         )
         return None
 
@@ -891,8 +892,8 @@ def _decode_semantics(content: bytes) -> _Semantics:
     _bound_json(raw)
     data = _as_object(raw, "semantics")
     _strict_keys(data, {"schema_version", "operations", "artifacts"}, "semantics")
-    if data.get("schema_version") != 1:
-        _InputError.fail("semantics.schema_version must be 1")
+    if data.get("schema_version") != _SEMANTICS_SCHEMA_VERSION:
+        _InputError.fail(f"semantics.schema_version must be {_SEMANTICS_SCHEMA_VERSION}")
     operations = _parse_operation_semantics(data.get("operations", []))
     artifacts = _parse_artifacts(data.get("artifacts", []))
     return _Semantics(operations, artifacts)
@@ -1069,7 +1070,7 @@ def _check_semantics(
             and declaration.sunset_at <= declaration.deprecation_at
         ):
             collector.finding(
-                rule_id="rest/lifecycle/sunset-order",
+                rule_id="api/lifecycle/deprecation-window",
                 severity="error",
                 message="sunset must be later than deprecation",
                 observed=(
@@ -1116,7 +1117,7 @@ def _check_exposure(  # ruff: ignore[too-many-arguments, too-many-positional-arg
         return
     rendered = " OR ".join("anonymous" if not item else " AND ".join(sorted(item)) for item in dnf)
     collector.finding(
-        rule_id="rest/security/exposure-contradiction",
+        rule_id="api/security/authentication",
         severity="error",
         message="explicit exposure contradicts effective OpenAPI security",
         observed=f"declared={exposure}, effective={rendered}",
@@ -1285,7 +1286,7 @@ def _problem_finding(  # ruff: ignore[too-many-arguments, too-many-positional-ar
     expected: str,
 ) -> None:
     collector.finding(
-        rule_id="rest/errors/problem-contract",
+        rule_id="api/errors/problem-details",
         severity="warning",
         message=message,
         observed=observed,
@@ -1386,11 +1387,7 @@ def _artifact_finding(  # ruff: ignore[too-many-arguments, too-many-positional-a
     observed: str,
     expected: str,
 ) -> None:
-    rule_id = (
-        "rest/artifact/provenance-incomplete"
-        if severity == "warning"
-        else "rest/artifact/provenance-contradiction"
-    )
+    rule_id = "api/artifact/provenance"
     collector.finding(
         rule_id=rule_id,
         severity=severity,

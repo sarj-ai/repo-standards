@@ -21,6 +21,7 @@ from .models import (
     Remediation,
     RuleId,
 )
+from .rule_reviews import RuleVersion
 
 
 def core_diagnostics(manifest: Manifest) -> tuple[Diagnostic, ...]:
@@ -47,7 +48,7 @@ def _overlap_diagnostics(manifest: Manifest) -> tuple[Diagnostic, ...]:
             owner = ownership_stack[-1]
             diagnostics.append(
                 Diagnostic(
-                    rule_id=RuleId("core/layout/non-overlapping-root"),
+                    rule_id=RuleId("architecture/layout/component-paths"),
                     rule_version=1,
                     severity="error",
                     evidence_level="verified",
@@ -155,31 +156,9 @@ def apply_exceptions(
                 f"exception for {diagnostic.rule_id}:{diagnostic.component_id} is future-dated"
             )
         if date.fromisoformat(exception.expires_on) < as_of:
-            result.extend(
-                (
-                    diagnostic,
-                    Diagnostic(
-                        rule_id=RuleId("core/exception/expired"),
-                        rule_version=1,
-                        severity="error",
-                        evidence_level="declared",
-                        component_id=diagnostic.component_id,
-                        subject_kind="exception",
-                        observed=exception.expires_on,
-                        expected=f"expiry on or after {as_of.isoformat()}",
-                        message=f"exception for {diagnostic.rule_id} has expired",
-                        path=diagnostic.path,
-                        manifest_anchor=f"exceptions.{diagnostic.rule_id}.{diagnostic.component_id}",
-                        remediation=Remediation(
-                            summary=(
-                                "Resolve the finding or renew the narrow exception through review."
-                            ),
-                            steps=("Fix the underlying finding or update its reviewed exception.",),
-                            validation=("Run repo-lint check with the same --as-of date.",),
-                        ),
-                        prerequisites=(diagnostic.rule_id,),
-                    ),
-                )
+            ConfigurationError.fail(
+                f"exception for {diagnostic.rule_id}:{diagnostic.component_id} expired on "
+                f"{exception.expires_on}"
             )
         else:
             result.append(
@@ -212,7 +191,7 @@ def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a
     mode: Mode,
     as_of: date | None = None,
     additional_diagnostics: tuple[Diagnostic, ...] = (),
-    enabled_rule_ids: frozenset[RuleId] | None = None,
+    enabled_rules: frozenset[RuleVersion] | None = None,
 ) -> AnalysisReport:
     if manifest.policy_id != policy.policy_id or manifest.policy_version != policy.policy_version:
         ConfigurationError.fail(
@@ -220,12 +199,13 @@ def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a
             f"installed policy is {policy.policy_id}@{policy.policy_version}"
         )
     emitted = core_diagnostics(manifest) + policy.evaluate(manifest) + additional_diagnostics
-    if enabled_rule_ids is not None:
-        emitted = tuple(item for item in emitted if item.rule_id in enabled_rule_ids)
-    findings = tuple(
-        with_fingerprint(item)
-        for item in emitted
-    )
+    if enabled_rules is not None:
+        emitted = tuple(
+            item
+            for item in emitted
+            if RuleVersion(item.rule_id, item.rule_version) in enabled_rules
+        )
+    findings = tuple(with_fingerprint(item) for item in emitted)
     fingerprints = [item.fingerprint for item in findings]
     if len(fingerprints) != len(set(fingerprints)):
         ConfigurationError.fail(
@@ -271,8 +251,9 @@ def check_baseline(report: AnalysisReport, baseline: Baseline) -> tuple[Diagnost
         if item.classification is RatchetClassification.NEW and item.diagnostic is not None
     )
     stale = comparison.fingerprints(RatchetClassification.RESOLVED)
-    stale_diagnostics = tuple(_stale_baseline_diagnostic(fingerprint) for fingerprint in stale)
-    return tuple(sorted(new + stale_diagnostics, key=lambda item: (item.rule_id, item.fingerprint)))
+    if stale:
+        ConfigurationError.fail("baseline contains resolved fingerprints: " + ", ".join(stale))
+    return tuple(sorted(new, key=lambda item: (item.rule_id, item.fingerprint)))
 
 
 def classify_baseline(report: AnalysisReport, baseline: Baseline) -> RatchetComparison:
@@ -306,29 +287,6 @@ def classify_baseline(report: AnalysisReport, baseline: Baseline) -> RatchetComp
         for fingerprint in sorted(known - set(current))
     )
     return RatchetComparison(entries=tuple(entries))
-
-
-def _stale_baseline_diagnostic(fingerprint: str) -> Diagnostic:
-    return with_fingerprint(
-        Diagnostic(
-            rule_id=RuleId("core/baseline/stale-entry"),
-            rule_version=1,
-            severity="error",
-            evidence_level="declared",
-            component_id=ComponentId("repository"),
-            subject_kind="baseline-entry",
-            observed=fingerprint,
-            expected="remove resolved debt from the baseline",
-            message="baseline retains a finding that no longer exists",
-            path=".repo-lint/baseline.json",
-            manifest_anchor=f"fingerprints.{fingerprint}",
-            remediation=Remediation(
-                summary="Delete the resolved fingerprint in the same change.",
-                steps=("Remove this exact fingerprint from the reviewed baseline.",),
-                validation=("Run repo-lint check --mode ratchet again.",),
-            ),
-        )
-    )
 
 
 def with_ratchet_diagnostics(

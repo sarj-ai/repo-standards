@@ -20,8 +20,6 @@ import typer
 from repo_lint.catalog import (
     build_catalog,
     catalog_schema,
-    catalog_v2_payload,
-    catalog_v2_schema,
     openapi_report_schema,
     report_schema,
 )
@@ -54,7 +52,7 @@ from repo_lint.core.models import (
 from repo_lint.core.pull_request_size import PullRequestSize, analyze_pull_request_size
 from repo_lint.core.registry import POLICY_API_VERSION, PolicyRegistry
 from repo_lint.core.render import diagnostic_dict, render_text, report_dict
-from repo_lint.core.rule_reviews import approved_rule_ids
+from repo_lint.core.rule_reviews import activated_rule_versions
 from repo_lint.github import GitHubAnalysisReport, GitHubClient, GitHubResponse
 from repo_lint.github import WorkflowDocument as GitHubWorkflowDocument
 from repo_lint.github import analyze as analyze_github
@@ -106,8 +104,6 @@ _OPENAPI_BASENAMES = frozenset({"openapi.json", "openapi.yaml", "openapi.yml"})
 _MAX_OPENAPI_DOCUMENTS = 100
 _MAX_OPENAPI_TOTAL_BYTES = 20 * 1024 * 1024
 _MAX_GIT_ORIGIN_BYTES = 4_096
-_CATALOG_V2 = 2
-_CATALOG_V3 = 3
 _GITHUB_SLUG = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?/"
     r"[A-Za-z0-9_.-]{1,100}"
@@ -166,7 +162,6 @@ class SchemaDocument(StrEnum):
     REPORT = "report"
     OPENAPI_ANALYSIS = "openapi-analysis"
     CATALOG = "catalog"
-    CATALOG_V2 = "catalog-v2"
 
 
 def _version_callback(value: object) -> None:
@@ -199,7 +194,7 @@ def _envelope(
     issues: Sequence[Mapping[str, object]] = (),
 ) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "tool": _tool(),
         "command": command,
         "completion": completion,
@@ -276,16 +271,14 @@ def capabilities_command() -> None:
                 "application_code_execution": False,
             },
         },
-        "schemas": {"openapi-analysis": 1, "report": 1},
+        "schemas": {"catalog": 4, "openapi-analysis": 2, "report": 2},
         "pagination": {"default_limit": 100, "maximum_limit": _MAX_PAGE_SIZE},
     }
     typer.echo(canonical_json(payload))
 
 
 @app.command("catalog")
-def catalog_command(
-    schema_version: Annotated[int, typer.Option(help="Catalog schema version (2 or 3).")] = 3,
-) -> None:
+def catalog_command() -> None:
     """Export the deterministic public product, rule, command, and schema catalog."""
     try:
         payload = build_catalog(app, package_version=_installed_version())
@@ -296,19 +289,7 @@ def catalog_command(
             str(error),
             remediation="Repair the installed metadata before publishing its public catalog.",
         )
-    if schema_version == _CATALOG_V3:
-        document = payload.model_dump(mode="json")
-    elif schema_version == _CATALOG_V2:
-        document = catalog_v2_payload(payload)
-    else:
-        _emit_command_error(
-            "catalog",
-            "catalog.version-unknown",
-            f"unsupported catalog schema version: {schema_version}",
-            phase="request",
-            remediation="Request catalog schema version 2 or 3.",
-        )
-    typer.echo(canonical_json(document))
+    typer.echo(canonical_json(payload.model_dump(mode="json")))
 
 
 @pull_request_app.command("size")
@@ -478,9 +459,14 @@ def github_command(
             help="GitHub owner/name for explicit read-only branch and repository evidence."
         ),
     ] = None,
+    enable_rule: Annotated[
+        list[str] | None,
+        typer.Option("--enable-rule", help="Activate one approved rule ID for this run."),
+    ] = None,
 ) -> None:
     """Audit committed GitHub workflows, with or without a repository manifest."""
     try:
+        enabled = activated_rule_versions(tuple(enable_rule or ()))
         report, identity, canonical_repository = _github_command_analysis(
             root=root,
             github_repository=github_repository,
@@ -505,13 +491,26 @@ def github_command(
         }
         typer.echo(_render_github_payload(payload, output_format), nl=False)
         raise typer.Exit(2) from None
-    enabled = approved_rule_ids()
-    diagnostics = tuple(item for item in report.diagnostics if item.rule_id in enabled)
+    diagnostics = tuple(
+        item
+        for item in report.diagnostics
+        if any(
+            str(rule.rule_id) == item.rule_id and rule.version == item.rule_version
+            for rule in enabled
+        )
+    )
+    conclusion = (
+        "inconclusive"
+        if report.completion != "complete"
+        else "findings"
+        if diagnostics
+        else "passed"
+    )
     payload = {
         **_envelope(
             "github",
             completion=report.completion,
-            conclusion=report.conclusion,
+            conclusion=conclusion,
             provenance={
                 "kind": "git-tree",
                 "source_revision": identity.source_revision,
@@ -937,10 +936,15 @@ def rest_check_command(
         RestEnforcement,
         typer.Option(help="report or strict; incomplete evidence always exits 2."),
     ] = RestEnforcement.STRICT,
+    enable_rule: Annotated[
+        list[str] | None,
+        typer.Option("--enable-rule", help="Activate one approved rule ID for this run."),
+    ] = None,
 ) -> None:
     """Check one committed OpenAPI contract from the exact selected Git tree."""
     identity: GitIdentity | None = None
     try:
+        enabled = activated_rule_versions(tuple(enable_rule or ()))
         resolved = root.resolve(strict=True)
         identity = git_identity(resolved)
     except (ConfigurationError, OSError, RequestError) as error:
@@ -949,13 +953,26 @@ def rest_check_command(
         report = _analyze_rest_snapshot(resolved, identity, spec, semantics)
     except (ConfigurationError, OSError, RequestError) as error:
         _emit_rest_error("rest.check", "rest.analysis-incomplete", str(error), identity)
-    enabled = approved_rule_ids()
-    diagnostics = tuple(item for item in report.diagnostics if RuleId(item.rule_id) in enabled)
+    diagnostics = tuple(
+        item
+        for item in report.diagnostics
+        if any(
+            str(rule.rule_id) == item.rule_id and rule.version == item.rule_version
+            for rule in enabled
+        )
+    )
+    conclusion = (
+        "inconclusive"
+        if report.completion != "complete"
+        else "findings"
+        if diagnostics
+        else "passed"
+    )
     payload = {
         **_envelope(
             "rest.check",
             completion=report.completion,
-            conclusion=report.conclusion,
+            conclusion=conclusion,
             provenance=_git_provenance(identity),
             issues=[asdict(item) for item in report.execution_issues],
         ),
@@ -1048,7 +1065,7 @@ def _select_openapi_entry(inspection: RepositoryInspection, selected: str | None
         )
     candidate = candidates[0]
     if not candidate.endswith(".json"):
-        message = "the only discovered OpenAPI document uses YAML, which is discovery-only in v1"
+        message = "the only discovered OpenAPI document uses YAML, which is discovery-only in v2"
         raise RequestError(message)
     return candidate
 
@@ -1151,6 +1168,10 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - C
         bool,
         typer.Option(help="Exit 2 unless configured GitHub evidence is complete."),
     ] = False,
+    enable_rule: Annotated[
+        list[str] | None,
+        typer.Option("--enable-rule", help="Activate one approved rule ID for this run."),
+    ] = None,
 ) -> None:
     """Analyze one repository manifest."""
     raise typer.Exit(
@@ -1164,6 +1185,7 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - C
             as_of=as_of,
             github_repository=github_repository,
             require_github_evidence=require_github_evidence,
+            enabled_rule_ids=tuple(enable_rule or ()),
         )
     )
 
@@ -1183,6 +1205,10 @@ def report_command(  # ruff: ignore[too-many-arguments,too-many-positional-argum
         bool,
         typer.Option(help="Exit 2 unless configured GitHub evidence is complete."),
     ] = False,
+    enable_rule: Annotated[
+        list[str] | None,
+        typer.Option("--enable-rule", help="Activate one approved rule ID for this run."),
+    ] = None,
 ) -> None:
     """Analyze one manifest without blocking on completed policy findings."""
     raise typer.Exit(
@@ -1196,6 +1222,7 @@ def report_command(  # ruff: ignore[too-many-arguments,too-many-positional-argum
             as_of=as_of,
             github_repository=github_repository,
             require_github_evidence=require_github_evidence,
+            enabled_rule_ids=tuple(enable_rule or ()),
         )
     )
 
@@ -1211,6 +1238,7 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
     as_of: str | None,
     github_repository: str | None,
     require_github_evidence: bool,
+    enabled_rule_ids: tuple[str, ...],
 ) -> int:
     command = "report" if mode is Mode.REPORT else "check"
     baseline_state: Mapping[str, object] = {
@@ -1229,6 +1257,7 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
             as_of=as_of,
             github_repository=github_repository,
             require_github_evidence=require_github_evidence,
+            enabled_rule_ids=enabled_rule_ids,
         )
     except ConfigurationError as error:
         report = _incomplete(PolicyId(policy_name), mode, str(error))
@@ -1287,6 +1316,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     as_of: str | None,
     github_repository: str | None,
     require_github_evidence: bool,
+    enabled_rule_ids: tuple[str, ...],
 ) -> _CompletedAnalysis:
     try:
         resolved_root = root.resolve(strict=True)
@@ -1314,7 +1344,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         mode=mode,
         as_of=_parse_date(as_of),
         additional_diagnostics=migration_diagnostics(snapshot) + github_diagnostics,
-        enabled_rule_ids=approved_rule_ids(),
+        enabled_rules=activated_rule_versions(enabled_rule_ids),
     )
     report = replace(
         report,
@@ -1723,7 +1753,7 @@ def _emit_command_error(
 def print_schema(
     document: Annotated[str, typer.Argument()] = SchemaDocument.REPORT,
 ) -> None:
-    """Print the report JSON Schema."""
+    """Print report, OpenAPI analysis, or catalog JSON Schema."""
     try:
         selected = SchemaDocument(document)
     except ValueError:
@@ -1737,8 +1767,6 @@ def print_schema(
     match selected:
         case SchemaDocument.CATALOG:
             payload = catalog_schema()
-        case SchemaDocument.CATALOG_V2:
-            payload = catalog_v2_schema()
         case SchemaDocument.OPENAPI_ANALYSIS:
             payload = _openapi_report_schema()
         case SchemaDocument.REPORT:

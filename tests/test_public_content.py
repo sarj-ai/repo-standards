@@ -77,10 +77,11 @@ def test_public_tree_contains_only_public_identity_references() -> None:
 
 
 def test_public_corpus_selection_has_public_provenance() -> None:
-    corpus_path = REPOSITORY_ROOT / "corpus" / "public-oss-v1.json"
+    corpus_path = REPOSITORY_ROOT / "corpus" / "public-oss-v2.json"
     corpus = JSON_OBJECT.validate_json(corpus_path.read_bytes(), strict=True)
     selection = corpus["selection"]
     assert isinstance(selection, dict)
+    assert selection["rule"] == "stratified-anchor-v2"
     assert "source_revision" not in selection
     seed = selection["seed"]
     assert isinstance(seed, str)

@@ -4,38 +4,20 @@ import { Code } from '@astrojs/starlight/components';
 import ReferencePage from '../components/ReferencePage.astro';
 import { catalog } from '../lib/catalog';
 
-const install = `uv tool install ${catalog.product.distribution}\nrepo-lint --help`;
-const safety = [
-  catalog.safety.mutation ? 'May modify files' : 'Read-only',
-  catalog.safety.network_default ? catalog.safety.network_mode : 'Offline by default',
-  `Checks the ${catalog.safety.inspection_input}`,
-].join('. ');
+const quickStart = `uvx --from ${catalog.product.distribution} repo-lint pull-request size . --base origin/main --head HEAD`;
 ---
 
 <ReferencePage title={catalog.product.title} description={catalog.product.summary} pagefind={false}>
-  <article class="overview">
-    <h1 class="sr-only">Sarj Repo Standards</h1>
-    <nav class="hero-actions" aria-label="Primary">
-      <a class="primary-action" href="#install">Install</a>
-      <a class="secondary-action" href="/review/">Review pending rules</a>
-    </nav>
+  <article class="about-page">
+    <h1>About</h1>
+    <p>Repository standards should be easy to understand before they are enforced.</p>
+    <p>Repo Standards measures pull-request size today. Every lint rule stays disabled while it is under review.</p>
+    <p><a href="/review/">Review pending rules</a> or use the read-only command below.</p>
 
-    <section aria-labelledby="capabilities">
-      <h2 id="capabilities">What it checks</h2>
-      <div class="capability-grid">
-        {catalog.capabilities.map((capability) => (
-          <article class="capability-card">
-            <h3>{capability.title}</h3>
-            <p>{capability.summary}</p>
-          </article>
-        ))}
-      </div>
-    </section>
-
-    <section class="install" aria-labelledby="install">
-      <h2 id="install">Install</h2>
-      <Code code={install} lang="bash" frame="terminal" wrap />
-      <p>{safety}.</p>
+    <section aria-labelledby="quick-start">
+      <h2 id="quick-start">Quick start</h2>
+      <Code code={quickStart} lang="bash" frame="terminal" wrap />
+      <p><a href="/cli/">CLI reference</a></p>
     </section>
   </article>
 </ReferencePage>
