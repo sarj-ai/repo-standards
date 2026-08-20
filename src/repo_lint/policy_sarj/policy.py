@@ -856,66 +856,16 @@ def _consolidated_rules(parts: tuple[Rule, ...]) -> tuple[Rule, ...]:
                 "sarj/graph/shared-imports-product",
                 "sarj/graph/contract-imports-implementation",
                 "sarj/graph/disallowed-code-dependency",
+                "sarj/graph/code-cycle",
             ),
             "Enforce dependency boundaries",
-            "Every dependency edge has legal endpoint kinds and ownership direction.",
+            "Every dependency edge is legal, ownership-safe, and acyclic.",
             (
                 "Reports self edges, forbidden code coupling, cross-product imports, or "
-                "invalid typed endpoints."
+                "invalid typed endpoints and dependency cycles."
             ),
-            "A single dependency policy keeps ownership and release boundaries explicit.",
+            "One dependency policy keeps ownership, release, and build direction explicit.",
             "error",
-        ),
-        (
-            "architecture/dependencies/acyclic",
-            ("sarj/graph/code-cycle",),
-            "Keep production code dependencies acyclic",
-            "Accepted production code dependencies form a directed acyclic graph.",
-            "Reports each strongly connected component containing two or more components.",
-            "Acyclic dependencies keep build, ownership, and extraction direction clear.",
-            "warning",
-        ),
-        (
-            "delivery/branches/hotfix-back-sync",
-            ("sarj/delivery/hotfix-backsync",),
-            "Back-sync production hotfixes",
-            "Production changes flow back through preview and development branches.",
-            "Reports a missing guarded pull-request back-sync edge or repository control.",
-            "Reliable back-sync prevents production fixes from disappearing in later releases.",
-            "error",
-        ),
-        (
-            "delivery/actions/safety",
-            (
-                "sarj/github/actions-sha-pinning",
-                "sarj/github/explicit-permissions",
-                "sarj/github/job-timeouts",
-                "sarj/github/immutable-installs",
-                "sarj/github/vulnerability-gate",
-            ),
-            "Harden GitHub Actions",
-            (
-                "Workflow jobs are pinned, least-privileged, time-bounded, reproducible, "
-                "and fail closed."
-            ),
-            (
-                "Reports mutable dependencies or installs, implicit permissions, missing "
-                "timeouts, or bypassed scanners."
-            ),
-            "A hardened workflow baseline limits supply-chain and unbounded-execution risk.",
-            "warning",
-        ),
-        (
-            "delivery/repository/controls",
-            ("sarj/github/repository-governance", "sarj/github/merge-queue-trigger"),
-            "Configure repository delivery controls",
-            (
-                "Repository ownership, updates, protection, token defaults, and merge-queue "
-                "coverage are explicit."
-            ),
-            "Reports missing repository safeguards or workflows that omit active merge queues.",
-            "Repository controls provide a consistent, reviewable delivery boundary.",
-            "warning",
         ),
     )
     compact_content = {
@@ -941,26 +891,6 @@ def _consolidated_rules(parts: tuple[Rule, ...]) -> tuple[Rule, ...]:
                 "Use an allowed edge type and compatible source and target component kinds.",
             ),
             ("edge type, endpoint kinds, component IDs, and product ownership",),
-            (),
-        ),
-        "delivery/actions/safety": (
-            _rule_remediation(
-                "Apply the missing workflow safety control.",
-                "Pin dependencies, bound permissions and time, enforce lockfiles, and fail closed.",
-            ),
-            ("parsed workflow references, jobs, steps, permissions, installs, and scanners",),
-            (
-                "executing workflows or package managers",
-                "automatically updating workflow references",
-                "choosing repository vulnerability policy",
-            ),
-        ),
-        "delivery/branches/hotfix-back-sync": (
-            _rule_remediation(
-                "Add guarded PR back-syncs and protect all three branches.",
-                "Implement main-to-preview and preview-to-development pull requests.",
-            ),
-            ("delivery branches, guarded synchronization workflows, and live protections",),
             (),
         ),
     }
@@ -1023,10 +953,6 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("architecture/layout/component-paths"): RuleClassification.OBJECTIVE,
         RuleId("architecture/schema/component"): RuleClassification.SCHEMA,
         RuleId("architecture/dependencies/policy"): RuleClassification.OBJECTIVE,
-        RuleId("architecture/dependencies/acyclic"): RuleClassification.JUDGMENT,
-        RuleId("delivery/branches/hotfix-back-sync"): RuleClassification.OBJECTIVE,
-        RuleId("delivery/actions/safety"): RuleClassification.OPERATIONAL,
-        RuleId("delivery/repository/controls"): RuleClassification.JUDGMENT,
     }
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
@@ -1034,10 +960,6 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("architecture/schema/component"): 10,
         RuleId("architecture/dependencies/policy"): 20,
         RuleId("architecture/layout/component-paths"): 30,
-        RuleId("architecture/dependencies/acyclic"): 40,
-        RuleId("delivery/branches/hotfix-back-sync"): 50,
-        RuleId("delivery/actions/safety"): 60,
-        RuleId("delivery/repository/controls"): 70,
     }
 )
 _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = MappingProxyType(
@@ -1057,20 +979,7 @@ _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = Mapp
 )
 
 _RULE_EVIDENCE: Mapping[RuleId, Literal["declared", "verified", "external"]] = MappingProxyType(
-    {
-        rule.rule_id: (
-            "external"
-            if rule.rule_id
-            in {
-                RuleId("delivery/branches/hotfix-back-sync"),
-                RuleId("delivery/repository/controls"),
-            }
-            else "verified"
-            if rule.rule_id == RuleId("delivery/actions/safety")
-            else "declared"
-        )
-        for rule in RULES
-    }
+    {rule.rule_id: "declared" for rule in RULES}
 )
 
 RULE_GOVERNANCE = tuple(
@@ -1567,7 +1476,7 @@ def _cycle_diagnostics(
         anchor = members[0]
         diagnostics.append(
             _diagnostic(
-                rule_id=RuleId("architecture/dependencies/acyclic"),
+                rule_id=RuleId("architecture/dependencies/policy"),
                 component_id=anchor,
                 subject_kind="code-cycle",
                 observed=" -> ".join((*members, members[0])),

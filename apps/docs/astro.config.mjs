@@ -1,5 +1,18 @@
+import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+import { readFileSync } from 'node:fs';
+import { URL } from 'node:url';
+
+const generatedCatalog = JSON.parse(
+  readFileSync(new URL('./src/generated/catalog.json', import.meta.url), 'utf8'),
+);
+const excludedPaths = new Set([
+  '/review/',
+  ...generatedCatalog.rules
+    .filter((rule) => rule.review.status === 'pending')
+    .map((rule) => `/rules/${rule.slug}/`),
+]);
 
 export default defineConfig({
   site: 'https://repo-standards.sarj.ai',
@@ -29,6 +42,7 @@ export default defineConfig({
     },
   },
   integrations: [
+    sitemap({ filter: (page) => !excludedPaths.has(new URL(page).pathname) }),
     starlight({
       title: 'Sarj Repo Standards',
       description: 'Deterministic repository policy and contract analysis.',

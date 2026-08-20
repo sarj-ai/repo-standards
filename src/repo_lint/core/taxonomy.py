@@ -22,7 +22,7 @@ class RuleCategory:
 
 ARCHITECTURE = RuleCategoryId("architecture")
 DELIVERY = RuleCategoryId("delivery")
-CHANGE_SAFETY = RuleCategoryId("change-safety")
+CHANGE_SAFETY = RuleCategoryId("repository")
 API_CONTRACTS = RuleCategoryId("api-contracts")
 
 DEPENDENCY_BOUNDARIES = RuleTopicId("dependency-boundaries")
@@ -46,47 +46,30 @@ REFERENCES = RuleTopicId("references")
 CATEGORIES = (
     RuleCategory(
         category_id=ARCHITECTURE,
-        label="Architecture & ownership",
+        label="Architecture",
         order=10,
         topics=(
-            RuleTopic(DEPENDENCY_BOUNDARIES, "Dependency boundaries", 10),
-            RuleTopic(REPOSITORY_LAYOUT, "Repository layout", 20),
-            RuleTopic(NAMING, "Naming", 30),
-            RuleTopic(REUSE, "Reuse", 40),
-            RuleTopic(COMPONENT_SCHEMA, "Component schema", 50),
-        ),
-    ),
-    RuleCategory(
-        category_id=DELIVERY,
-        label="Delivery & CI",
-        order=20,
-        topics=(
-            RuleTopic(GITHUB_ACTIONS, "GitHub Actions", 10),
-            RuleTopic(REPOSITORY_GOVERNANCE, "Repository governance", 20),
-            RuleTopic(RELEASE_FLOW, "Release flow", 30),
+            RuleTopic(DEPENDENCY_BOUNDARIES, "Dependencies", 10),
+            RuleTopic(REPOSITORY_LAYOUT, "Components & layout", 20),
+            RuleTopic(COMPONENT_SCHEMA, "Naming & identity", 30),
         ),
     ),
     RuleCategory(
         category_id=CHANGE_SAFETY,
-        label="Change safety",
-        order=30,
+        label="Repository changes",
+        order=20,
         topics=(
             RuleTopic(MIGRATIONS, "Migrations", 10),
-            RuleTopic(BASELINES, "Baselines", 20),
-            RuleTopic(EXCEPTIONS, "Exceptions", 30),
         ),
     ),
     RuleCategory(
         category_id=API_CONTRACTS,
         label="API contracts",
-        order=40,
+        order=30,
         topics=(
-            RuleTopic(API_SECURITY, "API security", 10),
-            RuleTopic(HTTP_SEMANTICS, "HTTP semantics", 20),
-            RuleTopic(GENERATED_ARTIFACTS, "Generated artifacts", 30),
-            RuleTopic(ERROR_CONTRACTS, "Error contracts", 40),
-            RuleTopic(API_LIFECYCLE, "API lifecycle", 50),
-            RuleTopic(REFERENCES, "References", 60),
+            RuleTopic(REFERENCES, "References", 10),
+            RuleTopic(HTTP_SEMANTICS, "HTTP", 20),
+            RuleTopic(ERROR_CONTRACTS, "Errors", 30),
         ),
     ),
 )

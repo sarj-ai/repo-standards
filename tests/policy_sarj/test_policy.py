@@ -14,7 +14,6 @@ from repo_lint.core.models import (
     Mode,
     PolicyId,
     RepositoryId,
-    RuleId,
 )
 from repo_lint.policy_sarj import (
     POLICY_SPEC,
@@ -635,11 +634,7 @@ def test_policy_spec_is_open_and_governance_covers_every_rule() -> None:
     assert {item.rule_id for item in RULE_GOVERNANCE} == {
         item.rule_id for item in SarjPolicy.rules()
     }
-    assert {item.evidence for item in RULE_GOVERNANCE} == {
-        "declared",
-        "external",
-        "verified",
-    }
+    assert {item.evidence for item in RULE_GOVERNANCE} == {"declared"}
     assert all(item.upstream for item in RULE_GOVERNANCE)
 
 
@@ -657,26 +652,8 @@ def test_warning_rules_are_explicitly_judgment_or_operational() -> None:
             assert metadata.maturity is RuleMaturity.STABLE_ERROR
 
 
-def test_delivery_rule_governance_keeps_only_the_objective_invariant_blocking() -> None:
-    rules = {
-        rule.rule_id: rule for rule in SarjPolicy.rules() if rule.rule_id.startswith("delivery/")
-    }
-    assert set(rules) == {
-        "delivery/branches/hotfix-back-sync",
-        "delivery/actions/safety",
-        "delivery/repository/controls",
-    }
-    assert rules[RuleId("delivery/branches/hotfix-back-sync")].severity == "error"
-    assert {
-        rule.severity
-        for rule_id, rule in rules.items()
-        if rule_id != "delivery/branches/hotfix-back-sync"
-    } == {"warning"}
-    assert {
-        rule.maturity
-        for rule_id, rule in rules.items()
-        if rule_id != "delivery/branches/hotfix-back-sync"
-    } == {"beta"}
+def test_delivery_rules_are_not_public_policy_rules() -> None:
+    assert all(not rule.rule_id.startswith("delivery/") for rule in SarjPolicy.rules())
 
 
 def test_public_expected_path_is_a_template_not_a_regex() -> None:
@@ -885,7 +862,7 @@ def test_typed_edge_endpoints_allow_application_runtime_call() -> None:
     assert _analyze(source, target).diagnostics == ()
 
 
-def test_boundary_clean_cycle_is_one_warning() -> None:
+def test_boundary_clean_cycle_is_part_of_dependency_policy() -> None:
     first, second = _edge_components("product-library", "product-library")
     second = Component(
         second.component_id,
@@ -897,8 +874,8 @@ def test_boundary_clean_cycle_is_one_warning() -> None:
         dependencies=(Dependency(first.component_id, "package-dependency"),),
     )
     report = _analyze(first, second)
-    assert [item.rule_id for item in report.diagnostics] == ["architecture/dependencies/acyclic"]
-    assert report.diagnostics[0].severity == "warning"
+    assert [item.rule_id for item in report.diagnostics] == ["architecture/dependencies/policy"]
+    assert report.diagnostics[0].severity == "error"
 
 
 def test_forbidden_edges_do_not_cascade_into_cycle_warning() -> None:

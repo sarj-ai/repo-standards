@@ -271,7 +271,7 @@ def capabilities_command() -> None:
                 "application_code_execution": False,
             },
         },
-        "schemas": {"catalog": 5, "openapi-analysis": 2, "report": 2},
+        "schemas": {"catalog": 6, "openapi-analysis": 2, "report": 2},
         "pagination": {"default_limit": 100, "maximum_limit": _MAX_PAGE_SIZE},
     }
     typer.echo(canonical_json(payload))

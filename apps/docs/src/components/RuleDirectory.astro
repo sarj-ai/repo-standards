@@ -27,7 +27,7 @@ const inputId = `rule-search-${mode}`;
             <strong>{rule.title}</strong>
             <span>{rule.summary}</span>
           </span>
-          <code>{rule.rule_id}</code>
+          <code>{rule.slug}</code>
           <span class:list={['severity', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>
         </a>
       </li>

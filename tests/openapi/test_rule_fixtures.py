@@ -125,7 +125,11 @@ def test_fixture_registry_matches_independent_expectations() -> None:
 
 def test_catalog_examples_are_rendered_from_executable_fixture_bytes() -> None:
     catalog = {rule.rule_id: rule for rule in rules()}
-    assert set(catalog) == {fixture.rule_id for fixture in REST_RULE_FIXTURES}
+    assert set(catalog) == {
+        RuleId("api/references/local-resolution"),
+        RuleId("api/http/message-semantics"),
+        RuleId("api/errors/problem-details"),
+    }
     for rule_id, rule in catalog.items():
         assert rule.examples == examples_for_rule(rule_id)
         assert rule.fixture_ids

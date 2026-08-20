@@ -61,10 +61,11 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
 
-    assert catalog.schema_version == 5
+    assert catalog.schema_version == 6
     assert {rule.review.status for rule in catalog.rules} == {"pending"}
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 15
+    assert len(rule_ids) == len(set(rule_ids)) == 7
+    assert len({rule.slug for rule in catalog.rules}) == 7
     assert {
         binding.default_activation for policy in catalog.policies for binding in policy.bindings
     } == {"disabled"}
@@ -92,6 +93,19 @@ def test_catalog_policy_binding_review_status_must_match_its_rule() -> None:
         Catalog.model_validate(payload)
 
 
+def test_catalog_rule_slugs_are_valid_and_unique() -> None:
+    catalog = build_catalog(app, package_version="9.8.7")
+    payload = catalog.model_dump(mode="python")
+    payload["rules"][1]["slug"] = payload["rules"][0]["slug"]
+    with pytest.raises(ValidationError, match="rule slugs must be unique"):
+        Catalog.model_validate(payload)
+
+    payload = catalog.model_dump(mode="python")
+    payload["rules"][0]["slug"] = "Not a slug"
+    with pytest.raises(ValidationError, match="string_pattern_mismatch"):
+        Catalog.model_validate(payload)
+
+
 def test_approved_review_descriptor_requires_immutable_object_id() -> None:
     with pytest.raises(ValidationError, match="string_pattern_mismatch"):
         ApprovedRuleReviewDescriptor(
@@ -109,7 +123,7 @@ def test_catalog_graph_is_complete() -> None:
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 15
+    assert len(rule_ids) == len(set(rule_ids)) == 7
     assert {policy.policy_id for policy in catalog.policies} == {
         str(policy.policy_id) for policy in registry.policies
     }
@@ -157,7 +171,7 @@ def test_catalog_rules_have_complete_clarity_taxonomy_and_examples() -> None:
     }
     fixture_ids: list[str] = []
 
-    assert category_ids == {"architecture", "api-contracts", "change-safety", "delivery"}
+    assert category_ids == {"architecture", "api-contracts", "repository"}
     assert {rule.category_id for rule in catalog.rules} == category_ids
     assert {rule.topic_id for rule in catalog.rules} == set(topic_parents)
     for rule in catalog.rules:
@@ -229,7 +243,7 @@ def test_catalog_schema_descriptor_versions_match_public_contracts() -> None:
     }
 
     assert versions == {
-        "catalog": 5,
+        "catalog": 6,
         "openapi-analysis": 2,
         "report": 2,
     }
