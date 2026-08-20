@@ -4,7 +4,7 @@ import { Code } from '@astrojs/starlight/components';
 import ReferencePage from '../components/ReferencePage.astro';
 import { catalog } from '../lib/catalog';
 
-const quickStart = `uvx --from ${catalog.product.distribution} repo-lint pull-request size . --base origin/main --head HEAD`;
+const quickStart = `uvx --from ${catalog.product.distribution} repo-standards pull-request size . --base origin/main --head HEAD`;
 ---
 
 <ReferencePage title={catalog.product.title} description={catalog.product.summary} pagefind={false}>

@@ -212,7 +212,7 @@ def _rule_remediation(summary: str, *steps: str) -> RuleRemediation:
     return RuleRemediation(
         summary=summary,
         steps=steps,
-        validation=("Run repo-lint again and confirm the rule passes.",),
+        validation=("Run repo-standards again and confirm the rule passes.",),
     )
 
 
@@ -1109,7 +1109,7 @@ def _remediation(summary: str, *steps: str) -> Remediation:
     return Remediation(
         summary=summary,
         steps=steps,
-        validation=("Run repo-lint check again and inspect the typed dependency graph.",),
+        validation=("Run repo-standards check again and inspect the typed dependency graph.",),
     )
 
 
@@ -1340,7 +1340,7 @@ def _component_field_diagnostic(
         remediation=_remediation(
             "Make the component fields match the selected component kind.",
             "Add required identity fields and remove fields forbidden for this kind.",
-            "Then rerun repo-lint so dependent naming and path rules can evaluate.",
+            "Then rerun repo-standards so dependent naming and path rules can evaluate.",
         ),
     )
 

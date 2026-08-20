@@ -42,7 +42,7 @@ export default defineConfig({
         { label: 'Schemas', link: '/schemas/' },
       ],
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/sarj-ai/sarj-repo-lint' },
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/sarj-ai/repo-standards' },
       ],
       pagefind: true,
       tableOfContents: false,

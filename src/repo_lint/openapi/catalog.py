@@ -27,7 +27,7 @@ _OAUTH_SECURITY = "https://www.rfc-editor.org/rfc/rfc9700.html"
 _PROBLEM = "https://www.rfc-editor.org/rfc/rfc9457.html"
 _DEPRECATION = "https://www.rfc-editor.org/rfc/rfc9745.html"
 _SUNSET = "https://www.rfc-editor.org/rfc/rfc8594.html"
-_VALIDATION = "Run repo-lint rest check again against the same tracked contract and semantics."
+_VALIDATION = "Run repo-standards rest check again against the same tracked contract and semantics."
 
 
 def _remediation(summary: str, *steps: str) -> RuleRemediation:

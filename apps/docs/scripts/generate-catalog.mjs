@@ -9,13 +9,13 @@ const repositoryDirectory = resolve(appDirectory, '../..');
 const generatedDirectory = resolve(appDirectory, 'src/generated');
 const result = spawnSync(
   'uv',
-  ['run', '--project', repositoryDirectory, '--frozen', 'repo-lint', 'catalog'],
+  ['run', '--project', repositoryDirectory, '--frozen', 'repo-standards', 'catalog'],
   {
     cwd: repositoryDirectory,
     encoding: 'utf8',
     env: {
       ...env,
-      UV_CACHE_DIR: env.UV_CACHE_DIR ?? resolve(tmpdir(), 'sarj-repo-lint-uv'),
+      UV_CACHE_DIR: env.UV_CACHE_DIR ?? resolve(tmpdir(), 'repo-standards-uv'),
     },
   },
 );

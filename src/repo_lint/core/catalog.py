@@ -47,7 +47,7 @@ _CORE_RULES = (
                 "Choose which component owns the overlapping files.",
                 "Merge duplicate declarations or move one component to a disjoint root.",
             ),
-            validation=("Run repo-lint check and confirm no component roots overlap.",),
+            validation=("Run repo-standards check and confirm no component roots overlap.",),
         ),
         examples=(
             RuleExamplePair(
@@ -117,7 +117,7 @@ owner = "@example/payments"''',
                 "Keep one migration path entry in the selected tree.",
                 "Verify and merge that move before declaring the next relocation.",
             ),
-            validation=("Run repo-lint check and confirm one migration path remains.",),
+            validation=("Run repo-standards check and confirm one migration path remains.",),
         ),
         examples=(
             RuleExamplePair(
@@ -193,7 +193,7 @@ to = "applications/alpha/api"''',
                 "Move and add the component's files at the declared target path.",
                 "Update path-sensitive build and workspace configuration in the same change.",
             ),
-            validation=("Run repo-lint check against the resulting commit.",),
+            validation=("Run repo-standards check against the resulting commit.",),
         ),
         examples=(
             RuleExamplePair(
@@ -235,7 +235,7 @@ to = "applications/alpha/api"''',
                 "Untrack node_modules trees and Yarn installation state.",
                 "Add or repair ignore rules before reinstalling from the lockfile.",
             ),
-            validation=("Inspect the exact committed tree and rerun repo-lint check.",),
+            validation=("Inspect the exact committed tree and rerun repo-standards check.",),
         ),
         examples=(
             RuleExamplePair(
@@ -292,7 +292,7 @@ package-lock.json
                 "Declare intentional compatibility files as a separately owned component.",
             ),
             validation=(
-                "Run repo-lint check and confirm the old root is empty or separately owned.",
+                "Run repo-standards check and confirm the old root is empty or separately owned.",
             ),
         ),
         examples=(
@@ -337,7 +337,7 @@ applications/alpha/api/main.py""",
                 "Keep exclusions at least as narrow as they were before the relocation.",
             ),
             validation=(
-                "Run the package manager's immutable workspace install and repo-lint check.",
+                "Run the package manager's immutable workspace install and repo-standards check.",
             ),
         ),
         examples=(
@@ -387,7 +387,7 @@ applications/alpha/api/main.py""",
                     "expiry without broadening its scope."
                 ),
             ),
-            validation=("Run repo-lint check with the same explicit analysis date.",),
+            validation=("Run repo-standards check with the same explicit analysis date.",),
         ),
         examples=(
             RuleExamplePair(
@@ -448,7 +448,7 @@ expires_on = "2029-04-01"
         remediation=RuleRemediation(
             summary="Delete the resolved fingerprint from the reviewed baseline.",
             steps=("Remove the exact resolved fingerprint from .repo-lint/baseline.json.",),
-            validation=("Run repo-lint check --mode ratchet again.",),
+            validation=("Run repo-standards check --mode ratchet again.",),
         ),
         examples=(
             RuleExamplePair(
@@ -505,7 +505,7 @@ def core_rules() -> tuple[RuleDefinition, ...]:
                     "Empty or explicitly reassign its former source root.",
                     "Update native workspace membership for relocated packages.",
                 ),
-                validation=("Run repo-lint against the resulting commit.",),
+                validation=("Run repo-standards against the resulting commit.",),
             ),
             examples=tuple(example for rule in sources for example in rule.examples),
             evidence_required=(

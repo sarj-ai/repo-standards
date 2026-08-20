@@ -93,7 +93,7 @@ runs:
         head=${INPUT_HEAD:-${PR_HEAD_SHA:-$EVENT_SHA}}
         test -n "$base" || { echo "A base revision is required outside pull_request events; pass base explicitly." >&2; exit 2; }
         test -n "$head" || { echo "A head revision is required." >&2; exit 2; }
-        report=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync repo-lint pull-request size "$INPUT_ROOT" \
+        report=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync repo-standards pull-request size "$INPUT_ROOT" \
           --base "$base" --head "$head" \
           --generated-attribute "$INPUT_GENERATED_ATTRIBUTE" --format json)
         counted=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(sys.stdin)["summary"]["counted_lines"])' <<< "$report")

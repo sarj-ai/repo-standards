@@ -443,7 +443,7 @@ def report_schema() -> dict[str, JSONValue]:
                 "additionalProperties": False,
                 "required": ["name", "version"],
                 "properties": {
-                    "name": {"const": "repo-lint"},
+                    "name": {"const": "repo-standards"},
                     "version": {"type": "string"},
                 },
             },
@@ -470,7 +470,7 @@ def openapi_report_schema() -> dict[str, JSONValue]:
                 "additionalProperties": False,
                 "required": ["name", "version"],
                 "properties": {
-                    "name": {"const": "repo-lint"},
+                    "name": {"const": "repo-standards"},
                     "version": {"type": "string"},
                 },
             },
@@ -505,22 +505,22 @@ def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
         catalog_version=package_version,
         product=ProductDescriptor(
             product_id="repo-lint",
-            name="repo-lint",
+            name="repo-standards",
             title="Sarj Repo Standards",
             summary=(
                 "Deterministic repository architecture, delivery, pull-request, and API "
                 "contract analysis."
             ),
-            distribution="sarj-repo-lint",
-            executables=("repo-lint", "sarj-repo-lint"),
-            repository_url="https://github.com/sarj-ai/sarj-repo-lint",
+            distribution="repo-standards",
+            executables=("repo-standards", "repo-lint", "sarj-repo-lint"),
+            repository_url="https://github.com/sarj-ai/repo-standards",
             website_url="https://repo-standards.sarj.ai/",
         ),
         provenance=ProvenanceDescriptor(
-            distribution="sarj-repo-lint",
+            distribution="repo-standards",
             package_version=package_version,
             policy_api_version=POLICY_API_VERSION,
-            repository_url="https://github.com/sarj-ai/sarj-repo-lint",
+            repository_url="https://github.com/sarj-ai/repo-standards",
             content_digest="",
         ),
         safety=SafetyDescriptor(

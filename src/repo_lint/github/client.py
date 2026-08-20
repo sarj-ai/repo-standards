@@ -285,7 +285,7 @@ class GitHubClient:
         query = f"?{urlencode(params)}" if params else ""
         headers: dict[str, str] = {
             "Accept": "application/vnd.github+json",
-            "User-Agent": "sarj-repo-lint",
+            "User-Agent": "repo-standards",
             "X-GitHub-Api-Version": "2022-11-28",
         }
         if self._token:
