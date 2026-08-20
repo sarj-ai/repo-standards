@@ -70,6 +70,7 @@ CATEGORIES = (
             RuleTopic(REFERENCES, "References", 10),
             RuleTopic(HTTP_SEMANTICS, "HTTP", 20),
             RuleTopic(ERROR_CONTRACTS, "Errors", 30),
+            RuleTopic(GENERATED_ARTIFACTS, "Generated artifacts", 40),
         ),
     ),
 )

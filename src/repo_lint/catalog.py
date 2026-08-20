@@ -89,6 +89,7 @@ SourcePath = Annotated[
 HttpsUrl = Annotated[str, Field(pattern=r"^https://")]
 
 _RULE_SLUGS: dict[str, RuleSlug] = {
+    "api/artifact/provenance": "artifact-provenance",
     "api/errors/problem-details": "problem-details",
     "api/http/message-semantics": "http-message-semantics",
     "api/references/local-resolution": "local-references",

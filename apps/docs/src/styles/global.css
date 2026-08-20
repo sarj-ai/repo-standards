@@ -229,9 +229,18 @@ h2 { margin-top: 1.5rem; }
 }
 
 @media (max-width: 22rem) {
-  .rule-detail__toolbar { gap: .5rem; }
+  .rule-detail__toolbar { gap: .35rem; margin-bottom: .25rem; }
+  .rule-detail__toolbar .rule-breadcrumb { grid-column: 1; }
   .rule-stepper a { width: 44px; justify-content: center; padding-inline: 0; }
   .rule-stepper__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
+  .rule-detail__header { padding-block: .35rem .6rem; }
+  .rule-detail h1 { margin-block: .1rem .25rem; font-size: 1.5rem; }
+  .rule-detail__header .lede { font-size: .9rem; line-height: 1.35; }
+  .rule-header-links { gap: .05rem .6rem; margin-top: .2rem; }
+  .rule-header-links code { display: none; }
+  .rule-detail > .rule-prose { gap: .7rem; margin-top: .8rem; }
+  .rule-prose p { margin-top: .2rem; font-size: .9rem; line-height: 1.4; }
+  .rule-detail > .examples-section { margin-top: .85rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

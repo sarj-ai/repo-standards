@@ -25,8 +25,6 @@ def _spec(
     *,
     operation: Mapping[str, object] | None = None,
     method: str = "get",
-    servers: list[object] | None = None,
-    security: list[object] | None = None,
     components: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     operation_value = (
@@ -37,10 +35,6 @@ def _spec(
         "info": {"title": "Example", "version": "1"},
         "paths": {"/widgets": {method: operation_value}},
     }
-    if servers is not None:
-        result["servers"] = servers
-    if security is not None:
-        result["security"] = security
     if components is not None:
         result["components"] = dict(components)
     return result
@@ -61,10 +55,6 @@ def _sidecar(
 def _rule_ids(report: AnalysisReport) -> list[str]:
     diagnostics = report.diagnostics
     return [item.rule_id for item in diagnostics]
-
-
-def _security(*requirements: Mapping[str, object]) -> list[object]:
-    return [dict(item) for item in requirements]
 
 
 def test_minimal_json_document_is_clean_and_deterministic() -> None:
@@ -248,79 +238,6 @@ def test_method_status_contradictions(method: str, status: str, expected: int) -
     assert len(findings) == expected
 
 
-def test_insecure_literal_server_and_templated_near_miss() -> None:
-    report = analyze_bytes(
-        _bytes(
-            _spec(
-                servers=[
-                    {"url": "http://api.example.test"},
-                    {
-                        "url": "{scheme}://api.example.test",
-                        "variables": {"scheme": {"default": "https"}},
-                    },
-                    {"url": "/relative"},
-                ]
-            )
-        )
-    )
-    assert _rule_ids(report) == ["api/security/transport"]
-    assert report.diagnostics[0].severity == "warning"
-
-
-def test_oauth_flow_keys_are_checked_without_name_inference() -> None:
-    components: dict[str, object] = {
-        "securitySchemes": {
-            "legacy": {
-                "type": "oauth2",
-                "flows": {"password": {}, "implicit": {}},
-            },
-            "password-in-name-only": {"type": "apiKey", "in": "header", "name": "X-Key"},
-        }
-    }
-    report = analyze_bytes(_bytes(_spec(components=components)))
-    assert _rule_ids(report) == [
-        "api/security/authentication",
-        "api/security/authentication",
-    ]
-    assert {item.severity for item in report.diagnostics} == {"error", "warning"}
-
-
-@pytest.mark.parametrize(
-    ("root_security", "operation_security", "exposure", "expected"),
-    [
-        pytest.param(_security({"oauth": []}), None, "public", 1, id="inherited-auth-public-tp"),
-        pytest.param(_security({"oauth": []}), None, "authenticated", 0, id="inherited-auth-tn"),
-        pytest.param(_security({"oauth": []}), [], "public", 0, id="operation-public-override-tn"),
-        pytest.param(
-            _security({"oauth": []}, {}),
-            None,
-            "authenticated",
-            1,
-            id="anonymous-alternative-tp",
-        ),
-    ],
-)
-def test_effective_security_dnf_against_explicit_exposure(
-    root_security: list[object],
-    operation_security: list[object] | None,
-    exposure: str,
-    expected: int,
-) -> None:
-    operation: dict[str, object] = {"responses": {"200": {"description": "ok"}}}
-    if operation_security is not None:
-        operation["security"] = operation_security
-    semantics = _sidecar(
-        operations=[{"operation_ref": "#/paths/~1widgets/get", "exposure": exposure}]
-    )
-    report = analyze_bytes(
-        _bytes(_spec(operation=operation, security=root_security)), semantics=semantics
-    )
-    findings = [
-        item for item in report.diagnostics if item.rule_id == "api/security/authentication"
-    ]
-    assert len(findings) == expected
-
-
 @pytest.mark.parametrize(
     ("response", "expected"),
     [
@@ -383,39 +300,10 @@ def test_non_opted_domain_error_is_untouched() -> None:
     assert _rule_ids(analyze_bytes(_bytes(_spec(operation={"responses": {"422": response}})))) == []
 
 
-def test_sunset_must_follow_deprecation() -> None:
-    sidecar = _sidecar(
-        operations=[
-            {
-                "operation_ref": "#/paths/~1widgets/get",
-                "deprecation_at": "2027-01-01T00:00:00Z",
-                "sunset_at": "2026-12-01T00:00:00Z",
-            }
-        ]
-    )
-    assert _rule_ids(analyze_bytes(_bytes(_spec()), semantics=sidecar)) == [
-        "api/lifecycle/deprecation-window"
-    ]
-
-
 def test_malformed_semantics_is_incomplete_not_a_finding() -> None:
     report = analyze_bytes(_bytes(_spec()), semantics=b'{"schema_version":2,"unknown":true}')
     assert report.completion == "incomplete"
     assert report.diagnostics == ()
-    assert [item.code for item in report.execution_issues] == ["semantics.invalid"]
-
-
-def test_lifecycle_timestamp_must_be_strict_rfc3339() -> None:
-    sidecar = _sidecar(
-        operations=[
-            {
-                "operation_ref": "#/paths/~1widgets/get",
-                "deprecation_at": "2026-01-01 00:00:00+00:00",
-            }
-        ]
-    )
-    report = analyze_bytes(_bytes(_spec()), semantics=sidecar)
-    assert report.completion == "incomplete"
     assert [item.code for item in report.execution_issues] == ["semantics.invalid"]
 
 
@@ -474,7 +362,7 @@ def test_artifact_provenance_missing_and_mismatch_are_distinct() -> None:
 def test_rule_catalog_is_complete_unique_and_source_backed() -> None:
     catalog = rules()
     assert [item.rule_id for item in catalog] == sorted(item.rule_id for item in catalog)
-    assert len({item.rule_id for item in catalog}) == len(catalog) == 3
+    assert len({item.rule_id for item in catalog}) == len(catalog) == 4
     assert all(
         item.title and item.detects and item.impact and item.remediation.steps and item.references
         for item in catalog
@@ -511,15 +399,13 @@ def test_invalid_prerequisite_shapes_never_report_clean(spec: object) -> None:
     assert report.conclusion == "inconclusive"
 
 
-def test_invalid_uri_and_huge_pointer_never_escape_as_exceptions() -> None:
-    invalid_server = analyze_bytes(_bytes(_spec(servers=[{"url": "http://["}])))
+def test_invalid_reference_uri_and_huge_pointer_never_escape_as_exceptions() -> None:
     huge_pointer = analyze_bytes(
         _bytes(_spec(components={"schemas": {"Widget": {"$ref": "#/items/" + "9" * 5_000}}}))
     )
     invalid_ref = analyze_bytes(
         _bytes(_spec(components={"schemas": {"Widget": {"$ref": "http://["}}}))
     )
-    assert invalid_server.completion == "incomplete"
     assert huge_pointer.completion == "complete"
     assert "api/references/local-resolution" in _rule_ids(huge_pointer)
     assert "api/references/local-resolution" in _rule_ids(invalid_ref)

@@ -878,5 +878,5 @@ def test_rest_catalog_and_capability_handshake_are_offline() -> None:
     rules_result = runner.invoke(app, ["rest", "rules"])
     explanation = runner.invoke(app, ["rest", "explain", "api/http/message-semantics"])
     assert rules_result.exit_code == explanation.exit_code == 0
-    assert len(_object_list(_json_object(rules_result.stdout)["rules"])) == 3
+    assert len(_object_list(_json_object(rules_result.stdout)["rules"])) == 4
     assert _object(_json_object(explanation.stdout)["rule"])["detects"]
