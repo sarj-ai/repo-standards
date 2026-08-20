@@ -29,7 +29,7 @@ def _site(directory: Path) -> _SiteDocuments:
     api = directory / "api" / "v4"
     api.mkdir(parents=True)
     catalog = _JSON_OBJECT.validate_python(
-        build_catalog(app, package_version=version("sarj-repo-lint")).model_dump(mode="json"),
+        build_catalog(app, package_version=version("repo-standards")).model_dump(mode="json"),
         strict=True,
     )
     schema = _JSON_OBJECT.validate_python(catalog_schema(), strict=True)
