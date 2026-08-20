@@ -53,14 +53,8 @@ def _example_title(fixture_id: FixtureId) -> str:
         "response": "Forbidden response content",
         "trace": "TRACE request body",
         "304": "Method and status mismatch",
-        "literal-http": "Unencrypted server URL",
-        "password": "OAuth password flow",
-        "implicit": "OAuth implicit flow",
-        "public": "Public operation requires authentication",
-        "authenticated": "Authenticated operation allows anonymous access",
         "media-type": "Problem Details media type",
         "status-member": "Problem Details status member",
-        "reversed": "Sunset before deprecation",
         "incomplete": "Incomplete provenance",
         "digest-mismatch": "Contradictory provenance digest",
     }[suffix]
@@ -74,8 +68,6 @@ def _spec(
     *,
     operation: Mapping[str, object] | None = None,
     method: str = "get",
-    servers: list[object] | None = None,
-    security: list[object] | None = None,
     components: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     operation_value = (
@@ -86,10 +78,6 @@ def _spec(
         "info": {"title": "Fixture", "version": "1"},
         "paths": {"/widgets": {method: operation_value}},
     }
-    if servers is not None:
-        result["servers"] = servers
-    if security is not None:
-        result["security"] = security
     if components is not None:
         result["components"] = dict(components)
     return result
@@ -232,61 +220,6 @@ def _status_method_fixture() -> OpenApiRuleFixture:
     )
 
 
-def _server_fixture() -> OpenApiRuleFixture:
-    rule_id = "api/security/transport"
-    return _fixture(
-        fixture_id=f"{rule_id}/literal-http",
-        rule_id=rule_id,
-        flagged=_request(_spec(servers=[{"url": "http://api.example.test"}])),
-        passes=_request(_spec(servers=[{"url": "https://api.example.test"}])),
-        severity="warning",
-    )
-
-
-def _oauth_fixture(flow: str, replacement: str, severity: Severity) -> OpenApiRuleFixture:
-    rule_id = "api/security/authentication"
-
-    def request(selected_flow: str) -> AnalysisRequest:
-        return _request(
-            _spec(
-                components={
-                    "securitySchemes": {"oauth": {"type": "oauth2", "flows": {selected_flow: {}}}}
-                }
-            )
-        )
-
-    return _fixture(
-        fixture_id=f"{rule_id}/{flow}",
-        rule_id=rule_id,
-        flagged=request(flow),
-        passes=request(replacement),
-        severity=severity,
-    )
-
-
-def _exposure_fixture(
-    exposure: str,
-    flagged_security: list[object],
-    passing_security: list[object],
-) -> OpenApiRuleFixture:
-    rule_id = "api/security/authentication"
-    semantics = _semantics(
-        operations=[
-            {
-                "operation_ref": "#/paths/~1widgets/get",
-                "exposure": exposure,
-            }
-        ]
-    )
-    return _fixture(
-        fixture_id=f"{rule_id}/{exposure}",
-        rule_id=rule_id,
-        flagged=_request(_spec(security=flagged_security), semantics=semantics),
-        passes=_request(_spec(security=passing_security), semantics=semantics),
-        severity="error",
-    )
-
-
 def _problem_fixture(
     suffix: str, flagged_response: Mapping[str, object], passing_response: Mapping[str, object]
 ) -> OpenApiRuleFixture:
@@ -312,32 +245,6 @@ def _problem_fixture(
         flagged=request(flagged_response),
         passes=request(passing_response),
         severity="warning",
-    )
-
-
-def _sunset_fixture() -> OpenApiRuleFixture:
-    rule_id = "api/lifecycle/deprecation-window"
-
-    def request(deprecation: str, sunset: str) -> AnalysisRequest:
-        return _request(
-            _spec(),
-            semantics=_semantics(
-                operations=[
-                    {
-                        "operation_ref": "#/paths/~1widgets/get",
-                        "deprecation_at": deprecation,
-                        "sunset_at": sunset,
-                    }
-                ]
-            ),
-        )
-
-    return _fixture(
-        fixture_id=f"{rule_id}/reversed",
-        rule_id=rule_id,
-        flagged=request("2027-01-01T00:00:00Z", "2026-12-01T00:00:00Z"),
-        passes=request("2026-01-01T00:00:00Z", "2026-12-01T00:00:00Z"),
-        severity="error",
     )
 
 
@@ -416,14 +323,8 @@ REST_RULE_FIXTURES: tuple[OpenApiRuleFixture, ...] = (
     _forbidden_response_fixture(),
     _forbidden_trace_fixture(),
     _status_method_fixture(),
-    _server_fixture(),
-    _oauth_fixture("password", "authorizationCode", "error"),
-    _oauth_fixture("implicit", "authorizationCode", "warning"),
-    _exposure_fixture("public", [{"oauth": []}], [{}]),
-    _exposure_fixture("authenticated", [{}], [{"oauth": []}]),
     _problem_fixture("media-type", _PROBLEM_MEDIA_FLAGGED, _PROBLEM_MEDIA_PASSES),
     _problem_fixture("status-member", _PROBLEM_STATUS_FLAGGED, _PROBLEM_STATUS_PASSES),
-    _sunset_fixture(),
     _artifact_fixture("incomplete", incomplete=True),
     _artifact_fixture("digest-mismatch", incomplete=False),
 )
@@ -433,12 +334,7 @@ _CONSOLIDATED_RULE_TARGETS: Mapping[str, str] = MappingProxyType(
         "rest/source/nonhermetic-ref": "api/references/local-resolution",
         "rest/http/forbidden-content": "api/http/message-semantics",
         "rest/http/status-method-contradiction": "api/http/message-semantics",
-        "rest/security/insecure-server": "api/security/transport",
-        "rest/security/oauth-password-grant": "api/security/authentication",
-        "rest/security/oauth-implicit-grant": "api/security/authentication",
-        "rest/security/exposure-contradiction": "api/security/authentication",
         "rest/errors/problem-contract": "api/errors/problem-details",
-        "rest/lifecycle/sunset-order": "api/lifecycle/deprecation-window",
         "rest/artifact/provenance-incomplete": "api/artifact/provenance",
         "rest/artifact/provenance-contradiction": "api/artifact/provenance",
     }

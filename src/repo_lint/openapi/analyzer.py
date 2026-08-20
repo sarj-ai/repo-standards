@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from hashlib import sha256
 import json
 import math
@@ -50,7 +49,6 @@ _NOT_MODIFIED = 304
 _CLIENT_ERROR_START = 400
 _SHA256_HEX_LENGTH = 64
 _SEMANTICS_SCHEMA_VERSION = 2
-_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 _OAS_VERSION = re.compile(r"^3\.(?:0|1|2)\.\d+$")
 _METHODS = frozenset({"get", "put", "post", "delete", "options", "head", "patch", "trace", "query"})
 _PROBLEM_STRING_MEMBERS = frozenset({"type", "title", "detail", "instance"})
@@ -71,10 +69,7 @@ class _DuplicateKeyError(_InputError):
 @dataclass(frozen=True, slots=True)
 class _OperationSemantics:
     operation_ref: str
-    exposure: Literal["public", "authenticated"] | None
     error_profile: Literal["rfc9457"] | None
-    deprecation_at: datetime | None
-    sunset_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,11 +106,6 @@ class _Operation(NamedTuple):
     pointer: str
     operation: JsonObject
     path_item: JsonObject
-
-
-class _ServerObject(NamedTuple):
-    pointer: str
-    value: JsonObject
 
 
 class _OperationMapEntry(NamedTuple):
@@ -267,8 +257,6 @@ def analyze(request: AnalysisRequest) -> AnalysisReport:
     _preflight_references(request.entrypoint, entry, documents, parsed, collector)
     semantics_data = _parse_semantics(request.semantics, collector)
     _check_http(request.entrypoint, entry, parsed, collector)
-    _check_servers(request.entrypoint, entry, collector)
-    _check_oauth(request.entrypoint, entry, collector)
     if semantics_data is not None:
         _check_semantics(request.entrypoint, entry, parsed, semantics_data, collector)
         _check_artifacts(documents, semantics_data, collector)
@@ -757,103 +745,6 @@ def _status_contradiction(
     )
 
 
-def _check_servers(name: str, root: JsonObject, collector: _Collector) -> None:
-    seen: set[str] = set()
-    for pointer, server in _server_objects(root):
-        if pointer in seen:
-            continue
-        seen.add(pointer)
-        url = server.get("url")
-        if not isinstance(url, str) or "{" in url or "}" in url:
-            continue
-        try:
-            scheme = urlsplit(url).scheme.lower()
-        except ValueError:
-            collector.issue(
-                "openapi.server-url-invalid",
-                "validation",
-                "server URL cannot be parsed safely",
-                "Validate the Server Object URL with the pinned upstream validator.",
-            )
-            continue
-        if scheme == "http":
-            collector.finding(
-                rule_id="api/security/transport",
-                severity="warning",
-                message="literal server URL uses cleartext HTTP",
-                observed=url,
-                expected="an https URL, relative URL, or explicitly templated URL",
-                document=name,
-                pointer=f"{pointer}/url",
-                summary="Use transport security.",
-                steps=("Change the literal server URL to https.",),
-            )
-
-
-def _server_objects(root: JsonObject) -> list[_ServerObject]:
-    result: list[_ServerObject] = []
-    servers = root.get("servers")
-    if isinstance(servers, list):
-        for index, server in enumerate(servers):
-            if isinstance(server, dict):
-                result.append(_ServerObject(f"/servers/{index}", cast("JsonObject", server)))
-    for _method, pointer, operation, path_item in _operations(root):
-        for owner_pointer, owner in ((pointer.rsplit("/", 1)[0], path_item), (pointer, operation)):
-            local_servers = owner.get("servers")
-            if not isinstance(local_servers, list):
-                continue
-            for index, server in enumerate(local_servers):
-                if isinstance(server, dict):
-                    result.append(
-                        _ServerObject(
-                            f"{owner_pointer}/servers/{index}", cast("JsonObject", server)
-                        )
-                    )
-    return result
-
-
-def _check_oauth(name: str, root: JsonObject, collector: _Collector) -> None:
-    components = root.get("components")
-    schemes = components.get("securitySchemes") if isinstance(components, dict) else None
-    if not isinstance(schemes, dict):
-        return
-    for scheme_name, raw_scheme in schemes.items():
-        if not isinstance(raw_scheme, dict) or raw_scheme.get("type") != "oauth2":
-            continue
-        flows = raw_scheme.get("flows")
-        if not isinstance(flows, dict):
-            continue
-        base = f"/components/securitySchemes/{_pointer_token(str(scheme_name))}/flows"
-        if "password" in flows:
-            collector.finding(
-                rule_id="api/security/authentication",
-                severity="error",
-                message="OAuth password flow is declared",
-                observed="flows.password",
-                expected="a code-based or client-credentials flow",
-                document=name,
-                pointer=f"{base}/password",
-                summary="Replace the password flow.",
-                steps=(
-                    "Select an OAuth flow that does not expose user credentials to the client.",
-                ),
-            )
-        if "implicit" in flows:
-            collector.finding(
-                rule_id="api/security/authentication",
-                severity="warning",
-                message="OAuth implicit flow is declared",
-                observed="flows.implicit",
-                expected="authorizationCode or another reviewed flow",
-                document=name,
-                pointer=f"{base}/implicit",
-                summary="Review and replace the legacy flow.",
-                steps=(
-                    "Use authorization code with appropriate client protections where applicable.",
-                ),
-            )
-
-
 def _parse_semantics(content: bytes | None, collector: _Collector) -> _Semantics | None:
     if content is None:
         return _Semantics((), ())
@@ -934,7 +825,7 @@ def _parse_operation_semantics(value: JsonValue) -> tuple[_OperationSemantics, .
         item = _as_object(raw, context)
         _strict_keys(
             item,
-            {"operation_ref", "exposure", "error_profile", "deprecation_at", "sunset_at"},
+            {"operation_ref", "error_profile"},
             context,
         )
         operation_ref = _optional_string(item, "operation_ref", context)
@@ -943,42 +834,16 @@ def _parse_operation_semantics(value: JsonValue) -> tuple[_OperationSemantics, .
         if operation_ref in seen:
             _InputError.fail(f"duplicate operation_ref {operation_ref!r}")
         seen.add(operation_ref)
-        exposure = _optional_string(item, "exposure", context)
-        if exposure not in {None, "public", "authenticated"}:
-            _InputError.fail(f"{context}.exposure must be public or authenticated")
         error_profile = _optional_string(item, "error_profile", context)
         if error_profile not in {None, "rfc9457"}:
             _InputError.fail(f"{context}.error_profile must be rfc9457")
-        deprecation = _parse_timestamp(
-            _optional_string(item, "deprecation_at", context), f"{context}.deprecation_at"
-        )
-        sunset = _parse_timestamp(
-            _optional_string(item, "sunset_at", context), f"{context}.sunset_at"
-        )
         result.append(
             _OperationSemantics(
                 operation_ref,
-                cast("Literal['public', 'authenticated'] | None", exposure),
                 cast("Literal['rfc9457'] | None", error_profile),
-                deprecation,
-                sunset,
             )
         )
     return tuple(result)
-
-
-def _parse_timestamp(value: str | None, context: str) -> datetime | None:
-    if value is None:
-        return None
-    if _RFC3339.fullmatch(value) is None:
-        _InputError.fail(f"{context} must be an RFC 3339 timestamp")
-    try:
-        result = datetime.fromisoformat(value)
-    except ValueError as error:
-        _InputError.fail(f"{context} must be an RFC 3339 timestamp", cause=error)
-    if result.tzinfo is None:
-        _InputError.fail(f"{context} must include a timezone")
-    return result
 
 
 def _parse_artifacts(value: JsonValue) -> tuple[_Artifact, ...]:
@@ -1060,29 +925,8 @@ def _check_semantics(
             continue
         _method, operation = target
         pointer = resolved_ref[1:]
-        if declaration.exposure is not None:
-            _check_exposure(name, root, operation, pointer, declaration.exposure, collector)
         if declaration.error_profile == "rfc9457":
             _check_problem_responses(name, operation, pointer, parsed, collector)
-        if (
-            declaration.deprecation_at is not None
-            and declaration.sunset_at is not None
-            and declaration.sunset_at <= declaration.deprecation_at
-        ):
-            collector.finding(
-                rule_id="api/lifecycle/deprecation-window",
-                severity="error",
-                message="sunset must be later than deprecation",
-                observed=(
-                    f"deprecation={declaration.deprecation_at.isoformat()}, "
-                    f"sunset={declaration.sunset_at.isoformat()}"
-                ),
-                expected="deprecation_at < sunset_at",
-                document=name,
-                pointer=pointer,
-                summary="Provide a positive migration window.",
-                steps=("Move sunset_at after deprecation_at.",),
-            )
 
 
 def _operation_map(root: JsonObject) -> dict[str, _OperationMapEntry]:
@@ -1090,60 +934,6 @@ def _operation_map(root: JsonObject) -> dict[str, _OperationMapEntry]:
         f"#{pointer}": _OperationMapEntry(method, operation)
         for method, pointer, operation, _ in _operations(root)
     }
-
-
-def _check_exposure(  # ruff: ignore[too-many-arguments, too-many-positional-arguments] - explicit rule evidence
-    name: str,
-    root: JsonObject,
-    operation: JsonObject,
-    pointer: str,
-    exposure: Literal["public", "authenticated"],
-    collector: _Collector,
-) -> None:
-    dnf = _security_dnf(_effective_security(root, operation))
-    if dnf is None:
-        collector.issue(
-            "openapi.security-invalid",
-            "security",
-            f"effective security for {pointer!r} is not a Security Requirement array",
-            "Correct the OpenAPI security structure before comparing exposure.",
-        )
-        return
-    allows_anonymous = any(not alternative for alternative in dnf)
-    contradiction = (exposure == "public" and not allows_anonymous) or (
-        exposure == "authenticated" and allows_anonymous
-    )
-    if not contradiction:
-        return
-    rendered = " OR ".join("anonymous" if not item else " AND ".join(sorted(item)) for item in dnf)
-    collector.finding(
-        rule_id="api/security/authentication",
-        severity="error",
-        message="explicit exposure contradicts effective OpenAPI security",
-        observed=f"declared={exposure}, effective={rendered}",
-        expected="public permits an anonymous alternative; authenticated permits none",
-        document=name,
-        pointer=pointer,
-        summary="Align exposure and effective security.",
-        steps=("Review root inheritance and the operation security alternatives.",),
-    )
-
-
-def _effective_security(root: JsonObject, operation: JsonObject) -> JsonValue:
-    return operation["security"] if "security" in operation else root.get("security", [])
-
-
-def _security_dnf(value: JsonValue) -> tuple[frozenset[str], ...] | None:
-    if not isinstance(value, list):
-        return None
-    if not value:
-        return (frozenset(),)
-    alternatives: list[frozenset[str]] = []
-    for requirement in value:
-        if not isinstance(requirement, dict):
-            return None
-        alternatives.append(frozenset(str(key) for key in requirement))
-    return tuple(alternatives)
 
 
 def _check_problem_responses(

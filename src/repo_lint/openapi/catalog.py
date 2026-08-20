@@ -9,8 +9,6 @@ from repo_lint.core.models import (
 )
 from repo_lint.core.taxonomy import (
     API_CONTRACTS,
-    API_LIFECYCLE,
-    API_SECURITY,
     ERROR_CONTRACTS,
     GENERATED_ARTIFACTS,
     HTTP_SEMANTICS,
@@ -23,10 +21,7 @@ from .fixtures import examples_for_rule
 
 _HTTP = "https://www.rfc-editor.org/rfc/rfc9110.html"
 _OAS = "https://spec.openapis.org/oas/v3.2.0.html"
-_OAUTH_SECURITY = "https://www.rfc-editor.org/rfc/rfc9700.html"
 _PROBLEM = "https://www.rfc-editor.org/rfc/rfc9457.html"
-_DEPRECATION = "https://www.rfc-editor.org/rfc/rfc9745.html"
-_SUNSET = "https://www.rfc-editor.org/rfc/rfc8594.html"
 _VALIDATION = "Run repo-standards rest check again against the same tracked contract and semantics."
 
 
@@ -127,121 +122,6 @@ RULES: tuple[RuleDefinition, ...] = (
         references=(_HTTP,),
     ),
     RuleDefinition(
-        rule_id=RuleId("rest/security/insecure-server"),
-        version=1,
-        default_severity="warning",
-        title="Literal HTTP server URL",
-        summary="Literal OpenAPI server URLs use transport security.",
-        detects="An OpenAPI Server Object contains a literal URL whose scheme is http.",
-        impact="Credentials and API data can be observed or modified in transit.",
-        taxonomy=taxonomy(API_CONTRACTS, API_SECURITY, "openapi", "rest", "transport"),
-        remediation=_remediation(
-            "Use transport security for the declared server.",
-            "Change the literal URL to HTTPS, or use an accurate relative or templated URL.",
-        ),
-        examples=examples_for_rule(RuleId("rest/security/insecure-server")),
-        evidence_required=("parsed literal Server Object URLs at root, path, and operation scope",),
-        non_goals=(
-            "inferring deployment TLS behind a proxy",
-            "evaluating templated or relative URLs",
-        ),
-        false_positive_controls=(
-            "Relative and templated URLs are ignored rather than guessed.",
-            "Malformed server URLs make analysis inconclusive instead of producing a finding.",
-            "This advisory rule does not claim to observe runtime transport configuration.",
-        ),
-        upstream=("OpenAPI conformance tooling",),
-        references=(_OAS,),
-        maturity="beta",
-    ),
-    RuleDefinition(
-        rule_id=RuleId("rest/security/oauth-password-grant"),
-        version=1,
-        default_severity="error",
-        title="OAuth password flow",
-        summary="OAuth schemes avoid exposing resource-owner credentials to clients.",
-        detects="An OAuth 2.0 security scheme declares flows.password.",
-        impact="The flow exposes the resource owner's credentials directly to the client.",
-        taxonomy=taxonomy(API_CONTRACTS, API_SECURITY, "oauth", "openapi", "rest"),
-        remediation=_remediation(
-            "Replace the password flow.",
-            "Select a reviewed OAuth flow that does not expose user credentials to the client.",
-        ),
-        examples=examples_for_rule(RuleId("rest/security/oauth-password-grant")),
-        evidence_required=("the exact components.securitySchemes.*.flows.password key",),
-        non_goals=("assessing runtime token security",),
-        false_positive_controls=(
-            "Only exact flow keys under a security scheme whose type is oauth2 are checked.",
-            "Scheme names, descriptions, and non-OAuth scheme types are ignored.",
-        ),
-        upstream=("OAuth security guidance", "OpenAPI conformance tooling"),
-        references=(_OAS, _OAUTH_SECURITY),
-    ),
-    RuleDefinition(
-        rule_id=RuleId("rest/security/oauth-implicit-grant"),
-        version=1,
-        default_severity="warning",
-        title="OAuth implicit flow",
-        summary="OAuth schemes prefer code-based flows over the legacy implicit flow.",
-        detects="An OAuth 2.0 security scheme declares flows.implicit.",
-        impact="The legacy browser flow has weaker token protections than code-based flows.",
-        taxonomy=taxonomy(API_CONTRACTS, API_SECURITY, "oauth", "openapi", "rest"),
-        remediation=_remediation(
-            "Review and replace the legacy flow.",
-            "Use authorization code with appropriate client protections where applicable.",
-        ),
-        examples=examples_for_rule(RuleId("rest/security/oauth-implicit-grant")),
-        evidence_required=("the exact components.securitySchemes.*.flows.implicit key",),
-        non_goals=("claiming an RFC violation", "assessing runtime token security"),
-        false_positive_controls=(
-            "Only exact flow keys under a security scheme whose type is oauth2 are checked.",
-            "Scheme names, descriptions, and non-OAuth scheme types are ignored.",
-            "Only the declared flow key is evaluated.",
-        ),
-        upstream=("OAuth security guidance", "OpenAPI conformance tooling"),
-        references=(_OAS, _OAUTH_SECURITY),
-        maturity="beta",
-    ),
-    RuleDefinition(
-        rule_id=RuleId("rest/security/exposure-contradiction"),
-        version=1,
-        default_severity="error",
-        title="Exposure conflicts with authentication",
-        summary="Declared exposure agrees with effective OpenAPI security.",
-        detects=(
-            "An operation marked public has no anonymous security alternative, or one marked "
-            "authenticated allows anonymous access."
-        ),
-        impact="Generated consumers can enforce the opposite authentication requirement.",
-        taxonomy=taxonomy(API_CONTRACTS, API_SECURITY, "authentication", "openapi", "rest"),
-        remediation=_remediation(
-            "Align declared exposure and effective security.",
-            "Review root security inheritance and operation-level security alternatives.",
-            "Change either the explicit exposure declaration or the OpenAPI security requirement.",
-        ),
-        examples=examples_for_rule(RuleId("rest/security/exposure-contradiction")),
-        evidence_required=(
-            (
-                "an exact operation_ref sidecar declaration and computed effective security "
-                "alternatives"
-            ),
-        ),
-        non_goals=("inferring exposure", "proving runtime authorization", "evaluating scopes"),
-        false_positive_controls=(
-            "Only operations with an explicit sidecar exposure declaration are checked.",
-            (
-                "Root inheritance, operation overrides, empty arrays, and empty requirement "
-                "objects are modeled."
-            ),
-            (
-                "Invalid security structures make analysis inconclusive instead of producing "
-                "a finding."
-            ),
-        ),
-        upstream=("OpenAPI security semantics",),
-        references=(_OAS,),
-    ),
-    RuleDefinition(
         rule_id=RuleId("rest/errors/problem-contract"),
         version=1,
         default_severity="warning",
@@ -278,33 +158,6 @@ RULES: tuple[RuleDefinition, ...] = (
         upstream=("RFC 9457", "OpenAPI conformance tooling"),
         references=(_PROBLEM, _OAS),
         maturity="beta",
-    ),
-    RuleDefinition(
-        rule_id=RuleId("rest/lifecycle/sunset-order"),
-        version=1,
-        default_severity="error",
-        title="Sunset after deprecation",
-        summary="Explicit lifecycle timestamps provide a positive migration window.",
-        detects=(
-            "An operation's explicit sunset timestamp is equal to or earlier than its "
-            "deprecation timestamp."
-        ),
-        impact="Consumers receive no valid migration window.",
-        taxonomy=taxonomy(API_CONTRACTS, API_LIFECYCLE, "deprecation", "openapi", "rest"),
-        remediation=_remediation(
-            "Provide a positive migration window.",
-            "Move sunset_at after deprecation_at.",
-        ),
-        examples=examples_for_rule(RuleId("rest/lifecycle/sunset-order")),
-        evidence_required=("two explicit strict-RFC3339 sidecar timestamps for one operation",),
-        non_goals=("inferring dates from prose or examples",),
-        false_positive_controls=(
-            "No finding is emitted unless both exact timestamps are declared.",
-            "Malformed sidecar timestamps make analysis inconclusive instead of being guessed.",
-            "Equal timestamps are treated as having no migration window.",
-        ),
-        upstream=("Deprecation and Sunset HTTP semantics",),
-        references=(_DEPRECATION, _SUNSET),
     ),
     RuleDefinition(
         rule_id=RuleId("rest/artifact/provenance-incomplete"),
@@ -401,8 +254,33 @@ def rules() -> tuple[RuleDefinition, ...]:
             ),
             "warning",
         ),
+        (
+            "api/artifact/provenance",
+            (
+                "rest/artifact/provenance-incomplete",
+                "rest/artifact/provenance-contradiction",
+            ),
+            "Verify artifact provenance",
+            "Derived artifacts identify their source, producer, configuration, and exact bytes.",
+            "Reports missing provenance fields, absent bytes, or digest contradictions.",
+            "Complete provenance makes generated contracts reproducible and tamper-evident.",
+            "error",
+        ),
     )
     compact_content = {
+        "api/artifact/provenance": (
+            _remediation(
+                "Complete or correct the provenance record.",
+                "Identify the exact source, producer, configuration, and output bytes.",
+                "Record SHA-256 digests that match the supplied source and artifact.",
+            ),
+            ("explicit artifact metadata plus the supplied source and artifact bytes",),
+            ("compiling generated code", "inferring generated artifacts from paths"),
+            (
+                "Only explicitly declared derived artifacts are checked.",
+                "Digest comparisons use exact supplied bytes without executing repository code.",
+            ),
+        ),
         "api/http/message-semantics": (
             _remediation(
                 "Remove forbidden content or choose a compatible method and status.",

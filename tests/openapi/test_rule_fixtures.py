@@ -39,31 +39,6 @@ _EXPECTED_FIXTURES = (
         "error",
     ),
     FixtureExpectation(
-        FixtureId("api/security/transport/literal-http"),
-        RuleId("api/security/transport"),
-        "warning",
-    ),
-    FixtureExpectation(
-        FixtureId("api/security/authentication/password"),
-        RuleId("api/security/authentication"),
-        "error",
-    ),
-    FixtureExpectation(
-        FixtureId("api/security/authentication/implicit"),
-        RuleId("api/security/authentication"),
-        "warning",
-    ),
-    FixtureExpectation(
-        FixtureId("api/security/authentication/public"),
-        RuleId("api/security/authentication"),
-        "error",
-    ),
-    FixtureExpectation(
-        FixtureId("api/security/authentication/authenticated"),
-        RuleId("api/security/authentication"),
-        "error",
-    ),
-    FixtureExpectation(
         FixtureId("api/errors/problem-details/media-type"),
         RuleId("api/errors/problem-details"),
         "warning",
@@ -72,11 +47,6 @@ _EXPECTED_FIXTURES = (
         FixtureId("api/errors/problem-details/status-member"),
         RuleId("api/errors/problem-details"),
         "warning",
-    ),
-    FixtureExpectation(
-        FixtureId("api/lifecycle/deprecation-window/reversed"),
-        RuleId("api/lifecycle/deprecation-window"),
-        "error",
     ),
     FixtureExpectation(
         FixtureId("api/artifact/provenance/incomplete"),
@@ -126,6 +96,7 @@ def test_fixture_registry_matches_independent_expectations() -> None:
 def test_catalog_examples_are_rendered_from_executable_fixture_bytes() -> None:
     catalog = {rule.rule_id: rule for rule in rules()}
     assert set(catalog) == {
+        RuleId("api/artifact/provenance"),
         RuleId("api/references/local-resolution"),
         RuleId("api/http/message-semantics"),
         RuleId("api/errors/problem-details"),

@@ -2,12 +2,19 @@
 interface Props {
   categoryId: string;
   label: string;
+  decorative?: boolean;
 }
 
-const { categoryId, label } = Astro.props;
+const { categoryId, label, decorative = false } = Astro.props;
 ---
 
-<span class="rule-type-mark" role="img" aria-label={label} title={label}>
+<span
+  class="rule-type-mark"
+  role={decorative ? undefined : 'img'}
+  aria-hidden={decorative ? 'true' : undefined}
+  aria-label={decorative ? undefined : label}
+  title={decorative ? undefined : label}
+>
   {categoryId === 'architecture' ? (
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="12" cy="18" r="2"/><path d="m8 8 3 8m5-8-3 8M8 7h8"/></svg>
   ) : categoryId === 'repository' ? (

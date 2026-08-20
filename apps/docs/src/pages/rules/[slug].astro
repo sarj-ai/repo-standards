@@ -49,7 +49,7 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
       <div class="rule-detail__toolbar">
         <nav class="rule-breadcrumb" aria-label="Breadcrumb">
           <a class="rule-breadcrumb__category" href={categoryUrl}>
-            <RuleTypeMark categoryId={rule.category_id} label={category.category.label} />
+            <RuleTypeMark categoryId={rule.category_id} label={category.category.label} decorative />
             <span>{category.category.label}</span>
           </a>
           <span aria-hidden="true">·</span>
