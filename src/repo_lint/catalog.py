@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
 
 _CATALOG_KIND = "repo-lint.catalog"
-_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v5.schema.json"
+_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v6.schema.json"
 _PUBLIC_REFERENCE_HOSTS = frozenset(
     {
         "docs.github.com",
@@ -75,6 +75,10 @@ RuleIdValue = Annotated[
     RuleId,
     Field(pattern=r"^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*){2,}$"),
 ]
+RuleSlug = Annotated[
+    str,
+    Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", min_length=3, max_length=64),
+]
 SourcePath = Annotated[
     str,
     Field(
@@ -83,6 +87,16 @@ SourcePath = Annotated[
     ),
 ]
 HttpsUrl = Annotated[str, Field(pattern=r"^https://")]
+
+_RULE_SLUGS: dict[str, RuleSlug] = {
+    "api/errors/problem-details": "problem-details",
+    "api/http/message-semantics": "http-message-semantics",
+    "api/references/local-resolution": "local-references",
+    "architecture/dependencies/policy": "dependency-policy",
+    "architecture/layout/component-paths": "component-paths",
+    "architecture/schema/component": "component-identity",
+    "repository/migration/consistency": "migration-consistency",
+}
 
 
 class _ParameterResult(NamedTuple):
@@ -211,6 +225,7 @@ class CategoryDescriptor(CatalogModel):
 class RuleDescriptor(CatalogModel):
     kind: Literal["rule"] = "rule"
     rule_id: RuleIdValue
+    slug: RuleSlug
     rule_version: PositiveVersion
     title: Annotated[str, Field(min_length=1, max_length=72)]
     category_id: RuleCategoryId
@@ -320,7 +335,7 @@ class SchemaDescriptor(CatalogModel):
 
 class Catalog(CatalogModel):
     kind: Literal["repo-lint.catalog"] = _CATALOG_KIND
-    schema_version: Literal[5] = 5
+    schema_version: Literal[6] = 6
     catalog_version: str
     product: ProductDescriptor
     provenance: ProvenanceDescriptor
@@ -386,6 +401,10 @@ def _validate_rule_graph(catalog: Catalog) -> None:
     rules_by_id = {rule.rule_id: rule for rule in catalog.rules}
     if len(rules_by_id) != len(catalog.rules):
         message = "catalog active rule ids must be unique"
+        raise ValueError(message)
+    slugs = [rule.slug for rule in catalog.rules]
+    if len(slugs) != len(set(slugs)):
+        message = "catalog rule slugs must be unique"
         raise ValueError(message)
     policy_ids = {policy.policy_id for policy in catalog.policies}
     if len(policy_ids) != len(catalog.policies):
@@ -698,6 +717,7 @@ def _rule_descriptor(rule: Rule, source_path: str) -> RuleDescriptor:
         review_descriptor = PendingRuleReviewDescriptor()
     return RuleDescriptor(
         rule_id=RuleId(str(rule.rule_id)),
+        slug=_RULE_SLUGS[str(rule.rule_id)],
         rule_version=rule.version,
         title=rule.title,
         category_id=rule.taxonomy.category_id,
@@ -942,7 +962,7 @@ def _schemas() -> tuple[SchemaDescriptor, ...]:
             "openapi-analysis",
             openapi_report_schema(),
         ),
-        ("catalog", "Repo-lint public catalog", 5, "catalog", catalog_schema()),
+        ("catalog", "Repo-lint public catalog", 6, "catalog", catalog_schema()),
     )
     return tuple(
         SchemaDescriptor(

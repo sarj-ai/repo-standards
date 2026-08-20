@@ -474,7 +474,7 @@ def test_artifact_provenance_missing_and_mismatch_are_distinct() -> None:
 def test_rule_catalog_is_complete_unique_and_source_backed() -> None:
     catalog = rules()
     assert [item.rule_id for item in catalog] == sorted(item.rule_id for item in catalog)
-    assert len({item.rule_id for item in catalog}) == len(catalog) == 7
+    assert len({item.rule_id for item in catalog}) == len(catalog) == 3
     assert all(
         item.title and item.detects and item.impact and item.remediation.steps and item.references
         for item in catalog

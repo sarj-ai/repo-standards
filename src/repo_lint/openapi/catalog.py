@@ -390,28 +390,6 @@ def rules() -> tuple[RuleDefinition, ...]:
             "error",
         ),
         (
-            "api/security/transport",
-            ("rest/security/insecure-server",),
-            "Use secure API transport",
-            "Literal server URLs use encrypted transport.",
-            "Reports an OpenAPI server URL whose literal scheme is HTTP.",
-            "Unencrypted transport exposes credentials and payloads to interception.",
-            "warning",
-        ),
-        (
-            "api/security/authentication",
-            (
-                "rest/security/exposure-contradiction",
-                "rest/security/oauth-implicit-grant",
-                "rest/security/oauth-password-grant",
-            ),
-            "Keep authentication contracts safe",
-            "Declared exposure agrees with security requirements and avoids unsafe OAuth grants.",
-            "Reports contradictory anonymous access or OAuth implicit and password flows.",
-            "Ambiguous or obsolete authentication contracts expose endpoints and credentials.",
-            "error",
-        ),
-        (
             "api/errors/problem-details",
             ("rest/errors/problem-contract",),
             "Publish valid Problem Details",
@@ -423,42 +401,8 @@ def rules() -> tuple[RuleDefinition, ...]:
             ),
             "warning",
         ),
-        (
-            "api/lifecycle/deprecation-window",
-            ("rest/lifecycle/sunset-order",),
-            "Order deprecation before sunset",
-            "An explicit API sunset occurs strictly after deprecation.",
-            "Reports a sunset timestamp equal to or earlier than its deprecation timestamp.",
-            "A positive deprecation window gives consumers time to migrate safely.",
-            "error",
-        ),
-        (
-            "api/artifact/provenance",
-            (
-                "rest/artifact/provenance-incomplete",
-                "rest/artifact/provenance-contradiction",
-            ),
-            "Verify artifact provenance",
-            "Derived artifacts identify their source, producer, configuration, and exact bytes.",
-            "Reports missing provenance fields, absent bytes, or digest contradictions.",
-            "Complete provenance makes generated contracts reproducible and tamper-evident.",
-            "error",
-        ),
     )
     compact_content = {
-        "api/artifact/provenance": (
-            _remediation(
-                "Complete or correct the provenance record.",
-                "Identify the exact source, producer, configuration, and output bytes.",
-                "Record SHA-256 digests that match the supplied source and artifact.",
-            ),
-            ("explicit artifact metadata plus the supplied source and artifact bytes",),
-            ("compiling generated code", "inferring generated artifacts from paths"),
-            (
-                "Only explicitly declared derived artifacts are checked.",
-                "Digest comparisons use exact supplied bytes without executing repository code.",
-            ),
-        ),
         "api/http/message-semantics": (
             _remediation(
                 "Remove forbidden content or choose a compatible method and status.",
@@ -471,20 +415,6 @@ def rules() -> tuple[RuleDefinition, ...]:
                 "Headers and links are not treated as message content.",
                 "Missing, empty, range, and default responses are not inferred.",
                 "Only the closed TRACE, HEAD, 1xx, 204, 205, 206, and 304 cases are checked.",
-            ),
-        ),
-        "api/security/authentication": (
-            _remediation(
-                "Align exposure, effective security, and OAuth flows.",
-                "Make anonymous access agree with the explicit exposure declaration.",
-                "Replace implicit or password flows with a supported authorization flow.",
-            ),
-            ("effective operation security, explicit exposure, and exact OAuth flow keys",),
-            ("inferring exposure", "proving runtime authorization", "evaluating scopes"),
-            (
-                "Only explicitly declared exposure and exact OAuth flow keys are checked.",
-                "Security inheritance and anonymous alternatives are modeled.",
-                "Invalid security structures make analysis inconclusive.",
             ),
         ),
     }

@@ -29,11 +29,7 @@ export interface CategoryView {
 }
 
 export function ruleHref(rule: Rule): string {
-  const [first, ...rest] = rule.rule_id.split('/');
-  if (rest.length < 2 || [first, ...rest].some((part) => part === '' || part === '.' || part === '..')) {
-    throw new TypeError(`Invalid rule route id: ${rule.rule_id}`);
-  }
-  return `/rules/${encodeURIComponent(first)}/${rest.map(encodeURIComponent).join('/')}/`;
+  return `/rules/${encodeURIComponent(rule.slug)}/`;
 }
 
 export function categoryHref(value: string): string {
@@ -53,7 +49,7 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
             rule,
             href: ruleHref(rule),
             category: categoryValue.label,
-            searchText: `${rule.title} ${rule.summary} ${rule.rule_id} ${categoryValue.label} ${topicValue.label} ${rule.tags.join(' ')}`.toLocaleLowerCase('en'),
+            searchText: `${rule.slug} ${rule.title} ${rule.summary} ${rule.rule_id} ${categoryValue.label} ${topicValue.label} ${rule.tags.join(' ')}`.toLocaleLowerCase('en'),
           }));
         if (rules.length === 0) throw new TypeError(`Rule topic has no rules: ${topicValue.topic_id}`);
         return { topic: topicValue, rules };
