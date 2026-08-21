@@ -6,10 +6,10 @@ from typing import ClassVar, Literal
 
 import pytest
 
-from repo_lint.core.canonical import canonical_json, canonical_path, semantic_fingerprint
-from repo_lint.core.engine import analyze, check_baseline, classify_baseline
-from repo_lint.core.errors import ConfigurationError
-from repo_lint.core.models import (
+from repo_standards.core.canonical import canonical_json, canonical_path, semantic_fingerprint
+from repo_standards.core.engine import analyze, check_baseline, classify_baseline
+from repo_standards.core.errors import ConfigurationError
+from repo_standards.core.models import (
     AnalysisReport,
     Baseline,
     Component,

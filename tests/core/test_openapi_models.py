@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from repo_lint.core.canonical import semantic_finding_key, semantic_fingerprint, with_fingerprint
-from repo_lint.core.models import (
+from repo_standards.core.canonical import (
+    semantic_finding_key,
+    semantic_fingerprint,
+    with_fingerprint,
+)
+from repo_standards.core.models import (
     AdapterRun,
     AnalysisContext,
     AnalysisReport,
@@ -31,7 +35,7 @@ from repo_lint.core.models import (
     RuleTopicId,
     SourceLocation,
 )
-from repo_lint.core.render import diagnostic_dict, report_dict
+from repo_standards.core.render import diagnostic_dict, report_dict
 
 
 def _diagnostic() -> Diagnostic:

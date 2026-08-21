@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
-from repo_lint.core.models import FixtureId, RuleExamplePair, RuleId, Severity
+from repo_standards.core.models import FixtureId, RuleExamplePair, RuleId, Severity
 
 from .models import AnalysisRequest, DocumentInput
 

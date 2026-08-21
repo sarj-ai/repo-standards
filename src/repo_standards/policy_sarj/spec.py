@@ -5,7 +5,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Literal
 
-from repo_lint.core.models import EvidenceLevel, PolicyId, RuleId
+from repo_standards.core.models import EvidenceLevel, PolicyId, RuleId
 
 
 PROFILE_ID = "sarj/public"

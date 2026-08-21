@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import TypeAdapter
 
-from repo_lint.catalog import build_catalog, catalog_schema
-from repo_lint.cli import app
-from repo_lint.core.canonical import canonical_json
-from repo_lint.core.models import JSONValue
+from repo_standards.catalog import build_catalog, catalog_schema
+from repo_standards.cli import app
+from repo_standards.core.canonical import canonical_json
+from repo_standards.core.models import JSONValue
 from verify_release_artifacts import verify_site_catalog
 
 

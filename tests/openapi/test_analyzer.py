@@ -9,8 +9,8 @@ from jsonschema import ValidationError as JSONSchemaValidationError
 from jsonschema import validate
 import pytest
 
-from repo_lint.openapi import AnalysisReport, DocumentInput, analyze_bytes, rules
-from repo_lint.openapi.schema import analysis_schema
+from repo_standards.openapi import AnalysisReport, DocumentInput, analyze_bytes, rules
+from repo_standards.openapi.schema import analysis_schema
 
 
 if TYPE_CHECKING:

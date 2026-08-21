@@ -4,10 +4,10 @@ from dataclasses import dataclass
 
 import pytest
 
-from repo_lint.core.models import FixtureId, RuleId, Severity
-from repo_lint.openapi import analyze
-from repo_lint.openapi.catalog import rules
-from repo_lint.openapi.fixtures import REST_RULE_FIXTURES, examples_for_rule
+from repo_standards.core.models import FixtureId, RuleId, Severity
+from repo_standards.openapi import analyze
+from repo_standards.openapi.catalog import rules
+from repo_standards.openapi.fixtures import REST_RULE_FIXTURES, examples_for_rule
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,7 +7,7 @@ import tomllib
 from pydantic import TypeAdapter
 import yaml
 
-from repo_lint.core.models import JSONValue
+from repo_standards.core.models import JSONValue
 
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
@@ -49,7 +49,7 @@ def test_public_distribution_has_no_legacy_compatibility_surface() -> None:
     )
     project = OBJECT_MAP.validate_python(project_document["project"], strict=True)
     scripts = STRING_MAP.validate_python(project["scripts"], strict=True)
-    assert scripts == {"repo-standards": "repo_lint.cli:main"}
+    assert scripts == {"repo-standards": "repo_standards.cli:main"}
     assert not any(path.is_file() for path in (REPOSITORY_ROOT / "compat").rglob("*"))
     publish_document = OBJECT_MAP.validate_python(
         yaml.load(

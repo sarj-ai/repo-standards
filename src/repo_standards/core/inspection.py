@@ -217,13 +217,13 @@ def _inspection_from_blobs(
         )
     contents, read_issues = _read_metadata_batch(root, metadata_blobs)
     issues.extend(read_issues)
-    projects: list[PackageEvidence] = []
+    packages: list[PackageEvidence] = []
     workspaces: list[WorkspaceEvidence] = []
     for blob in metadata_blobs:
         content = contents.get(blob.object_id)
         project = _inspect_project(blob, content, issues)
         if project is not None:
-            projects.append(project)
+            packages.append(project)
         workspace = _inspect_workspace(blob, content, issues)
         if workspace is not None:
             workspaces.append(workspace)
@@ -249,7 +249,7 @@ def _inspection_from_blobs(
             object_id=project.object_id,
             content_digest=project.content_digest,
         )
-        for project in projects
+        for project in packages
     ]
     inventory_units.extend(
         InventoryUnit(
@@ -275,11 +275,11 @@ def _inspection_from_blobs(
         source_revision=identity.source_revision,
         tree_digest=identity.tree_digest,
         tracked_file_count=len(tracked),
-        projects=tuple(sorted(projects, key=lambda item: (item.path, item.ecosystem))),
+        packages=tuple(sorted(packages, key=lambda item: (item.path, item.ecosystem))),
         workflow_paths=tuple(blob.path for blob in workflow_blobs),
         cloudbuild_paths=tuple(blob.path for blob in cloudbuild_blobs),
         dockerfile_paths=tuple(blob.path for blob in dockerfile_blobs),
-        terraform_roots=tuple(item.path for item in terraform_modules),
+        terraform_modules=tuple(item.path for item in terraform_modules),
         issues=tuple(sorted(issues)),
         tracked_files=tuple(TrackedFileEvidence(blob.path, blob.object_id) for blob in blobs),
         workspaces=tuple(sorted(workspaces, key=lambda item: (item.path, item.ecosystem))),

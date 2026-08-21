@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from repo_lint.rest import (
+from repo_standards.rest import (
     InstrumentationInputError,
     TrackedFile,
     detect_instrumentation,

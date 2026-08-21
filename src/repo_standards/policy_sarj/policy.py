@@ -5,8 +5,8 @@ import re
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
-from repo_lint.core.errors import ConfigurationError
-from repo_lint.core.models import (
+from repo_standards.core.errors import ConfigurationError
+from repo_standards.core.models import (
     Component,
     ComponentId,
     Diagnostic,
@@ -19,7 +19,7 @@ from repo_lint.core.models import (
     RuleExamplePair,
     RuleId,
 )
-from repo_lint.core.taxonomy import (
+from repo_standards.core.taxonomy import (
     ARCHITECTURE,
     COMPONENT_SCHEMA,
     DEPENDENCY_BOUNDARIES,

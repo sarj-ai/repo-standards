@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 import tomllib
-from typing import TYPE_CHECKING, NamedTuple, NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
-from repo_lint.core.engine import core_diagnostics
-from repo_lint.core.models import (
+from repo_standards.core.engine import core_diagnostics
+from repo_standards.core.models import (
     Component,
     ComponentId,
     Dependency,
@@ -15,13 +15,6 @@ from repo_lint.core.models import (
     PolicyId,
     RepositoryId,
     RuleId,
-)
-from repo_lint.github.analyzer import analyze as analyze_github
-from repo_lint.github.models import (
-    BranchEvidence,
-    RepositoryEvidence,
-    RulesetEvidence,
-    WorkflowDocument,
 )
 
 from .policy import RULES, SarjPolicy
@@ -52,11 +45,6 @@ class _ExampleInputError(ValueError):
         raise cls(message)
 
 
-class _GovernanceInput(NamedTuple):
-    evidence: RepositoryEvidence
-    repository_files: tuple[str, ...]
-
-
 def rule_example_cases() -> tuple[RuleExampleCase, ...]:
     return tuple(
         RuleExampleCase(example.example_id, rule.rule_id, example.before, example.after)
@@ -67,8 +55,6 @@ def rule_example_cases() -> tuple[RuleExampleCase, ...]:
 
 def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
     identifier = str(fixture_id)
-    if identifier.startswith(("sarj-github-", "sarj-delivery-")):
-        return _run_github(fixture_id=identifier, source=source)
     manifest = _manifest(fixture_id=identifier, source=source)
     diagnostics = (
         core_diagnostics(manifest)
@@ -333,164 +319,6 @@ def _naming_components(*, fixture_id: str, source: str) -> tuple[Component, ...]
         case _:
             message = f"unknown Sarj naming example fixture: {fixture_id}"
             _ExampleInputError.fail(message)
-
-
-def _run_github(*, fixture_id: str, source: str) -> RuleExampleResult:
-    evidence: RepositoryEvidence | None = None
-    repository_files: tuple[str, ...] = ()
-    selected_revision: str | None = None
-    if fixture_id == "sarj-github-repository-governance":
-        governance = _governance_input(source)
-        evidence = governance.evidence
-        repository_files = governance.repository_files
-        workflows: tuple[WorkflowDocument, ...] = ()
-    elif fixture_id == "sarj-delivery-hotfix-backsync":
-        evidence = _evidence()
-        repository_files = (".github/CODEOWNERS", ".github/dependabot.yml")
-        selected_revision = "a" * 40
-        workflows = (WorkflowDocument(".github/workflows/backsync.yml", _backsync(source)),)
-    else:
-        if fixture_id == "sarj-github-merge-queue-trigger":
-            evidence = _evidence(merge_queue=True, delivery=False)
-            repository_files = (".github/CODEOWNERS", ".github/dependabot.yml")
-        workflows = (
-            WorkflowDocument(
-                ".github/workflows/ci.yml",
-                _workflow(fixture_id=fixture_id, source=source).encode(),
-            ),
-        )
-    report = analyze_github(
-        None,
-        evidence,
-        workflows,
-        repository_files=repository_files,
-        selected_revision=selected_revision,
-    )
-    return RuleExampleResult(
-        tuple(item.rule_id for item in report.diagnostics),
-        report.completion == "complete",
-        tuple(item.code for item in report.execution_issues),
-    )
-
-
-def _workflow(*, fixture_id: str, source: str) -> str:
-    if fixture_id == "sarj-github-explicit-permissions":
-        return f"on: pull_request\n{source}\n"
-    if fixture_id == "sarj-github-job-timeouts":
-        return f"on: pull_request\npermissions:\n  contents: read\n{source}\n"
-    if fixture_id == "sarj-github-merge-queue-trigger":
-        return (
-            f"{source}\npermissions:\n  contents: read\njobs:\n  test:\n"
-            "    timeout-minutes: 15\n    steps:\n      - run: echo ok\n"
-        )
-    return (
-        "on: pull_request\npermissions:\n  contents: read\njobs:\n  test:\n"
-        "    timeout-minutes: 15\n    steps:\n"
-        f"      - {source}\n"
-    )
-
-
-def _governance_input(source: str) -> _GovernanceInput:
-    values = {item.strip() for item in source.split(";")}
-    files = [".github/dependabot.yml"]
-    if "CODEOWNERS" in values:
-        files.append(".github/CODEOWNERS")
-    return _GovernanceInput(_evidence(delivery=False), tuple(files))
-
-
-def _evidence(*, merge_queue: bool = False, delivery: bool = True) -> RepositoryEvidence:
-    names = ("main", "preview", "dev") if delivery else ("main",)
-    branches = tuple(
-        BranchEvidence(
-            name=name,
-            protected=True,
-            required_status_checks=("gate",),
-            head_sha="a" * 40 if name == "main" else "b" * 40,
-        )
-        for name in names
-    )
-    rulesets = (
-        (RulesetEvidence("queue", "active", "branch", ("merge_queue",)),) if merge_queue else ()
-    )
-    return RepositoryEvidence(
-        repository="acme/widgets",
-        default_branch="main",
-        branches=branches,
-        rulesets=rulesets,
-        allow_auto_merge=True,
-        actions_default_workflow_permissions="read",
-        actions_can_approve_pull_requests=False,
-    )
-
-
-def _backsync(source: str) -> bytes:
-    preview_to_dev = source.startswith("main -> preview -> dev")
-    second_job = _BACKSYNC_DEV_JOB if preview_to_dev else ""
-    return f"{_BACKSYNC_HEADER}{second_job}".encode()
-
-
-_BACKSYNC_HEADER = """on:
-  push:
-    branches: [main, preview]
-  schedule:
-    - cron: '17 * * * *'
-  workflow_dispatch:
-permissions:
-  contents: write
-  pull-requests: write
-concurrency:
-  group: backsync
-  cancel-in-progress: false
-jobs:
-  main-to-preview:
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
-    timeout-minutes: 35
-    env:
-      AUTHOR_TOKEN: ${{ secrets.BACKSYNC_TOKEN }}
-    steps:
-      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567
-      - run: |
-          main_sha=$(GH_TOKEN="$AUTHOR_TOKEN" gh api repos/acme/widgets/git/ref/heads/main)
-          git merge-tree --write-tree origin/preview origin/main
-          git rev-parse 'origin/preview^{tree}'
-          sync_branch="sync-main-$main_sha"
-          GH_TOKEN="$AUTHOR_TOKEN" gh api repos/acme/widgets/git/refs \
-            -f ref="refs/heads/$sync_branch"
-          number=$(GH_TOKEN="$AUTHOR_TOKEN" gh pr list --base preview --head "$sync_branch")
-          if [ -z "$number" ]; then
-            GH_TOKEN="$AUTHOR_TOKEN" gh pr create --base preview --head "$sync_branch"
-          fi
-          head_oid=$(GH_TOKEN="$AUTHOR_TOKEN" gh pr view "$number" --json headRefOid,mergeable)
-          if [ "$head_oid" != "$main_sha" ]; then exit 1; fi
-          if [ "$mergeable" = "CONFLICTING" ]; then exit 1; fi
-          GH_TOKEN="$AUTHOR_TOKEN" gh pr merge "$number" --auto --squash \
-            --match-head-commit "$main_sha"
-"""
-
-_BACKSYNC_DEV_JOB = """  preview-to-dev:
-    if: github.event_name != 'push' || github.ref == 'refs/heads/preview'
-    timeout-minutes: 35
-    env:
-      AUTHOR_TOKEN: ${{ secrets.BACKSYNC_TOKEN }}
-    steps:
-      - run: |
-          preview_sha=$(GH_TOKEN="$AUTHOR_TOKEN" gh api repos/acme/widgets/git/ref/heads/preview)
-          old_dev=$(GH_TOKEN="$AUTHOR_TOKEN" gh api repos/acme/widgets/git/ref/heads/dev)
-          GH_TOKEN="$AUTHOR_TOKEN" gh api "repos/acme/widgets/compare/$preview_sha...$old_dev"
-          git merge --no-edit origin/preview
-          sync_branch="sync-preview-$preview_sha"
-          GH_TOKEN="$AUTHOR_TOKEN" gh api repos/acme/widgets/git/refs \
-            -f ref="refs/heads/$sync_branch"
-          number=$(GH_TOKEN="$AUTHOR_TOKEN" gh pr list --base dev --head "$sync_branch")
-          if [ -z "$number" ]; then
-            GH_TOKEN="$AUTHOR_TOKEN" gh pr create --base dev --head "$sync_branch"
-          fi
-          head_oid=$(GH_TOKEN="$AUTHOR_TOKEN" gh pr view "$number" --json headRefOid,mergeable)
-          if [ "$head_oid" != "$preview_sha" ]; then exit 1; fi
-          if [ "$mergeable" = "CONFLICTING" ]; then exit 1; fi
-          GH_TOKEN="$AUTHOR_TOKEN" gh pr merge "$number" --auto --merge \
-            --match-head-commit "$preview_sha"
-"""
 
 
 def _toml(source: str) -> Mapping[str, object]:

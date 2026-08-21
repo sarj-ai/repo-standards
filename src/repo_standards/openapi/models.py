@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from repo_lint.core.models import RuleDefinition as _RuleDefinition
+from repo_standards.core.models import RuleDefinition as _RuleDefinition
 
 
 RuleDefinition = _RuleDefinition

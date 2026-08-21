@@ -30,10 +30,7 @@ Issues = "https://github.com/sarj-ai/repo-standards/issues"
 Documentation = "https://repo-standards.sarj.ai"
 
 [project.scripts]
-repo-standards = "repo_lint.cli:main"
-
-[project.entry-points."repo_lint.policies.v2"]
-sarj = "repo_lint.policy_sarj:SarjPolicy"
+repo-standards = "repo_standards.cli:main"
 
 [dependency-groups]
 dev = [
@@ -48,7 +45,7 @@ requires = ["uv_build>=0.12.5,<0.13"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "repo_lint"
+module-name = "repo_standards"
 
 [tool.pytest.ini_options]
 addopts = "-q --import-mode=importlib"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from repo_lint.core.models import RuleCategoryId, RuleTaxonomy, RuleTopicId
+from repo_standards.core.models import RuleCategoryId, RuleTaxonomy, RuleTopicId
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +21,6 @@ class RuleCategory:
 
 
 ARCHITECTURE = RuleCategoryId("architecture")
-DELIVERY = RuleCategoryId("delivery")
 CHANGE_SAFETY = RuleCategoryId("repository")
 API_CONTRACTS = RuleCategoryId("api-contracts")
 
@@ -30,9 +29,6 @@ REPOSITORY_LAYOUT = RuleTopicId("repository-layout")
 NAMING = RuleTopicId("naming")
 REUSE = RuleTopicId("reuse")
 COMPONENT_SCHEMA = RuleTopicId("component-schema")
-GITHUB_ACTIONS = RuleTopicId("github-actions")
-REPOSITORY_GOVERNANCE = RuleTopicId("repository-governance")
-RELEASE_FLOW = RuleTopicId("release-flow")
 MIGRATIONS = RuleTopicId("migrations")
 BASELINES = RuleTopicId("baselines")
 EXCEPTIONS = RuleTopicId("exceptions")

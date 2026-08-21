@@ -92,13 +92,4 @@ def scope_digest(manifest: Manifest) -> str:
         "policy_id": manifest.policy_id,
         "policy_version": manifest.policy_version,
     }
-    if manifest.delivery is not None:
-        payload["delivery"] = {
-            "provider": manifest.delivery.provider,
-            "repository": manifest.delivery.repository,
-            "production_branch": manifest.delivery.production_branch,
-            "preview_branch": manifest.delivery.preview_branch,
-            "development_branch": manifest.delivery.development_branch,
-            "sync_workflows": list(manifest.delivery.sync_workflows),
-        }
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()

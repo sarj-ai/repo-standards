@@ -23,27 +23,27 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 from typer.models import ArgumentInfo, CommandInfo, DefaultPlaceholder, OptionInfo, TyperInfo
 
-from repo_lint.core.canonical import canonical_json
-from repo_lint.core.catalog import core_rules
-from repo_lint.core.models import (
+from repo_standards.core.canonical import canonical_json
+from repo_standards.core.catalog import core_rules
+from repo_standards.core.models import (
     ExampleLanguage,
     JSONValue,
+    Policy,
     Rule,
     RuleCategoryId,
     RuleId,
     RuleTopicId,
 )
-from repo_lint.core.registry import POLICY_API_VERSION, PolicyRegistry
-from repo_lint.core.render import output_schema
-from repo_lint.core.rule_reviews import (
+from repo_standards.core.render import output_schema
+from repo_standards.core.rule_reviews import (
     ApprovedRuleReview,
     review_for,
 )
-from repo_lint.core.taxonomy import CATEGORIES
-from repo_lint.openapi import analysis_schema
-from repo_lint.openapi import rules as rest_rules
-from repo_lint.policy_sarj.policy import POLICY_SPEC
-from repo_lint.rest import instrumentation_capabilities
+from repo_standards.core.taxonomy import CATEGORIES
+from repo_standards.openapi import analysis_schema
+from repo_standards.openapi import rules as rest_rules
+from repo_standards.policy_sarj.policy import POLICY_SPEC, SarjPolicy
+from repo_standards.rest import instrumentation_capabilities
 
 
 if TYPE_CHECKING:
@@ -62,6 +62,7 @@ _PUBLIC_REFERENCE_HOSTS = frozenset(
 )
 _JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
 _ANNOTATION_OBJECT = TypeAdapter(dict[str, object])
+_POLICY_API_VERSION = 2
 
 CommandId = NewType("CommandId", str)
 CapabilityId = NewType("CapabilityId", str)
@@ -115,7 +116,7 @@ class CatalogModel(BaseModel):
 
 
 class ProductDescriptor(CatalogModel):
-    product_id: Literal["repo-lint"]
+    product_id: Literal["repo-standards"]
     name: str
     title: str
     summary: str
@@ -513,21 +514,20 @@ def openapi_report_schema() -> dict[str, JSONValue]:
 
 
 def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
-    registry = PolicyRegistry.from_installed()
+    policy = SarjPolicy()
     commands = _commands(app)
-    policies = _policies(registry)
-    rules = _rules(registry)
+    policies = _policies(policy)
+    rules = _rules(policy)
     used_taxonomy = {(rule.category_id, rule.topic_id) for rule in rules}
     schemas = _schemas()
     catalog = Catalog(
         catalog_version=package_version,
         product=ProductDescriptor(
-            product_id="repo-lint",
+            product_id="repo-standards",
             name="repo-standards",
             title="Sarj Repo Standards",
             summary=(
-                "Deterministic repository architecture, delivery, pull-request, and API "
-                "contract analysis."
+                "Deterministic repository architecture, pull-request, and API contract analysis."
             ),
             distribution="repo-standards",
             executables=("repo-standards",),
@@ -537,7 +537,7 @@ def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
         provenance=ProvenanceDescriptor(
             distribution="repo-standards",
             package_version=package_version,
-            policy_api_version=POLICY_API_VERSION,
+            policy_api_version=_POLICY_API_VERSION,
             repository_url="https://github.com/sarj-ai/repo-standards",
             content_digest="",
         ),
@@ -545,7 +545,7 @@ def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
             mutation=False,
             repository_code_execution=False,
             network_default=False,
-            network_mode="opt-in read-only GitHub API",
+            network_mode="disabled",
             inspection_input="exact Git tree",
         ),
         capabilities=_capabilities(commands),
@@ -579,49 +579,41 @@ def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
     )
 
 
-def _policies(registry: PolicyRegistry) -> tuple[PolicyDescriptor, ...]:
-    descriptors: list[PolicyDescriptor] = []
+def _policies(policy: Policy) -> tuple[PolicyDescriptor, ...]:
     governance = {str(item.rule_id): item for item in POLICY_SPEC.rule_governance}
-    for policy in registry.policies:
-        bindings: list[PolicyRuleBinding] = []
-        for rule in sorted(policy.rules(), key=lambda item: str(item.rule_id)):
-            item = governance.get(str(rule.rule_id))
-            review = review_for(RuleId(str(rule.rule_id)), rule.version)
-            bindings.append(
-                PolicyRuleBinding(
-                    rule_id=RuleId(str(rule.rule_id)),
-                    rule_version=rule.version,
-                    severity=rule.severity,
-                    classification=item.classification.value if item else None,
-                    evidence_level=item.evidence if item else None,
-                    precedence=item.precedence if item else None,
-                    review_status=review.status,
-                )
-            )
-        descriptors.append(
-            PolicyDescriptor(
-                policy_id=str(policy.policy_id),
-                policy_version=policy.policy_version,
-                title=(
-                    POLICY_SPEC.profile.title
-                    if policy.policy_id == "sarj"
-                    else str(policy.policy_id)
-                ),
-                bindings=tuple(bindings),
+    bindings: list[PolicyRuleBinding] = []
+    for rule in sorted(policy.rules(), key=lambda item: str(item.rule_id)):
+        item = governance.get(str(rule.rule_id))
+        review = review_for(RuleId(str(rule.rule_id)), rule.version)
+        bindings.append(
+            PolicyRuleBinding(
+                rule_id=RuleId(str(rule.rule_id)),
+                rule_version=rule.version,
+                severity=rule.severity,
+                classification=item.classification.value if item else None,
+                evidence_level=item.evidence if item else None,
+                precedence=item.precedence if item else None,
+                review_status=review.status,
             )
         )
-    return tuple(sorted(descriptors, key=lambda item: item.policy_id))
+    return (
+        PolicyDescriptor(
+            policy_id=str(policy.policy_id),
+            policy_version=policy.policy_version,
+            title=POLICY_SPEC.profile.title,
+            bindings=tuple(bindings),
+        ),
+    )
 
 
-def _rules(registry: PolicyRegistry) -> tuple[RuleDescriptor, ...]:
+def _rules(policy: Policy) -> tuple[RuleDescriptor, ...]:
     selected: dict[str, tuple[RuleDescriptor, str]] = {}
     for rule in core_rules():
-        _add_rule(selected, rule, "src/repo_lint/core/catalog.py")
-    for policy in registry.policies:
-        for rule in policy.rules():
-            _add_rule(selected, rule, "src/repo_lint/policy_sarj/policy.py")
+        _add_rule(selected, rule, "src/repo_standards/core/catalog.py")
+    for rule in policy.rules():
+        _add_rule(selected, rule, "src/repo_standards/policy_sarj/policy.py")
     for rule in rest_rules():
-        _add_rule(selected, rule, "src/repo_lint/openapi/catalog.py")
+        _add_rule(selected, rule, "src/repo_standards/openapi/catalog.py")
     return tuple(selected[key][0] for key in sorted(selected))
 
 
@@ -850,14 +842,6 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
             status="stable",
             command_ids=(CommandId("pull-request.size"),),
             input_kinds=("git-diff", "git-attributes"),
-        ),
-        CapabilityDescriptor(
-            capability_id=CapabilityId("github"),
-            title="GitHub delivery",
-            summary="Inspect committed workflows with optional read-only repository evidence.",
-            status="beta",
-            command_ids=(CommandId("github"),),
-            input_kinds=("workflow-yaml", "github-api-evidence"),
         ),
         CapabilityDescriptor(
             capability_id=CapabilityId("rest"),

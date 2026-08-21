@@ -4,8 +4,8 @@ from typing import NamedTuple
 
 import pytest
 
-from repo_lint.core.engine import analyze
-from repo_lint.core.models import (
+from repo_standards.core.engine import analyze
+from repo_standards.core.models import (
     AnalysisReport,
     Component,
     ComponentId,
@@ -15,7 +15,7 @@ from repo_lint.core.models import (
     PolicyId,
     RepositoryId,
 )
-from repo_lint.policy_sarj import (
+from repo_standards.policy_sarj import (
     POLICY_SPEC,
     RULE_GOVERNANCE,
     RuleClassification,

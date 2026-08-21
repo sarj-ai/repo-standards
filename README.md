@@ -66,7 +66,6 @@ Thresholds, labels, comments, and approval requirements remain consumer policy. 
 
 - Repository contents come from one exact Git tree.
 - Workflow YAML and API descriptions are parsed as inert data.
-- GitHub access is read-only and credentials never come from inspected configuration.
 - Missing required evidence produces an inconclusive result rather than a false pass.
 - The linter has no autofix or repository mutation mode.
 

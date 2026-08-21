@@ -10,18 +10,18 @@ from pydantic import TypeAdapter, ValidationError
 import pytest
 from typer.testing import CliRunner
 
-from repo_lint.catalog import (
+from repo_standards.catalog import (
     ApprovedRuleReviewDescriptor,
     Catalog,
     build_catalog,
     catalog_schema,
 )
-from repo_lint.cli import app
-from repo_lint.core.canonical import canonical_json
-from repo_lint.core.catalog import core_rules
-from repo_lint.core.models import JSONValue
-from repo_lint.core.registry import PolicyRegistry
-from repo_lint.openapi import rules as openapi_rules
+from repo_standards.cli import app
+from repo_standards.core.canonical import canonical_json
+from repo_standards.core.catalog import core_rules
+from repo_standards.core.models import JSONValue
+from repo_standards.openapi import rules as openapi_rules
+from repo_standards.policy_sarj import SarjPolicy
 
 
 runner = CliRunner()
@@ -51,11 +51,9 @@ def test_catalog_is_deterministic_and_digest_covers_all_content() -> None:
 
 def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
-    registry = PolicyRegistry.from_installed()
+    registry = (SarjPolicy(),)
     expected_rule_ids = {str(rule.rule_id) for rule in core_rules()}
-    expected_rule_ids.update(
-        str(rule.rule_id) for policy in registry.policies for rule in policy.rules()
-    )
+    expected_rule_ids.update(str(rule.rule_id) for policy in registry for rule in policy.rules())
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
 
@@ -108,17 +106,15 @@ def test_approved_review_descriptor_requires_immutable_object_id() -> None:
 
 def test_catalog_graph_is_complete() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
-    registry = PolicyRegistry.from_installed()
+    registry = (SarjPolicy(),)
     expected_rule_ids = {str(rule.rule_id) for rule in core_rules()}
-    expected_rule_ids.update(
-        str(rule.rule_id) for policy in registry.policies for rule in policy.rules()
-    )
+    expected_rule_ids.update(str(rule.rule_id) for policy in registry for rule in policy.rules())
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
     assert rule_ids == sorted(expected_rule_ids)
     assert len(rule_ids) == len(set(rule_ids)) == 8
     assert {policy.policy_id for policy in catalog.policies} == {
-        str(policy.policy_id) for policy in registry.policies
+        str(policy.policy_id) for policy in registry
     }
     for policy in catalog.policies:
         assert policy.bindings
@@ -130,7 +126,6 @@ def test_catalog_graph_is_complete() -> None:
         "catalog",
         "check",
         "explain",
-        "github",
         "inspect",
         "pull-request.size",
         "report",
@@ -143,7 +138,6 @@ def test_catalog_graph_is_complete() -> None:
         "schema",
     }
     assert {capability.capability_id for capability in catalog.capabilities} == {
-        "github",
         "pull-request-size",
         "repository",
         "rest",

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from repo_lint.policy_sarj.examples import (
+from repo_standards.policy_sarj.examples import (
     RuleExampleCase,
     rule_example_cases,
     run_rule_example,
 )
-from repo_lint.policy_sarj.policy import RULES
+from repo_standards.policy_sarj.policy import RULES
 
 
 def _case_id(case: RuleExampleCase) -> str:

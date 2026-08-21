@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from repo_lint.core.models import RuleDefinition, RuleId
-from repo_lint.core.taxonomy import (
+from repo_standards.core.models import RuleDefinition, RuleId
+from repo_standards.core.taxonomy import (
     API_CONTRACTS,
     ERROR_CONTRACTS,
     GENERATED_ARTIFACTS,

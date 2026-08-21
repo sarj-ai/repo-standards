@@ -122,12 +122,12 @@ def _workspace_membership_diagnostics(
     snapshot: RepositorySnapshot, migration: MigrationPath
 ) -> tuple[Diagnostic, ...]:
     diagnostics: list[Diagnostic] = []
-    projects = tuple(
+    packages = tuple(
         project
-        for project in snapshot.inspection.projects
+        for project in snapshot.inspection.packages
         if not project.workspace_root and _is_within(project.path, migration.new_path)
     )
-    for project in projects:
+    for project in packages:
         old_project_path = _relocated_path(
             path=project.path,
             new_root=migration.new_path,

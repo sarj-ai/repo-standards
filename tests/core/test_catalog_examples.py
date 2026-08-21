@@ -7,11 +7,11 @@ import tomllib
 from pydantic import TypeAdapter
 import pytest
 
-from repo_lint.core.catalog import core_rules
-from repo_lint.core.engine import apply_exceptions, check_baseline, core_diagnostics
-from repo_lint.core.inspection import parse_project_metadata, parse_workspace_metadata
-from repo_lint.core.migration import migration_diagnostics
-from repo_lint.core.models import (
+from repo_standards.core.catalog import core_rules
+from repo_standards.core.engine import apply_exceptions, check_baseline, core_diagnostics
+from repo_standards.core.inspection import parse_project_metadata, parse_workspace_metadata
+from repo_standards.core.migration import migration_diagnostics
+from repo_standards.core.models import (
     AnalysisReport,
     ComponentId,
     Diagnostic,
@@ -33,7 +33,7 @@ from repo_lint.core.models import (
     TrackedFileEvidence,
     WorkspaceEvidence,
 )
-from repo_lint.core.parser import parse_baseline_bytes, parse_manifest_bytes
+from repo_standards.core.parser import parse_baseline_bytes, parse_manifest_bytes
 
 
 type ExampleRunner = Callable[[bytes], tuple[str, ...]]
@@ -62,7 +62,7 @@ _FINGERPRINT = "f" * 64
 def _inspection(
     paths: tuple[str, ...],
     *,
-    projects: tuple[PackageEvidence, ...] = (),
+    packages: tuple[PackageEvidence, ...] = (),
     workspaces: tuple[WorkspaceEvidence, ...] = (),
 ) -> RepositoryInspection:
     tracked = tuple(
@@ -74,11 +74,11 @@ def _inspection(
         source_revision="a" * 40,
         tree_digest="b" * 40,
         tracked_file_count=len(tracked),
-        projects=projects,
+        packages=packages,
         workflow_paths=(),
         cloudbuild_paths=(),
         dockerfile_paths=(),
-        terraform_roots=(),
+        terraform_modules=(),
         issues=(),
         tracked_files=tracked,
         workspaces=workspaces,
@@ -89,13 +89,13 @@ def _snapshot(
     manifest: Manifest,
     paths: tuple[str, ...],
     *,
-    projects: tuple[PackageEvidence, ...] = (),
+    packages: tuple[PackageEvidence, ...] = (),
     workspaces: tuple[WorkspaceEvidence, ...] = (),
 ) -> RepositorySnapshot:
     return RepositorySnapshot(
         manifest=manifest,
         baseline=None,
-        inspection=_inspection(paths, projects=projects, workspaces=workspaces),
+        inspection=_inspection(paths, packages=packages, workspaces=workspaces),
         provenance=InputProvenance(
             mode="git-tree",
             source_revision="a" * 40,
@@ -152,7 +152,7 @@ def _run_workspace(content: bytes) -> tuple[str, ...]:
     snapshot = _snapshot(
         manifest,
         (package_path,),
-        projects=(project,),
+        packages=(project,),
         workspaces=(workspace,),
     )
     return _rule_ids(migration_diagnostics(snapshot))

@@ -22,7 +22,6 @@ EvidenceLevel = Literal["verified", "declared", "external", "unknown"]
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 AdapterStatus = Literal["complete", "incomplete", "failed"]
-DeliveryProvider = Literal["github"]
 MAX_RULE_TITLE_LENGTH = 72
 MAX_RULE_EXAMPLE_TITLE_LENGTH = 56
 
@@ -97,16 +96,6 @@ class ExceptionRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class DeliveryConfig:
-    provider: DeliveryProvider = "github"
-    repository: str | None = None
-    production_branch: str = "main"
-    preview_branch: str = "preview"
-    development_branch: str = "dev"
-    sync_workflows: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class Manifest:
     repository_id: RepositoryId
     policy_id: PolicyId
@@ -114,7 +103,6 @@ class Manifest:
     components: tuple[Component, ...]
     migration_paths: tuple[MigrationPath, ...] = ()
     exceptions: tuple[ExceptionRecord, ...] = ()
-    delivery: DeliveryConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,25 +372,15 @@ class RepositoryInspection:
     source_revision: str
     tree_digest: str
     tracked_file_count: int
-    projects: tuple[PackageEvidence, ...]
+    packages: tuple[PackageEvidence, ...]
     workflow_paths: tuple[str, ...]
     cloudbuild_paths: tuple[str, ...]
     dockerfile_paths: tuple[str, ...]
-    terraform_roots: tuple[str, ...]
+    terraform_modules: tuple[str, ...]
     issues: tuple[str, ...]
     tracked_files: tuple[TrackedFileEvidence, ...] = ()
     workspaces: tuple[WorkspaceEvidence, ...] = ()
     inventory_units: tuple[InventoryUnit, ...] = ()
-
-    @property
-    def packages(self) -> tuple[PackageEvidence, ...]:
-        """Return the preferred package-evidence name for the legacy projects field."""
-        return self.projects
-
-    @property
-    def terraform_modules(self) -> tuple[str, ...]:
-        """Return Terraform directory facts without claiming root-module semantics."""
-        return self.terraform_roots
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from repo_lint.core import (
+from repo_standards.core import (
     ConfigurationError,
     InventoryKind,
     core_rules,

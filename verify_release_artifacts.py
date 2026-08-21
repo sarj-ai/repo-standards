@@ -18,8 +18,8 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 import typer
 
-from repo_lint.core.canonical import canonical_json
-from repo_lint.core.models import JSONValue
+from repo_standards.core.canonical import canonical_json
+from repo_standards.core.models import JSONValue
 
 
 if TYPE_CHECKING:
@@ -255,7 +255,7 @@ def verify_distributions(
     allowed_wheel_names = {
         name
         for name in wheel_names
-        if name.startswith("repo_lint/") and (name.endswith(".py") or name == "repo_lint/py.typed")
+        if name.startswith("repo_standards/") and (name.endswith(".py") or name == "repo_standards/py.typed")
     }
     allowed_wheel_names.update(
         f"{wheel_metadata.dist_info}/{name}" for name in WHEEL_METADATA_FILES
@@ -283,8 +283,8 @@ def verify_distributions(
     allowed_sdist_names = {
         name
         for name in sdist_names
-        if name.startswith(f"{sdist_root}/src/repo_lint/")
-        and (name.endswith(".py") or name == f"{sdist_root}/src/repo_lint/py.typed")
+        if name.startswith(f"{sdist_root}/src/repo_standards/")
+        and (name.endswith(".py") or name == f"{sdist_root}/src/repo_standards/py.typed")
     }
     allowed_sdist_names.update(f"{sdist_root}/{name}" for name in SDIST_ROOT_FILES)
     violations.extend(
