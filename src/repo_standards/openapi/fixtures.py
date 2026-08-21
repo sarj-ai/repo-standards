@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
-from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
@@ -329,21 +328,9 @@ REST_RULE_FIXTURES: tuple[OpenApiRuleFixture, ...] = (
     _artifact_fixture("digest-mismatch", incomplete=False),
 )
 
-_CONSOLIDATED_RULE_TARGETS: Mapping[str, str] = MappingProxyType(
-    {
-        "rest/source/nonhermetic-ref": "api/references/local-resolution",
-        "rest/http/forbidden-content": "api/http/message-semantics",
-        "rest/http/status-method-contradiction": "api/http/message-semantics",
-        "rest/errors/problem-contract": "api/errors/problem-details",
-        "rest/artifact/provenance-incomplete": "api/artifact/provenance",
-        "rest/artifact/provenance-contradiction": "api/artifact/provenance",
-    }
-)
-
 
 def examples_for_rule(rule_id: RuleId) -> tuple[RuleExamplePair, ...]:
-    selected = RuleId(_CONSOLIDATED_RULE_TARGETS.get(str(rule_id), str(rule_id)))
-    return tuple(fixture.example for fixture in REST_RULE_FIXTURES if fixture.rule_id == selected)
+    return tuple(fixture.example for fixture in REST_RULE_FIXTURES if fixture.rule_id == rule_id)
 
 
 def render_request(request: AnalysisRequest) -> str:

@@ -142,6 +142,9 @@ def test_catalog_graph_is_complete() -> None:
         "repository",
         "rest",
     }
+    assert next(schema for schema in catalog.schemas if schema.schema_id == "catalog").title == (
+        "Repo Standards public catalog"
+    )
     for capability in catalog.capabilities:
         assert capability.command_ids
         assert set(capability.command_ids) <= command_ids

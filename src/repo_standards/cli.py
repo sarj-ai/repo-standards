@@ -191,6 +191,7 @@ def capabilities_command() -> None:
         **_envelope("capabilities"),
         "commands": [
             "capabilities",
+            "catalog",
             "check",
             "explain",
             "inspect",
