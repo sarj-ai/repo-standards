@@ -6,24 +6,22 @@ import json
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, validate
-from jsonschema import ValidationError as JSONSchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 import pytest
 from typer.testing import CliRunner
 
-from repo_lint.catalog import (
+from repo_standards.catalog import (
     ApprovedRuleReviewDescriptor,
     Catalog,
-    LifecycleDescriptor,
     build_catalog,
     catalog_schema,
 )
-from repo_lint.cli import app
-from repo_lint.core.canonical import canonical_json
-from repo_lint.core.catalog import core_rules
-from repo_lint.core.models import JSONValue
-from repo_lint.core.registry import PolicyRegistry
-from repo_lint.openapi import rules as openapi_rules
+from repo_standards.cli import app
+from repo_standards.core.canonical import canonical_json
+from repo_standards.core.catalog import core_rules
+from repo_standards.core.models import JSONValue
+from repo_standards.openapi import rules as openapi_rules
+from repo_standards.policy_sarj import SarjPolicy
 
 
 runner = CliRunner()
@@ -53,15 +51,13 @@ def test_catalog_is_deterministic_and_digest_covers_all_content() -> None:
 
 def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
-    registry = PolicyRegistry.from_installed()
+    registry = (SarjPolicy(),)
     expected_rule_ids = {str(rule.rule_id) for rule in core_rules()}
-    expected_rule_ids.update(
-        str(rule.rule_id) for policy in registry.policies for rule in policy.rules()
-    )
+    expected_rule_ids.update(str(rule.rule_id) for policy in registry for rule in policy.rules())
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
 
-    assert catalog.schema_version == 6
+    assert catalog.schema_version == 7
     assert {rule.review.status for rule in catalog.rules} == {"pending"}
     assert rule_ids == sorted(expected_rule_ids)
     assert len(rule_ids) == len(set(rule_ids)) == 8
@@ -71,17 +67,12 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     } == {"disabled"}
 
 
-def test_catalog_versions_are_positive_and_lifecycle_states_are_coherent() -> None:
+def test_catalog_rule_versions_are_positive() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
     payload = catalog.model_dump(mode="python")
     payload["rules"][0]["rule_version"] = 0
     with pytest.raises(ValidationError, match="greater than 0"):
         Catalog.model_validate(payload)
-
-    with pytest.raises(ValidationError, match="cannot contain deprecation metadata"):
-        LifecycleDescriptor(status="stable", deprecated_in="2.0.0")
-    with pytest.raises(ValidationError, match="require deprecation and removal versions"):
-        LifecycleDescriptor(status="deprecated", deprecated_in="2.0.0")
 
 
 def test_catalog_policy_binding_review_status_must_match_its_rule() -> None:
@@ -115,17 +106,15 @@ def test_approved_review_descriptor_requires_immutable_object_id() -> None:
 
 def test_catalog_graph_is_complete() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
-    registry = PolicyRegistry.from_installed()
+    registry = (SarjPolicy(),)
     expected_rule_ids = {str(rule.rule_id) for rule in core_rules()}
-    expected_rule_ids.update(
-        str(rule.rule_id) for policy in registry.policies for rule in policy.rules()
-    )
+    expected_rule_ids.update(str(rule.rule_id) for policy in registry for rule in policy.rules())
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
     assert rule_ids == sorted(expected_rule_ids)
     assert len(rule_ids) == len(set(rule_ids)) == 8
     assert {policy.policy_id for policy in catalog.policies} == {
-        str(policy.policy_id) for policy in registry.policies
+        str(policy.policy_id) for policy in registry
     }
     for policy in catalog.policies:
         assert policy.bindings
@@ -137,7 +126,6 @@ def test_catalog_graph_is_complete() -> None:
         "catalog",
         "check",
         "explain",
-        "github",
         "inspect",
         "pull-request.size",
         "report",
@@ -150,7 +138,6 @@ def test_catalog_graph_is_complete() -> None:
         "schema",
     }
     assert {capability.capability_id for capability in catalog.capabilities} == {
-        "github",
         "pull-request-size",
         "repository",
         "rest",
@@ -177,22 +164,47 @@ def test_catalog_rules_have_complete_clarity_taxonomy_and_examples() -> None:
     for rule in catalog.rules:
         assert topic_parents[rule.topic_id] == rule.category_id
         assert rule.title
-        assert rule.summary
-        assert rule.detects
-        assert rule.impact
-        assert rule.remediation.summary
-        assert rule.remediation.steps
-        assert rule.remediation.validation
-        assert rule.evidence_required
+        assert rule.description
+        assert rule.why
+        assert rule.fix
         assert rule.examples
         for example in rule.examples:
             assert example.language
-            assert example.flagged
-            assert example.passes
-            assert example.flagged != example.passes
-            fixture_ids.append(example.fixture_id)
+            assert example.before
+            assert example.after
+            assert example.before != example.after
+            fixture_ids.append(example.id)
 
     assert len(fixture_ids) == len(set(fixture_ids))
+
+
+def test_rule_wire_contract_contains_only_compact_fields() -> None:
+    rule = build_catalog(app, package_version="9.8.7").rules[0]
+    assert set(rule.model_dump()) == {
+        "kind",
+        "rule_id",
+        "slug",
+        "rule_version",
+        "title",
+        "category_id",
+        "topic_id",
+        "default_severity",
+        "description",
+        "why",
+        "fix",
+        "references",
+        "examples",
+        "source",
+        "review",
+    }
+    assert set(rule.examples[0].model_dump()) == {
+        "id",
+        "title",
+        "language",
+        "before",
+        "after",
+        "expected_severity",
+    }
 
 
 def test_catalog_and_every_embedded_schema_are_valid_json_schemas() -> None:
@@ -208,18 +220,11 @@ def test_catalog_and_every_embedded_schema_are_valid_json_schemas() -> None:
         Draft202012Validator.check_schema(document)
 
 
-def test_catalog_schema_encodes_lifecycle_and_approved_review_states() -> None:
+def test_catalog_schema_encodes_approved_review_states() -> None:
     schema = catalog_schema()
     definitions = schema["$defs"]
     assert isinstance(definitions, dict)
 
-    with pytest.raises(JSONSchemaValidationError):
-        validate(
-            instance={"status": "stable", "deprecated_in": "3.0.0"},
-            schema=_JSON_OBJECT.validate_python(
-                definitions["LifecycleDescriptor"], strict=True
-            ),
-        )
     approved = _JSON_OBJECT.validate_python(
         definitions["ApprovedRuleReviewDescriptor"], strict=True
     )
@@ -243,9 +248,9 @@ def test_catalog_schema_descriptor_versions_match_public_contracts() -> None:
     }
 
     assert versions == {
-        "catalog": 6,
-        "openapi-analysis": 2,
-        "report": 2,
+        "catalog": 7,
+        "openapi-analysis": 3,
+        "report": 3,
     }
 
 

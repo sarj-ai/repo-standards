@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from repo_lint.rest import (
+from repo_standards.rest import (
     InstrumentationInputError,
     TrackedFile,
     detect_instrumentation,
@@ -244,7 +244,7 @@ def test_operation_map_is_validated_and_canonicalized() -> None:
 
 
 def test_conventional_operation_map_is_detected_only_after_validation() -> None:
-    path = ".repo-lint/api-operation-map.json"
+    path = ".repo-standards/api-operation-map.json"
     report = detect_instrumentation((TrackedFile(path, _operation_map()),))
     assert [item.capability.capability_id for item in report.candidates] == ["operation-map"]
     assert report.candidates[0].evidence[0].value == "a" * 64

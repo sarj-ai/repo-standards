@@ -1,28 +1,18 @@
 from __future__ import annotations
 
-from datetime import timedelta
-import importlib
 from importlib.metadata import version
 import json
 from pathlib import Path
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local Git fixture only
-from urllib.error import URLError
-from urllib.request import Request
 
 from jsonschema import ValidationError as JSONSchemaValidationError
 from jsonschema import validate
 import pytest
 from typer.testing import CliRunner
 
-from repo_lint.cli import (
-    app,
-    gh_api_transport,
-    resolve_github_repository,
-)
-from repo_lint.core import ConfigurationError
-from repo_lint.github import RepositoryEvidence
+from repo_standards.cli import app
 
 
 runner = CliRunner()
@@ -33,62 +23,6 @@ def test_version_matches_installed_distribution() -> None:
 
     assert result.exit_code == 0
     assert result.stdout.strip() == version("repo-standards")
-
-
-def test_gh_transport_preserves_api_contract_without_forwarding_authorization(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    observed: list[str] = []
-
-    def fake_run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        del kwargs
-        observed.extend(arguments)
-        return subprocess.CompletedProcess(arguments, 0, stdout=b"{}", stderr=b"")
-
-    def fake_which(name: str) -> str:
-        return f"/usr/bin/{name}"
-
-    monkeypatch.setattr(shutil, "which", fake_which)
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    request = Request(
-        "https://api.github.com/repos/acme/widgets",
-        headers={"Authorization": "Bearer never-forward-this"},
-    )
-
-    status, body = gh_api_transport(request, timedelta(seconds=2))
-
-    assert (status, body) == (200, b"{}")
-    assert "Accept: application/vnd.github+json" in observed
-    assert "X-GitHub-Api-Version: 2022-11-28" in observed
-    assert not any("never-forward-this" in value for value in observed)
-
-
-def test_gh_transport_normalizes_timeout_and_operational_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_which(name: str) -> str:
-        return f"/usr/bin/{name}"
-
-    monkeypatch.setattr(shutil, "which", fake_which)
-
-    def timeout(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        del args, kwargs
-        command = "gh"
-        raise subprocess.TimeoutExpired(command, 2)
-
-    monkeypatch.setattr(subprocess, "run", timeout)
-    request = Request("https://api.github.com/repos/acme/widgets")
-    with pytest.raises(TimeoutError, match="timed out"):
-        gh_api_transport(request, timedelta(seconds=2))
-
-    def failure(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        del args, kwargs
-        return subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"not authenticated: secret")
-
-    monkeypatch.setattr(subprocess, "run", failure)
-    with pytest.raises(URLError, match="could not complete") as captured:
-        gh_api_transport(request, timedelta(seconds=2))
-    assert "secret" not in str(captured.value)
 
 
 def _git(repository: Path, *arguments: str) -> str:
@@ -174,7 +108,7 @@ def test_pull_request_size_errors_have_command_specific_remediation(tmp_path: Pa
 
 
 def _manifest(root: Path, text: str) -> None:
-    policy_directory = root / ".repo-lint"
+    policy_directory = root / ".repo-standards"
     policy_directory.mkdir()
     (policy_directory / "repository.toml").write_text(text, encoding="utf-8")
     _commit_fixture(root)
@@ -210,9 +144,6 @@ def _object_list(value: object) -> list[dict[str, object]]:
 GOOD_MANIFEST = """
 schema_version = 2
 repository_id = "example-repository"
-policy = "sarj"
-policy_version = 5
-
 [[components]]
 id = "alpha.agent"
 kind = "application"
@@ -224,8 +155,8 @@ owner = "@example/alpha"
 
 def test_report_json_is_one_deterministic_value(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST)
-    first = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
-    second = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    first = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
+    second = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     assert first.exit_code == second.exit_code == 0
     assert first.stdout == second.stdout
     report = _json_object(first.stdout)
@@ -235,18 +166,18 @@ def test_report_json_is_one_deterministic_value(tmp_path: Path) -> None:
     assert _object(report["ratchet"])["status"] == "not-requested"
     assert _object(report["tool"])["version"] != "0.1.0-dev"
 
-    (tmp_path / ".repo-lint" / "repository.toml").write_text(
+    (tmp_path / ".repo-standards" / "repository.toml").write_text(
         GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"),
         encoding="utf-8",
     )
-    dirty = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    dirty = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     assert dirty.exit_code == 0
     assert dirty.stdout == first.stdout
 
 
 def test_pending_report_findings_are_disabled(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"))
-    result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    result = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     report = _json_object(result.stdout)
     assert result.exit_code == 0
     assert report["conclusion"] == "passed"
@@ -285,7 +216,7 @@ def test_enable_rule_help_requires_an_exact_version() -> None:
 
 def test_text_diagnostics_do_not_invent_source_coordinates(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"))
-    result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "text"])
+    result = runner.invoke(app, ["report", str(tmp_path), "--format", "text"])
     assert result.exit_code == 0
     assert ":1:1:" not in result.stdout
     assert result.stdout == "repo-standards: passed; 0 errors, 0 warnings\n"
@@ -293,9 +224,7 @@ def test_text_diagnostics_do_not_invent_source_coordinates(tmp_path: Path) -> No
 
 def test_pending_strict_errors_do_not_block(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"))
-    result = runner.invoke(
-        app, ["check", str(tmp_path), "--policy", "sarj", "--mode", "strict", "--format", "json"]
-    )
+    result = runner.invoke(app, ["check", str(tmp_path), "--mode", "strict", "--format", "json"])
     assert result.exit_code == 0
 
 
@@ -311,9 +240,7 @@ product = "alpha"
 path = "iac/alpha"''',
     )
     _manifest(tmp_path, operational_manifest)
-    result = runner.invoke(
-        app, ["check", str(tmp_path), "--policy", "sarj", "--mode", "strict", "--format", "json"]
-    )
+    result = runner.invoke(app, ["check", str(tmp_path), "--mode", "strict", "--format", "json"])
     report = _json_object(result.stdout)
     assert result.exit_code == 0
     assert _object_list(report["diagnostics"]) == []
@@ -321,7 +248,7 @@ path = "iac/alpha"''',
 
 def test_malformed_manifest_is_incomplete(tmp_path: Path) -> None:
     _manifest(tmp_path, "schema_version = 2\nunknown = true\n")
-    result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    result = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     report = _json_object(result.stdout)
     assert result.exit_code == 2
     assert report["completion"] == "incomplete"
@@ -334,12 +261,12 @@ def test_schema_is_machine_discoverable() -> None:
     schema = _json_object(result.stdout)
     properties = _object(schema["properties"])
     schema_version = _object(properties["schema_version"])
-    assert schema_version["const"] == 2
+    assert schema_version["const"] == 3
 
 
 def test_report_validates_against_published_schema(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST)
-    checked = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    checked = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     assert checked.exit_code == 0
     report = _json_object(checked.stdout)
     schema_result = runner.invoke(app, ["schema"])
@@ -350,7 +277,7 @@ def test_report_validates_against_published_schema(tmp_path: Path) -> None:
 
 def test_report_schema_rejects_incoherent_outcome_state(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST)
-    checked = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    checked = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     assert checked.exit_code == 0
     report = _json_object(checked.stdout)
     report["completion"] = "complete"
@@ -365,24 +292,22 @@ def test_report_schema_rejects_incoherent_outcome_state(tmp_path: Path) -> None:
 
 def test_incomplete_report_and_anchor_locations_validate_against_schema(tmp_path: Path) -> None:
     _manifest(tmp_path, "schema_version = 2\nunknown = true\n")
-    incomplete = runner.invoke(
-        app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"]
-    )
+    incomplete = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     schema_result = runner.invoke(app, ["schema"])
     validate(instance=_json_object(incomplete.stdout), schema=_json_object(schema_result.stdout))
 
-    policy_directory = tmp_path / ".repo-lint"
+    policy_directory = tmp_path / ".repo-standards"
     (policy_directory / "repository.toml").write_text(
         GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"),
         encoding="utf-8",
     )
     _commit_changes(tmp_path)
-    findings = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    findings = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     assert _object_list(_json_object(findings.stdout)["diagnostics"]) == []
 
 
 def test_neutral_core_contains_no_sarj_policy_vocabulary() -> None:
-    core = Path(__file__).parents[1] / "src" / "repo_lint" / "core"
+    core = Path(__file__).parents[1] / "src" / "repo_standards" / "core"
     source = "\n".join(
         path.read_text(encoding="utf-8") for path in sorted(core.glob("*.py"))
     ).casefold()
@@ -394,11 +319,11 @@ def test_neutral_core_contains_no_sarj_policy_vocabulary() -> None:
 def test_manifest_symlink_is_rejected(tmp_path: Path) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-outside.toml"
     outside.write_text(GOOD_MANIFEST, encoding="utf-8")
-    policy_directory = tmp_path / ".repo-lint"
+    policy_directory = tmp_path / ".repo-standards"
     policy_directory.mkdir()
     Path(policy_directory / "repository.toml").symlink_to(outside)
     _commit_fixture(tmp_path)
-    result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    result = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     report = _json_object(result.stdout)
     assert result.exit_code == 2
     issues = _object_list(report["execution_issues"])
@@ -412,7 +337,7 @@ def test_repository_code_is_not_executed(tmp_path: Path) -> None:
     (tmp_path / "package.json").write_text(
         json.dumps({"scripts": {"postinstall": f"touch {marker}"}}), encoding="utf-8"
     )
-    result = runner.invoke(app, ["report", str(tmp_path), "--policy", "sarj", "--format", "json"])
+    result = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     assert result.exit_code == 0
     assert not marker.exists()
 
@@ -445,35 +370,6 @@ def test_inspect_supports_bounded_filtered_pages() -> None:
     assert all(item["kind"] == "project" for item in _object_list(payload["items"]))
 
 
-def test_github_audit_bootstraps_without_a_repository_manifest(tmp_path: Path) -> None:
-    workflow = tmp_path / ".github" / "workflows" / "ci.yml"
-    workflow.parent.mkdir(parents=True)
-    workflow.write_text(
-        "on: pull_request\npermissions: {}\njobs:\n  test:\n"
-        "    timeout-minutes: 5\n    steps:\n      - uses: actions/checkout@v4\n",
-        encoding="utf-8",
-    )
-    _commit_fixture(tmp_path)
-
-    result = runner.invoke(app, ["github", str(tmp_path), "--format", "json"])
-    report = _json_object(result.stdout)
-
-    assert result.exit_code == 0
-    assert report["command"] == "github"
-    assert report["completion"] == "complete"
-    assert _object_list(report["diagnostics"]) == []
-
-    workflow.write_text(
-        workflow.read_text(encoding="utf-8").replace(
-            "actions/checkout@v4",
-            "actions/checkout@0123456789abcdef0123456789abcdef01234567",
-        ),
-        encoding="utf-8",
-    )
-    dirty = runner.invoke(app, ["github", str(tmp_path), "--format", "json"])
-    assert dirty.stdout == result.stdout
-
-
 def test_invalid_page_is_a_structured_failure() -> None:
     result = runner.invoke(app, ["rules", "--limit", "501"])
     payload = _json_object(result.stdout)
@@ -491,144 +387,11 @@ def test_capabilities_are_machine_discoverable() -> None:
     safety = _object(capabilities["safety"])
     assert safety["repository_code_execution"] is False
     assert safety["mutation"] is False
-    assert safety["network"] is True
+    assert safety["network"] is False
     assert safety["network_default"] is False
-    assert safety["network_mode"] == "opt-in-read-only-github-api"
+    assert safety["network_mode"] == "disabled"
     assert _object(capabilities["tool"])["version"]
     assert capabilities["execution_issues"] == []
-
-
-def test_removed_github_rules_do_not_require_repository_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
-    _manifest(tmp_path, GOOD_MANIFEST)
-    result = runner.invoke(
-        app,
-        [
-            "report",
-            str(tmp_path),
-            "--format",
-            "json",
-            "--require-github-evidence",
-        ],
-    )
-    report = _json_object(result.stdout)
-    assert result.exit_code == 0
-    assert report["completion"] == "complete"
-    assert report["conclusion"] == "passed"
-    assert report["execution_issues"] == []
-
-
-def test_github_repository_override_uses_token_from_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    observed: dict[str, str | None] = {}
-
-    class FakeGitHubClient:
-        def __init__(self, token: str | None) -> None:
-            observed["token"] = token
-
-        def collect(  # ruff: ignore[no-self-use] - test double matches client instance API
-            self, repository: str
-        ) -> RepositoryEvidence:
-            observed["repository"] = repository
-            return RepositoryEvidence(
-                repository=repository,
-                default_branch="main",
-                branches=(),
-                rulesets=(),
-                allow_auto_merge=False,
-                actions_default_workflow_permissions="read",
-                actions_can_approve_pull_requests=False,
-            )
-
-    cli_module = importlib.import_module("repo_lint.cli")
-    monkeypatch.setattr(cli_module, "GitHubClient", FakeGitHubClient)
-    monkeypatch.setenv("SARJ_REPO_LINT_GITHUB_TOKEN", "test-token")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "ignored/environment")
-    _manifest(tmp_path, GOOD_MANIFEST)
-    result = runner.invoke(
-        app,
-        [
-            "report",
-            str(tmp_path),
-            "--format",
-            "json",
-            "--github-repository",
-            "selected/repository",
-        ],
-    )
-    assert result.exit_code == 0
-    assert observed == {"token": "test-token", "repository": "selected/repository"}
-
-
-def test_github_repository_resolution_priority_and_safe_origin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _manifest(tmp_path, GOOD_MANIFEST)
-    _git(tmp_path, "remote", "add", "origin", "git@github.com:origin/repository.git")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "environment/repository")
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    with pytest.raises(ConfigurationError, match="must match"):
-        resolve_github_repository(
-            tmp_path,
-            cli_repository="override/repository",
-            manifest_repository="manifest/repository",
-        )
-    assert (
-        resolve_github_repository(
-            tmp_path,
-            cli_repository=None,
-            manifest_repository="manifest/repository",
-        )
-        == "manifest/repository"
-    )
-    assert (
-        resolve_github_repository(tmp_path, cli_repository=None, manifest_repository=None)
-        == "environment/repository"
-    )
-    monkeypatch.delenv("GITHUB_REPOSITORY")
-    monkeypatch.delenv("GITHUB_ACTIONS")
-    assert (
-        resolve_github_repository(tmp_path, cli_repository=None, manifest_repository=None)
-        == "origin/repository"
-    )
-
-    _git(tmp_path, "remote", "set-url", "origin", "https://token@github.com/unsafe/repo.git")
-    assert (
-        resolve_github_repository(tmp_path, cli_repository=None, manifest_repository=None) is None
-    )
-    with pytest.raises(ConfigurationError, match="safe owner/name"):
-        resolve_github_repository(
-            tmp_path,
-            cli_repository="https://github.com/unsafe/repo",
-            manifest_repository=None,
-        )
-
-
-def test_workflow_analysis_reads_exact_committed_tree(tmp_path: Path) -> None:
-    policy_directory = tmp_path / ".repo-lint"
-    policy_directory.mkdir()
-    (policy_directory / "repository.toml").write_text(GOOD_MANIFEST, encoding="utf-8")
-    workflow = tmp_path / ".github" / "workflows" / "ci.yml"
-    workflow.parent.mkdir(parents=True)
-    workflow.write_text(
-        "name: CI\non: [pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
-        "    steps:\n      - uses: actions/checkout@v4\n",
-        encoding="utf-8",
-    )
-    _commit_fixture(tmp_path)
-    workflow.write_text(
-        "name: CI\non: [pull_request]\npermissions: read-all\njobs:\n  test:\n"
-        "    timeout-minutes: 10\n    runs-on: ubuntu-latest\n    steps:\n"
-        "      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567\n",
-        encoding="utf-8",
-    )
-    result = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
-    diagnostics = _object_list(_json_object(result.stdout)["diagnostics"])
-    assert result.exit_code == 0
-    assert diagnostics == []
 
 
 def test_rules_are_filterable_and_paginated() -> None:
@@ -658,7 +421,9 @@ def test_ratchet_report_has_explicit_verified_baseline_status(tmp_path: Path) ->
         "scope_digest": report["scope_digest"],
         "fingerprints": list[str](),
     }
-    (tmp_path / ".repo-lint" / "baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
+    (tmp_path / ".repo-standards" / "baseline.json").write_text(
+        json.dumps(baseline), encoding="utf-8"
+    )
     _commit_changes(tmp_path)
     checked = runner.invoke(
         app,
@@ -669,7 +434,9 @@ def test_ratchet_report_has_explicit_verified_baseline_status(tmp_path: Path) ->
     assert _object(payload["baseline"])["status"] == "verified"
     assert _object(payload["ratchet"])["status"] == "clean"
 
-    (tmp_path / ".repo-lint" / "baseline.json").write_text("not-json", encoding="utf-8")
+    (tmp_path / ".repo-standards" / "baseline.json").write_text(
+        "not-json", encoding="utf-8"
+    )
     dirty = runner.invoke(
         app,
         ["check", str(tmp_path), "--mode", "ratchet", "--format", "json"],
@@ -688,33 +455,6 @@ def test_ratchet_rejects_missing_baseline_explicitly(tmp_path: Path) -> None:
     assert checked.exit_code == 2
     assert _object(payload["baseline"])["status"] == "rejected"
     assert _object(payload["ratchet"])["status"] == "not-evaluated"
-
-
-def test_unknown_policy_is_structured_incomplete(tmp_path: Path) -> None:
-    _manifest(tmp_path, GOOD_MANIFEST)
-    result = runner.invoke(
-        app,
-        ["report", str(tmp_path), "--policy", "missing", "--format", "json"],
-    )
-    assert result.exit_code == 2
-    report = _json_object(result.stdout)
-    assert report["completion"] == "incomplete"
-    assert report["conclusion"] == "inconclusive"
-
-
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        pytest.param(("rules",), id="rules"),
-        pytest.param(("explain", "example/rule"), id="explain"),
-    ],
-)
-def test_unknown_policy_is_structured_for_rule_commands(arguments: tuple[str, ...]) -> None:
-    result = runner.invoke(app, [*arguments, "--policy", "missing"])
-    assert result.exit_code == 2
-    payload = _json_object(result.stdout)
-    assert payload["completion"] == "incomplete"
-    assert _object_list(payload["execution_issues"])
 
 
 def test_unknown_rule_and_schema_are_structured() -> None:
@@ -879,4 +619,4 @@ def test_rest_catalog_and_capability_handshake_are_offline() -> None:
     explanation = runner.invoke(app, ["rest", "explain", "api/http/message-semantics"])
     assert rules_result.exit_code == explanation.exit_code == 0
     assert len(_object_list(_json_object(rules_result.stdout)["rules"])) == 4
-    assert _object(_json_object(explanation.stdout)["rule"])["detects"]
+    assert _object(_json_object(explanation.stdout)["rule"])["description"]

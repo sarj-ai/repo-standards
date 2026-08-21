@@ -4,32 +4,25 @@ from typing import NamedTuple
 
 import pytest
 
-from repo_lint.core.engine import analyze
-from repo_lint.core.models import (
+from repo_standards.core.engine import analyze
+from repo_standards.core.models import (
     AnalysisReport,
     Component,
     ComponentId,
     Dependency,
     Manifest,
     Mode,
-    PolicyId,
     RepositoryId,
 )
-from repo_lint.policy_sarj import (
-    POLICY_SPEC,
-    RULE_GOVERNANCE,
-    RuleClassification,
-    RuleMaturity,
-    SarjPolicy,
-)
+from repo_standards.policy_sarj import SarjPolicy
+from repo_standards.policy_sarj.policy import POLICY_SPEC, RULE_GOVERNANCE
+from repo_standards.policy_sarj.spec import RuleClassification, RuleMaturity
 
 
 def _analyze(*components: Component) -> AnalysisReport:
     return analyze(
         Manifest(
             RepositoryId("example-repository"),
-            PolicyId("sarj"),
-            SarjPolicy.policy_version,
             components,
         ),
         SarjPolicy(),
@@ -625,11 +618,9 @@ def test_library_importing_application_is_rejected() -> None:
     ]
 
 
-def test_policy_spec_is_open_and_governance_covers_every_rule() -> None:
+def test_policy_spec_governance_covers_every_rule() -> None:
     assert POLICY_SPEC.profile_id == "sarj/public"
-    assert POLICY_SPEC.profile.product_registry_mode == "open"
-    assert POLICY_SPEC.profile.repository_overrides is False
-    assert POLICY_SPEC.profile.target_repository_plugins is False
+    assert POLICY_SPEC.title == "Sarj repository standard"
     assert POLICY_SPEC.policy_version == SarjPolicy.policy_version == 5
     assert {item.rule_id for item in RULE_GOVERNANCE} == {
         item.rule_id for item in SarjPolicy.rules()

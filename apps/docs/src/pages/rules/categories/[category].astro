@@ -2,6 +2,7 @@
 import Breadcrumbs from '../../../components/Breadcrumbs.astro';
 import ReferencePage from '../../../components/ReferencePage.astro';
 import { approvedRules, referenceCatalog, type CategoryView } from '../../../lib/catalog';
+import { ruleDescription } from '../../../lib/rule-view';
 
 export function getStaticPaths() {
   return referenceCatalog.map((category) => ({
@@ -32,7 +33,7 @@ const approvedCount = topics.reduce((total, topic) => total + topic.rules.length
             {rules.map(({ rule, href }) => (
               <a class="rule-row" href={href} data-rule-id={rule.rule_id}>
                 <strong>{rule.title}</strong>
-                <span>{rule.summary}</span>
+                <span>{ruleDescription(rule)}</span>
                 <code>{rule.rule_id}</code>
                 <span class:list={['severity', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>
               </a>

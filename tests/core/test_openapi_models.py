@@ -2,21 +2,20 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from repo_lint.core.canonical import semantic_finding_key, semantic_fingerprint, with_fingerprint
-from repo_lint.core.models import (
-    AdapterRun,
-    AnalysisContext,
-    AnalysisReport,
+from repo_standards.core.canonical import (
+    semantic_finding_key,
+    semantic_fingerprint,
+    with_fingerprint,
+)
+from repo_standards.core.models import (
     ComponentId,
     Diagnostic,
-    EvidenceBundle,
+    FindingsReport,
     FixtureId,
     GitObjectId,
     InputProvenance,
     Mode,
-    Page,
     PolicyId,
-    Query,
     RatchetClassification,
     RatchetComparison,
     RatchetEntry,
@@ -27,12 +26,11 @@ from repo_lint.core.models import (
     RuleCategoryId,
     RuleExamplePair,
     RuleId,
-    RuleRemediation,
     RuleTaxonomy,
     RuleTopicId,
     SourceLocation,
 )
-from repo_lint.core.render import diagnostic_dict, report_dict
+from repo_standards.core.render import diagnostic_dict, report_dict
 
 
 def _diagnostic() -> Diagnostic:
@@ -92,57 +90,28 @@ def test_rich_locations_are_additive_in_the_v2_diagnostic_shape() -> None:
     assert payload["related_locations"][0]["location"]["path"] == "client.ts"  # type: ignore[index]
 
 
-def test_context_adapter_and_cursor_models_are_framework_neutral() -> None:
-    evidence = EvidenceBundle(
-        evidence_id="spec:public",
-        kind="openapi.document",
-        values={"version": "3.1.0"},
-        locations=(SourceLocation("openapi.yaml"),),
-        content_digest="a" * 64,
-    )
-    run = AdapterRun("openapi-static", "1", "complete", evidence=(evidence,))
-    context = AnalysisContext(
-        RepositoryId("example"),
-        source_revision="b" * 40,
-        tree_digest="c" * 40,
-        evidence=(evidence,),
-        adapter_runs=(run,),
-    )
-
-    assert context.adapter_runs[0].status == "complete"
-    assert Query().limit == 100
-    assert Page((evidence,), next_cursor="opaque").items == (evidence,)
-
-
 def test_rule_metadata_is_complete_and_examples_expose_fixture_ids() -> None:
     rule = Rule(
         rule_id=RuleId("example/rule"),
         version=1,
         default_severity="warning",
         title="Example rule",
-        summary="The example remains valid.",
-        detects="The example is invalid.",
-        impact="Invalid examples confuse consumers.",
+        description="The example remains valid.",
+        why="Invalid examples confuse consumers.",
+        fix="Correct the example input.",
         taxonomy=RuleTaxonomy(RuleCategoryId("examples"), RuleTopicId("example-rules")),
-        remediation=RuleRemediation(
-            "Correct the example.",
-            ("Change the input.",),
-            ("Run the rule again.",),
-        ),
         examples=(
             RuleExamplePair(
-                FixtureId("example-rule"),
-                "text",
-                "invalid",
-                "valid",
-                "Example violation",
-                "error",
+                example_id=FixtureId("example-rule"),
+                title="Example violation",
+                language="text",
+                before="invalid",
+                after="valid",
+                expected_severity="error",
             ),
         ),
-        evidence_required=("Example input",),
     )
 
-    assert rule.maturity == "stable"
     assert rule.references == ()
     assert rule.fixture_ids == (FixtureId("example-rule"),)
 
@@ -153,18 +122,16 @@ def test_report_serializes_provenance_and_ratchet_when_present() -> None:
         mode="git-tree",
         source_revision="a" * 40,
         tree_digest="b" * 40,
-        manifest_path=".repo-lint/repository.toml",
+        manifest_path=".repo-standards/repository.toml",
         manifest_object_id=GitObjectId("c" * 40),
         manifest_digest="d" * 64,
     )
-    report = AnalysisReport(
+    report = FindingsReport(
         mode=Mode.STRICT,
         repository_id=RepositoryId("example"),
         policy_id=PolicyId("example"),
         policy_version=1,
         scope_digest="e" * 64,
-        completion="complete",
-        conclusion="findings",
         diagnostics=(diagnostic,),
         input_provenance=provenance,
         ratchet=RatchetComparison(

@@ -7,12 +7,11 @@ import tomllib
 from pydantic import TypeAdapter
 import pytest
 
-from repo_lint.core.catalog import core_rules
-from repo_lint.core.engine import apply_exceptions, check_baseline, core_diagnostics
-from repo_lint.core.inspection import parse_project_metadata, parse_workspace_metadata
-from repo_lint.core.migration import migration_diagnostics
-from repo_lint.core.models import (
-    AnalysisReport,
+from repo_standards.core.catalog import core_rules
+from repo_standards.core.engine import apply_exceptions, check_baseline, core_diagnostics
+from repo_standards.core.inspection import parse_project_metadata, parse_workspace_metadata
+from repo_standards.core.migration import migration_diagnostics
+from repo_standards.core.models import (
     ComponentId,
     Diagnostic,
     ExceptionRecord,
@@ -22,7 +21,7 @@ from repo_lint.core.models import (
     Manifest,
     Mode,
     PackageEvidence,
-    PolicyId,
+    PassedReport,
     Remediation,
     RepositoryId,
     RepositoryInspection,
@@ -33,7 +32,7 @@ from repo_lint.core.models import (
     TrackedFileEvidence,
     WorkspaceEvidence,
 )
-from repo_lint.core.parser import parse_baseline_bytes, parse_manifest_bytes
+from repo_standards.core.parser import parse_baseline_bytes, parse_manifest_bytes
 
 
 type ExampleRunner = Callable[[bytes], tuple[str, ...]]
@@ -41,9 +40,6 @@ _STRING_MAPPING = TypeAdapter(dict[str, str])
 _SINGLE_MIGRATION = b"""\
 schema_version = 2
 repository_id = "example-repository"
-policy = "example"
-policy_version = 1
-
 [[components]]
 id = "api"
 kind = "service"
@@ -62,7 +58,7 @@ _FINGERPRINT = "f" * 64
 def _inspection(
     paths: tuple[str, ...],
     *,
-    projects: tuple[PackageEvidence, ...] = (),
+    packages: tuple[PackageEvidence, ...] = (),
     workspaces: tuple[WorkspaceEvidence, ...] = (),
 ) -> RepositoryInspection:
     tracked = tuple(
@@ -74,11 +70,11 @@ def _inspection(
         source_revision="a" * 40,
         tree_digest="b" * 40,
         tracked_file_count=len(tracked),
-        projects=projects,
+        packages=packages,
         workflow_paths=(),
         cloudbuild_paths=(),
         dockerfile_paths=(),
-        terraform_roots=(),
+        terraform_modules=(),
         issues=(),
         tracked_files=tracked,
         workspaces=workspaces,
@@ -89,18 +85,18 @@ def _snapshot(
     manifest: Manifest,
     paths: tuple[str, ...],
     *,
-    projects: tuple[PackageEvidence, ...] = (),
+    packages: tuple[PackageEvidence, ...] = (),
     workspaces: tuple[WorkspaceEvidence, ...] = (),
 ) -> RepositorySnapshot:
     return RepositorySnapshot(
         manifest=manifest,
         baseline=None,
-        inspection=_inspection(paths, projects=projects, workspaces=workspaces),
+        inspection=_inspection(paths, packages=packages, workspaces=workspaces),
         provenance=InputProvenance(
             mode="git-tree",
             source_revision="a" * 40,
             tree_digest="b" * 40,
-            manifest_path=".repo-lint/repository.toml",
+            manifest_path=".repo-standards/repository.toml",
             manifest_object_id=GitObjectId("c" * 40),
             manifest_digest="d" * 64,
         ),
@@ -152,7 +148,7 @@ def _run_workspace(content: bytes) -> tuple[str, ...]:
     snapshot = _snapshot(
         manifest,
         (package_path,),
-        projects=(project,),
+        packages=(project,),
         workspaces=(workspace,),
     )
     return _rule_ids(migration_diagnostics(snapshot))
@@ -176,8 +172,6 @@ def _run_exception(content: bytes) -> tuple[str, ...]:
     )
     manifest = Manifest(
         repository_id=RepositoryId("example-repository"),
-        policy_id=PolicyId("example"),
-        policy_version=1,
         components=(),
         exceptions=(exception,),
     )
@@ -196,7 +190,7 @@ def _run_exception(content: bytes) -> tuple[str, ...]:
         remediation=Remediation(
             summary="Give each component one disjoint ownership root.",
             steps=("Move one component to a disjoint root.",),
-            validation=("Run repo-lint check again.",),
+            validation=("Run repo-standards check again.",),
         ),
         fingerprint=exception.fingerprint,
     )
@@ -205,14 +199,12 @@ def _run_exception(content: bytes) -> tuple[str, ...]:
 
 def _run_baseline(content: bytes) -> tuple[str, ...]:
     baseline = parse_baseline_bytes(content)
-    report = AnalysisReport(
+    report = PassedReport(
         mode=Mode.RATCHET,
         repository_id=baseline.repository_id,
         policy_id=baseline.policy_id,
         policy_version=baseline.policy_version,
         scope_digest=baseline.scope_digest,
-        completion="complete",
-        conclusion="passed",
     )
     return _rule_ids(check_baseline(report, baseline))
 
@@ -239,26 +231,26 @@ _EXAMPLES: tuple[tuple[RuleDefinition, RuleExamplePair], ...] = tuple(
 @pytest.mark.parametrize(
     ("rule", "example"),
     _EXAMPLES,
-    ids=[str(example.fixture_id) for _, example in _EXAMPLES],
+    ids=[str(example.example_id) for _, example in _EXAMPLES],
 )
 def test_core_rule_examples_execute_exact_catalog_bytes(
     rule: RuleDefinition,
     example: RuleExamplePair,
 ) -> None:
-    runner = _RUNNERS[example.fixture_id]
+    runner = _RUNNERS[example.example_id]
 
-    flagged = runner(example.flagged.encode("utf-8"))
-    passes = runner(example.passes.encode("utf-8"))
+    flagged = runner(example.before.encode("utf-8"))
+    passes = runner(example.after.encode("utf-8"))
 
-    assert flagged == _EXPECTED_FLAGGED[example.fixture_id]
-    assert passes == _EXPECTED_PASSES[example.fixture_id]
+    assert flagged == _EXPECTED_FLAGGED[example.example_id]
+    assert passes == _EXPECTED_PASSES[example.example_id]
     assert str(rule.rule_id) in flagged
     assert str(rule.rule_id) not in passes
 
 
 def test_every_core_rule_has_one_registered_executable_example() -> None:
     rules = core_rules()
-    fixture_ids = tuple(example.fixture_id for rule in rules for example in rule.examples)
+    fixture_ids = tuple(example.example_id for rule in rules for example in rule.examples)
 
     assert len(rules) == 1
     assert len(_RUNNERS) == len(set(fixture_ids)) == 3

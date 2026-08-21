@@ -1,0 +1,8 @@
+schema_version = 2
+repository_id = "wheel-smoke"
+[[components]]
+id = "alpha.agent"
+kind = "application"
+product = "alpha"
+path = "applications/alpha/agent"
+owner = "@example/alpha"

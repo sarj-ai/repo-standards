@@ -13,14 +13,12 @@ const lines = [
   `- [Rules](${origin}/rules/)`,
   `- [CLI](${origin}/cli/)`,
   `- [Schemas](${origin}/schemas/)`,
-  `- [Catalog JSON](${origin}/api/v6/catalog.json)`,
-  `- [Catalog schema](${origin}/api/v6/catalog.schema.json)`,
+  `- [Catalog JSON](${origin}/api/v7/catalog.json)`,
+  `- [Catalog schema](${origin}/api/v7/catalog.schema.json)`,
   '',
   '## Rule categories',
   '',
   ...catalog.categories.map((category) => `- [${category.label}](${origin}${categoryHref(category.category_id)})`),
-  '',
-  `Complete text: ${origin}/llms-full.txt`,
   '',
 ];
 

@@ -7,8 +7,8 @@ from typing import NamedTuple
 
 import pytest
 
-from repo_lint.core import ConfigurationError
-from repo_lint.core.pull_request_size import analyze_pull_request_size, is_test_path
+from repo_standards.core.errors import ConfigurationError
+from repo_standards.core.pull_request_size import analyze_pull_request_size, is_test_path
 
 
 class RepositoryFixture(NamedTuple):

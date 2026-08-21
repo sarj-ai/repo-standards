@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from repo_lint.core import rule_reviews
-from repo_lint.core.models import RuleId
-from repo_lint.core.rule_reviews import (
+from repo_standards.core import rule_reviews
+from repo_standards.core.models import RuleId
+from repo_standards.core.rule_reviews import (
     ApprovedRuleReview,
     PendingRuleReview,
     RuleVersion,

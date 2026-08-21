@@ -1,8 +1,8 @@
 ---
-import { Code } from '@astrojs/starlight/components';
 import RulePager from '@sarj/docs-ui/RulePager.astro';
 
 import ReferencePage from '../../components/ReferencePage.astro';
+import RuleExamplePair from '../../components/RuleExamplePair.astro';
 import RuleTypeMark from '../../components/RuleTypeMark.astro';
 import {
   catalog,
@@ -10,7 +10,7 @@ import {
   type Rule,
 } from '../../lib/catalog';
 import { sourceRevision } from '../../lib/build';
-import { exampleExcerpt } from '../../lib/example-excerpt';
+import { ruleDescription, ruleExamples, ruleFix, ruleWhy } from '../../lib/rule-view';
 
 export function getStaticPaths() {
   return catalog.rules.map((rule) => ({
@@ -22,8 +22,11 @@ export function getStaticPaths() {
 interface Props { rule: Rule }
 const { rule } = Astro.props;
 const sourceUrl = `${catalog.product.repository_url}/blob/${sourceRevision}/${rule.source.path}`;
-const ruleJsonUrl = `/api/v6/rules/${rule.rule_id.split('/').map(encodeURIComponent).join('/')}.json`;
+const ruleJsonUrl = `/api/v7/rules/${rule.rule_id.split('/').map(encodeURIComponent).join('/')}.json`;
 const { category, topic, previous, next } = rulePage(rule);
+const description = ruleDescription(rule);
+const examples = ruleExamples(rule);
+const [primaryExample, ...additionalExamples] = examples;
 const categoryUrl = rule.review.status === 'pending'
   ? '/review/'
   : `/rules/categories/${encodeURIComponent(rule.category_id)}/`;
@@ -35,7 +38,7 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
 
 <ReferencePage
   title={rule.slug}
-  description={rule.summary}
+  description={description}
   noindex={rule.review.status === 'pending'}
 >
   <article
@@ -62,12 +65,12 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
       </div>
 
       <h1>{rule.slug}</h1>
-      <p class="lede" data-rule-summary>{rule.summary}</p>
+      <p class="lede" data-rule-description>{description}</p>
       <div class="rule-header-links" aria-label="Rule links">
         <code>{rule.rule_id}</code>
         <a href={sourceUrl}>Rule source</a>
         <a href={ruleJsonUrl}>Rule JSON</a>
-        <a href="/api/v6/catalog.json">Catalog JSON</a>
+        <a href="/api/v7/catalog.json">Catalog JSON</a>
         {referenceLinks.map(({ href, label }) => <a href={href}>{label}</a>)}
       </div>
     </header>
@@ -75,37 +78,26 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
     <section class="rule-prose" aria-label="Rule guidance">
       <div>
         <h2>Why</h2>
-        <p>{rule.impact}</p>
+        <p>{ruleWhy(rule)}</p>
       </div>
       <div>
         <h2>Fix</h2>
-        <p>{rule.remediation.summary}</p>
+        <p>{ruleFix(rule)}</p>
       </div>
     </section>
 
-    {rule.examples.length > 0 && (
+    {primaryExample !== undefined && (
       <section class="examples-section" aria-labelledby="examples">
         <h2 id="examples">Examples</h2>
-        <div class="examples-list">
-          {rule.examples.map((example) => {
-            const excerpt = exampleExcerpt(example.flagged, example.passes, example.language);
-            return (
-              <section class="example-pair" aria-label={example.title} data-example-pair={example.fixture_id}>
-                <h3 class="example-pair-title">{example.title}</h3>
-                <div class="examples-grid">
-                  <figure class="example example--bad" data-example-kind="flagged">
-                    <figcaption><span>Before · {example.severity}</span></figcaption>
-                    <Code code={excerpt.flagged} lang={example.language} wrap />
-                  </figure>
-                  <figure class="example example--good" data-example-kind="passes">
-                    <figcaption><span>After</span></figcaption>
-                    <Code code={excerpt.passes} lang={example.language} wrap />
-                  </figure>
-                </div>
-              </section>
-            );
-          })}
-        </div>
+        <div class="examples-list"><RuleExamplePair example={primaryExample} /></div>
+        {additionalExamples.length > 0 && (
+          <details class="more-examples">
+            <summary>More cases <span>{additionalExamples.length}</span></summary>
+            <div class="examples-list">
+              {additionalExamples.map((example) => <RuleExamplePair example={example} />)}
+            </div>
+          </details>
+        )}
       </section>
     )}
   </article>

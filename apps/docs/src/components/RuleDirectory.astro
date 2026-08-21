@@ -4,16 +4,12 @@ import RuleTypeMark from './RuleTypeMark.astro';
 
 interface Props {
   rows: readonly RuleView[];
-  mode: 'approved' | 'review';
 }
 
-const { rows, mode } = Astro.props;
+const { rows } = Astro.props;
 ---
 
 <div class="rule-directory">
-  <div class="directory-toolbar">
-    <span class="directory-status">{rows.length} {mode === 'review' ? 'pending' : 'approved'}</span>
-  </div>
   <ul class="rule-table">
     {rows.map(({ rule, href, category }) => (
       <li>
@@ -21,7 +17,7 @@ const { rows, mode } = Astro.props;
           <RuleTypeMark categoryId={rule.category_id} label={category} />
           <span class="rule-row__main">
             <strong>{rule.title}</strong>
-            <span>{rule.summary}</span>
+            <span>{rule.description}</span>
           </span>
           <code>{rule.slug}</code>
           <span class:list={['severity', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>

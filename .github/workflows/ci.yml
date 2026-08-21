@@ -71,16 +71,16 @@ jobs:
           --distributions dist/repo-standards
       - name: Install wheels into a clean environment
         env:
-          SMOKE_ENV: ${{ runner.temp }}/repo-lint-smoke
+          SMOKE_ENV: ${{ runner.temp }}/repo-standards-smoke
         run: |
           uv venv --python 3.12 "$SMOKE_ENV"
           uv pip install --python "$SMOKE_ENV/bin/python" \
             dist/repo-standards/repo_standards-*.whl
       - name: Smoke-test installed interfaces
         env:
-          FIXTURE_ROOT: ${{ runner.temp }}/repo-lint-fixture
-          REPORT_PATH: ${{ runner.temp }}/repo-lint-report.json
-          SMOKE_ENV: ${{ runner.temp }}/repo-lint-smoke
+          FIXTURE_ROOT: ${{ runner.temp }}/repo-standards-fixture
+          REPORT_PATH: ${{ runner.temp }}/repo-standards-report.json
+          SMOKE_ENV: ${{ runner.temp }}/repo-standards-smoke
         run: |
           "$SMOKE_ENV/bin/repo-standards" --help
           "$SMOKE_ENV/bin/repo-standards" --version
@@ -91,21 +91,21 @@ jobs:
           "$SMOKE_ENV/bin/repo-standards" rest --help
           "$SMOKE_ENV/bin/repo-standards" rest rules
           "$SMOKE_ENV/bin/python" -c \
-            'import repo_lint, repo_lint.core, repo_lint.github, repo_lint.openapi, repo_lint.policy_sarj, repo_lint.rest'
-          mkdir -p "$FIXTURE_ROOT/.repo-lint"
-          cp tests/fixtures/smoke/.repo-lint/repository.toml \
-            "$FIXTURE_ROOT/.repo-lint/repository.toml"
+            'import repo_standards, repo_standards.catalog, repo_standards.openapi, repo_standards.pull_request, repo_standards.repository'
+          mkdir -p "$FIXTURE_ROOT/.repo-standards"
+          cp tests/fixtures/smoke/.repo-standards/repository.toml \
+            "$FIXTURE_ROOT/.repo-standards/repository.toml"
           git -C "$FIXTURE_ROOT" init --quiet
           git -C "$FIXTURE_ROOT" add .
           git -C "$FIXTURE_ROOT" -c user.name='Repository Lint' \
             -c user.email='repository-lint@example.invalid' commit --quiet -m fixture
           "$SMOKE_ENV/bin/repo-standards" report "$FIXTURE_ROOT" \
-            --policy sarj --format json > "$REPORT_PATH"
+            --format json > "$REPORT_PATH"
           "$SMOKE_ENV/bin/python" -c \
             'import json, os; from importlib.metadata import version; p=json.load(open(os.environ["REPORT_PATH"])); assert p["completion"] == "complete"; assert p["tool"]["version"] == version("repo-standards")'
       - name: Add consumer action size fixture
         env:
-          FIXTURE_ROOT: ${{ runner.temp }}/repo-lint-fixture
+          FIXTURE_ROOT: ${{ runner.temp }}/repo-standards-fixture
         run: |
           mkdir -p "$FIXTURE_ROOT/tests"
           printf 'assert True\n' > "$FIXTURE_ROOT/tests/test_fixture.py"
@@ -117,7 +117,7 @@ jobs:
         id: size-action
         uses: ./
         with:
-          root: ${{ runner.temp }}/repo-lint-fixture
+          root: ${{ runner.temp }}/repo-standards-fixture
           base: HEAD^
           head: HEAD
       - name: Verify pull-request size action output

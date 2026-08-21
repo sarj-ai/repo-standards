@@ -5,6 +5,7 @@ const outputDirectory = new URL('../dist/', import.meta.url);
 const htmlPaths = (await readdir(outputDirectory, { recursive: true }))
   .filter((path) => path.endsWith('.html'))
   .sort();
+const outputPaths = await readdir(outputDirectory, { recursive: true });
 const documents = await Promise.all(
   htmlPaths.map(
     async (path) => [path, await readFile(new URL(path, outputDirectory), 'utf8')] as const,
@@ -12,6 +13,7 @@ const documents = await Promise.all(
 );
 const policy = extractPolicy(documents[0]?.[1] ?? '');
 if (policy === undefined) throw new Error('Astro did not emit a Content Security Policy.');
+verifyCompactReference(outputPaths, documents);
 
 const hashes = new Set<string>();
 for (const [, document] of documents) {
@@ -47,4 +49,14 @@ function appendHashes(policy: string, hashes: string[]): string {
   if (directive === undefined) throw new Error('Content Security Policy is missing script-src-elem.');
   const additions = hashes.filter((hash) => !directive.includes(hash));
   return policy.replace(pattern, `$1 ${additions.join(' ')}$2`);
+}
+
+function verifyCompactReference(
+  paths: readonly string[],
+  pages: readonly (readonly [string, string])[],
+): void {
+  const forbiddenPath = paths.find((path) => /(^|\/)pagefind(\/|$)|(^|\/)llms-full\.txt$/iu.test(path));
+  if (forbiddenPath !== undefined) throw new Error(`Forbidden search or duplicate LLM artifact: ${forbiddenPath}`);
+  const forbiddenMarkup = pages.find(([, document]) => /data-pagefind|pagefind-ui|aria-keyshortcuts=["'][^"']*(?:Meta|Control|Mod)\+K/iu.test(document));
+  if (forbiddenMarkup !== undefined) throw new Error(`Search UI or Cmd/Ctrl-K shortcut found in ${forbiddenMarkup[0]}`);
 }

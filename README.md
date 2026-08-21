@@ -62,34 +62,12 @@ path/to/generated/** pr-size-excluded
 Thresholds, labels, comments, and approval requirements remain consumer policy. Use
 `pull_request`, never `pull_request_target`; this metric is not a security gate.
 
-## Live GitHub evidence
-
-Live governance checks are explicit and read-only. Supply a repository whose token can read
-metadata, branch protection, rulesets, and Actions settings:
-
-```bash
-export SARJ_REPO_LINT_GITHUB_TOKEN=...
-repo-standards check . \
-  --github-repository owner/repository \
-  --require-github-evidence \
-  --policy sarj \
-  --format json
-```
-
-Without `SARJ_REPO_LINT_GITHUB_TOKEN`, the CLI can reuse an authenticated `gh` session. Live
-delivery checks require the selected revision to match the default-branch head.
-
 ## Safety model
 
 - Repository contents come from one exact Git tree.
 - Workflow YAML and API descriptions are parsed as inert data.
-- GitHub access is read-only and credentials never come from inspected configuration.
 - Missing required evidence produces an inconclusive result rather than a false pass.
 - The linter has no autofix or repository mutation mode.
-
-Repositories with production, preview, and development branches can declare and verify
-continuous hotfix propagation. See [Delivery and CI/CD policy](docs/delivery-policy.md) for
-the complete evidence model.
 
 ## Development
 
