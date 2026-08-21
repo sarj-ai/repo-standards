@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from repo_standards.core.models import RuleDefinition as _RuleDefinition
@@ -10,8 +10,6 @@ RuleDefinition = _RuleDefinition
 
 
 Severity = Literal["warning", "error"]
-Completion = Literal["complete", "incomplete"]
-Conclusion = Literal["passed", "findings", "inconclusive"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,28 +60,45 @@ class ExecutionIssue:
     remediation: tuple[str, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class AnalysisReport:
-    schema_version: int
-    completion: Completion
-    conclusion: Conclusion
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _AnalysisReportBase:
+    schema_version: Literal[3] = field(init=False, default=3)
     entrypoint: str
     openapi_version: str | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PassedReport(_AnalysisReportBase):
+    completion: Literal["complete"] = field(init=False, default="complete")
+    conclusion: Literal["passed"] = field(init=False, default="passed")
+    diagnostics: tuple[Diagnostic, ...] = field(init=False, default=())
+    execution_issues: tuple[ExecutionIssue, ...] = field(init=False, default=())
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FindingsReport(_AnalysisReportBase):
     diagnostics: tuple[Diagnostic, ...]
-    execution_issues: tuple[ExecutionIssue, ...]
+    completion: Literal["complete"] = field(init=False, default="complete")
+    conclusion: Literal["findings"] = field(init=False, default="findings")
+    execution_issues: tuple[ExecutionIssue, ...] = field(init=False, default=())
 
     def __post_init__(self) -> None:
-        if self.completion == "incomplete":
-            if self.conclusion != "inconclusive" or not self.execution_issues or self.diagnostics:
-                message = (
-                    "incomplete OpenAPI reports must be inconclusive, contain execution issues, "
-                    "and contain no diagnostics"
-                )
-                raise ValueError(message)
-            return
-        if self.conclusion == "inconclusive" or self.execution_issues:
-            message = "complete OpenAPI reports cannot be inconclusive or contain execution issues"
+        if not self.diagnostics:
+            message = "OpenAPI findings reports require at least one diagnostic"
             raise ValueError(message)
-        if (self.conclusion == "passed") == bool(self.diagnostics):
-            message = "passed reports need no diagnostics; findings reports need diagnostics"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class IncompleteReport(_AnalysisReportBase):
+    execution_issues: tuple[ExecutionIssue, ...]
+    completion: Literal["incomplete"] = field(init=False, default="incomplete")
+    conclusion: Literal["inconclusive"] = field(init=False, default="inconclusive")
+    diagnostics: tuple[Diagnostic, ...] = field(init=False, default=())
+
+    def __post_init__(self) -> None:
+        if not self.execution_issues:
+            message = "incomplete OpenAPI reports require at least one execution issue"
             raise ValueError(message)
+
+
+type AnalysisReport = PassedReport | FindingsReport | IncompleteReport

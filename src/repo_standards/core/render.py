@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-import json
 from typing import TYPE_CHECKING
-
-from .canonical import canonical_json
 
 
 if TYPE_CHECKING:
@@ -16,12 +13,11 @@ if TYPE_CHECKING:
         InputProvenance,
         RatchetComparison,
         RelatedLocation,
-        Rule,
         SourceLocation,
     )
 
 
-OUTPUT_SCHEMA_VERSION = 2
+OUTPUT_SCHEMA_VERSION = 3
 
 
 def diagnostic_dict(diagnostic: Diagnostic) -> Mapping[str, object]:
@@ -135,12 +131,6 @@ def report_dict(report: AnalysisReport) -> Mapping[str, object]:
     return payload
 
 
-def render_json(report: AnalysisReport, *, pretty: bool = False) -> str:
-    if pretty:
-        return json.dumps(report_dict(report), ensure_ascii=True, indent=2, sort_keys=True) + "\n"
-    return canonical_json(report_dict(report)) + "\n"
-
-
 def render_text(report: AnalysisReport) -> str:
     lines = [
         f"repo-standards: analysis incomplete: {issue.code}: {issue.message}"
@@ -157,11 +147,6 @@ def render_text(report: AnalysisReport) -> str:
         f"{report.summary.get('warnings', 0)} warnings"
     )
     return "\n".join(lines) + "\n"
-
-
-def render_rules(rules: tuple[Rule, ...]) -> str:
-    payload = [asdict(item) for item in sorted(rules, key=lambda item: item.rule_id)]
-    return canonical_json({"schema_version": 2, "rules": payload}) + "\n"
 
 
 def output_schema() -> Mapping[str, object]:
@@ -274,7 +259,7 @@ def output_schema() -> Mapping[str, object]:
     }
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "urn:repo-lint:schema:report:v2",
+        "$id": "urn:repo-standards:schema:report:v3",
         "type": "object",
         "additionalProperties": False,
         "required": [
@@ -290,7 +275,7 @@ def output_schema() -> Mapping[str, object]:
             "diagnostics",
         ],
         "properties": {
-            "schema_version": {"const": 2},
+            "schema_version": {"const": 3},
             "completion": {"enum": ["complete", "incomplete"]},
             "conclusion": {"enum": ["passed", "findings", "inconclusive"]},
             "mode": {"enum": ["report", "ratchet", "strict"]},
@@ -322,4 +307,30 @@ def output_schema() -> Mapping[str, object]:
             "input_provenance": {"type": "object"},
             "ratchet_comparison": {"type": "object"},
         },
+        "oneOf": [
+            {
+                "properties": {
+                    "completion": {"const": "complete"},
+                    "conclusion": {"const": "passed"},
+                    "diagnostics": {"maxItems": 0},
+                    "execution_issues": {"maxItems": 0},
+                }
+            },
+            {
+                "properties": {
+                    "completion": {"const": "complete"},
+                    "conclusion": {"const": "findings"},
+                    "diagnostics": {"minItems": 1},
+                    "execution_issues": {"maxItems": 0},
+                }
+            },
+            {
+                "properties": {
+                    "completion": {"const": "incomplete"},
+                    "conclusion": {"const": "inconclusive"},
+                    "diagnostics": {"maxItems": 0},
+                    "execution_issues": {"minItems": 1},
+                }
+            },
+        ],
     }

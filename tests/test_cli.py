@@ -108,7 +108,7 @@ def test_pull_request_size_errors_have_command_specific_remediation(tmp_path: Pa
 
 
 def _manifest(root: Path, text: str) -> None:
-    policy_directory = root / ".repo-lint"
+    policy_directory = root / ".repo-standards"
     policy_directory.mkdir()
     (policy_directory / "repository.toml").write_text(text, encoding="utf-8")
     _commit_fixture(root)
@@ -144,9 +144,6 @@ def _object_list(value: object) -> list[dict[str, object]]:
 GOOD_MANIFEST = """
 schema_version = 2
 repository_id = "example-repository"
-policy = "sarj"
-policy_version = 5
-
 [[components]]
 id = "alpha.agent"
 kind = "application"
@@ -169,7 +166,7 @@ def test_report_json_is_one_deterministic_value(tmp_path: Path) -> None:
     assert _object(report["ratchet"])["status"] == "not-requested"
     assert _object(report["tool"])["version"] != "0.1.0-dev"
 
-    (tmp_path / ".repo-lint" / "repository.toml").write_text(
+    (tmp_path / ".repo-standards" / "repository.toml").write_text(
         GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"),
         encoding="utf-8",
     )
@@ -264,7 +261,7 @@ def test_schema_is_machine_discoverable() -> None:
     schema = _json_object(result.stdout)
     properties = _object(schema["properties"])
     schema_version = _object(properties["schema_version"])
-    assert schema_version["const"] == 2
+    assert schema_version["const"] == 3
 
 
 def test_report_validates_against_published_schema(tmp_path: Path) -> None:
@@ -299,7 +296,7 @@ def test_incomplete_report_and_anchor_locations_validate_against_schema(tmp_path
     schema_result = runner.invoke(app, ["schema"])
     validate(instance=_json_object(incomplete.stdout), schema=_json_object(schema_result.stdout))
 
-    policy_directory = tmp_path / ".repo-lint"
+    policy_directory = tmp_path / ".repo-standards"
     (policy_directory / "repository.toml").write_text(
         GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"),
         encoding="utf-8",
@@ -322,7 +319,7 @@ def test_neutral_core_contains_no_sarj_policy_vocabulary() -> None:
 def test_manifest_symlink_is_rejected(tmp_path: Path) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-outside.toml"
     outside.write_text(GOOD_MANIFEST, encoding="utf-8")
-    policy_directory = tmp_path / ".repo-lint"
+    policy_directory = tmp_path / ".repo-standards"
     policy_directory.mkdir()
     Path(policy_directory / "repository.toml").symlink_to(outside)
     _commit_fixture(tmp_path)
@@ -424,7 +421,9 @@ def test_ratchet_report_has_explicit_verified_baseline_status(tmp_path: Path) ->
         "scope_digest": report["scope_digest"],
         "fingerprints": list[str](),
     }
-    (tmp_path / ".repo-lint" / "baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
+    (tmp_path / ".repo-standards" / "baseline.json").write_text(
+        json.dumps(baseline), encoding="utf-8"
+    )
     _commit_changes(tmp_path)
     checked = runner.invoke(
         app,
@@ -435,7 +434,9 @@ def test_ratchet_report_has_explicit_verified_baseline_status(tmp_path: Path) ->
     assert _object(payload["baseline"])["status"] == "verified"
     assert _object(payload["ratchet"])["status"] == "clean"
 
-    (tmp_path / ".repo-lint" / "baseline.json").write_text("not-json", encoding="utf-8")
+    (tmp_path / ".repo-standards" / "baseline.json").write_text(
+        "not-json", encoding="utf-8"
+    )
     dirty = runner.invoke(
         app,
         ["check", str(tmp_path), "--mode", "ratchet", "--format", "json"],

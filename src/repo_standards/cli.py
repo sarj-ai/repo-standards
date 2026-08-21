@@ -33,6 +33,8 @@ from repo_standards.core.models import (
     AnalysisReport,
     Diagnostic,
     ExecutionIssue,
+    FindingsReport,
+    IncompleteReport,
     Mode,
     Policy,
     PolicyId,
@@ -81,7 +83,6 @@ app.add_typer(rest_app, name="rest")
 app.add_typer(pull_request_app, name="pull-request")
 
 _DISTRIBUTION_NAME = "repo-standards"
-_POLICY_API_VERSION = 2
 _MAX_PAGE_SIZE = 500
 _INSPECTION_KINDS = frozenset(
     {"all", "project", "workflow", "cloudbuild", "dockerfile", "terraform", "openapi"}
@@ -223,7 +224,7 @@ def capabilities_command() -> None:
                 "application_code_execution": False,
             },
         },
-        "schemas": {"catalog": 7, "openapi-analysis": 2, "report": 2},
+        "schemas": {"catalog": 7, "openapi-analysis": 3, "report": 3},
         "pagination": {"default_limit": 100, "maximum_limit": _MAX_PAGE_SIZE},
     }
     typer.echo(canonical_json(payload))
@@ -721,6 +722,7 @@ def rest_check_command(
             "warnings": sum(item.severity == "warning" for item in diagnostics),
         },
     }
+    payload["schema_version"] = 3
     typer.echo(canonical_json(payload))
     if report.completion != "complete":
         raise typer.Exit(2)
@@ -857,6 +859,7 @@ def _emit_rest_error(
             )
         ],
     )
+    payload["schema_version"] = 3
     if command == "rest.check":
         payload.update(
             {
@@ -889,8 +892,8 @@ def _issue_payload(
 @app.command()
 def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - CLI boundary
     root: Annotated[Path, typer.Argument()] = Path(),
-    manifest: Annotated[str, typer.Option()] = ".repo-lint/repository.toml",
-    baseline: Annotated[str, typer.Option()] = ".repo-lint/baseline.json",
+    manifest: Annotated[str, typer.Option()] = ".repo-standards/repository.toml",
+    baseline: Annotated[str, typer.Option()] = ".repo-standards/baseline.json",
     mode: Annotated[Mode, typer.Option()] = Mode.STRICT,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
     as_of: Annotated[str | None, typer.Option(help="Deterministic YYYY-MM-DD")] = None,
@@ -919,7 +922,7 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - C
 @app.command("report")
 def report_command(
     root: Annotated[Path, typer.Argument()] = Path(),
-    manifest: Annotated[str, typer.Option()] = ".repo-lint/repository.toml",
+    manifest: Annotated[str, typer.Option()] = ".repo-standards/repository.toml",
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
     as_of: Annotated[str | None, typer.Option(help="Deterministic YYYY-MM-DD")] = None,
     enable_rule: Annotated[
@@ -935,7 +938,7 @@ def report_command(
         _run_check(
             root=root,
             manifest_path=manifest,
-            baseline_path=".repo-lint/baseline.json",
+            baseline_path=".repo-standards/baseline.json",
             mode=Mode.REPORT,
             output_format=output_format,
             as_of=as_of,
@@ -1072,17 +1075,29 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     active_count = sum(
         item.severity == "error" and item.disposition == "active" for item in report.diagnostics
     )
-    report = replace(
-        report,
-        diagnostics=tuple(sorted(report.diagnostics + stale, key=lambda item: item.fingerprint)),
-        summary={
-            **report.summary,
-            "ratchet_regressions": len(regressions),
-            "ratchet_new": new_count,
-            "ratchet_stale": len(stale),
-            "ratchet_known": max(active_count - new_count, 0),
-        },
-    )
+    ratchet_summary = {
+        **report.summary,
+        "ratchet_regressions": len(regressions),
+        "ratchet_new": new_count,
+        "ratchet_stale": len(stale),
+        "ratchet_known": max(active_count - new_count, 0),
+    }
+    if stale:
+        report = FindingsReport(
+            mode=report.mode,
+            repository_id=report.repository_id,
+            policy_id=report.policy_id,
+            policy_version=report.policy_version,
+            scope_digest=report.scope_digest,
+            diagnostics=tuple(
+                sorted(report.diagnostics + stale, key=lambda item: item.fingerprint)
+            ),
+            summary=ratchet_summary,
+            input_provenance=report.input_provenance,
+            ratchet=report.ratchet,
+        )
+    else:
+        report = replace(report, summary=ratchet_summary)
     baseline_state: Mapping[str, object] = {
         "status": "verified",
         "path": baseline_path,
@@ -1116,14 +1131,12 @@ def _policy() -> Policy:
 
 
 def _incomplete(policy_id: PolicyId, mode: Mode, issue: str) -> AnalysisReport:
-    return AnalysisReport(
+    return IncompleteReport(
         mode=mode,
         repository_id=RepositoryId("unknown"),
         policy_id=policy_id,
         policy_version=0,
         scope_digest="0" * 64,
-        completion="incomplete",
-        conclusion="inconclusive",
         execution_issues=(
             ExecutionIssue(
                 code="analysis.configuration",
@@ -1231,7 +1244,6 @@ def explain_rule(
                     "id": str(selected_policy.policy_id),
                     "version": selected_policy.policy_version,
                 },
-                "policy_api_version": _POLICY_API_VERSION,
             },
         ),
         "rule": asdict(rule),
@@ -1239,7 +1251,6 @@ def explain_rule(
     typer.echo(json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True))
 
 
-@app.command("list-rules", hidden=True)
 @app.command("rules")
 def list_rules(
     rule_prefix: Annotated[str | None, typer.Option(help="Filter rule IDs by prefix.")] = None,
@@ -1275,7 +1286,6 @@ def list_rules(
                     "id": str(selected_policy.policy_id),
                     "version": selected_policy.policy_version,
                 },
-                "policy_api_version": _POLICY_API_VERSION,
             },
         ),
         "filters": {"rule_prefix": rule_prefix, "severity": severity},

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import ClassVar, Literal, NewType, Protocol, runtime_checkable
@@ -21,13 +20,8 @@ ExampleLanguage = Literal["json", "text", "toml", "yaml"]
 EvidenceLevel = Literal["verified", "declared", "external", "unknown"]
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
-AdapterStatus = Literal["complete", "incomplete", "failed"]
 MAX_RULE_TITLE_LENGTH = 72
 MAX_RULE_EXAMPLE_TITLE_LENGTH = 56
-
-
-def _empty_json_mapping() -> dict[str, JSONValue]:
-    return {}
 
 
 class Mode(StrEnum):
@@ -98,8 +92,6 @@ class ExceptionRecord:
 @dataclass(frozen=True, slots=True)
 class Manifest:
     repository_id: RepositoryId
-    policy_id: PolicyId
-    policy_version: int
     components: tuple[Component, ...]
     migration_paths: tuple[MigrationPath, ...] = ()
     exceptions: tuple[ExceptionRecord, ...] = ()
@@ -324,49 +316,6 @@ class InputProvenance:
 
 
 @dataclass(frozen=True, slots=True)
-class EvidenceBundle:
-    evidence_id: str
-    kind: str
-    values: Mapping[str, JSONValue]
-    locations: tuple[SourceLocation, ...] = ()
-    content_digest: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class AdapterRun:
-    adapter_id: str
-    adapter_version: str
-    status: AdapterStatus
-    evidence: tuple[EvidenceBundle, ...] = ()
-    issues: tuple[ExecutionIssue, ...] = ()
-    provenance: InputProvenance | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class AnalysisContext:
-    repository_id: RepositoryId
-    source_revision: str
-    tree_digest: str
-    evidence: tuple[EvidenceBundle, ...] = ()
-    adapter_runs: tuple[AdapterRun, ...] = ()
-    parameters: Mapping[str, JSONValue] = field(default_factory=_empty_json_mapping)
-
-
-@dataclass(frozen=True, slots=True)
-class Query:
-    limit: int = 100
-    cursor: str | None = None
-    filters: tuple[tuple[str, str], ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class Page[PageItem]:
-    items: tuple[PageItem, ...]
-    next_cursor: str | None = None
-    total_count: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class RepositoryInspection:
     completion: Literal["complete", "incomplete"]
     source_revision: str
@@ -408,33 +357,50 @@ class RatchetComparison:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class AnalysisReport:
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _AnalysisReportBase:
     mode: Mode
     repository_id: RepositoryId
     policy_id: PolicyId
     policy_version: int
     scope_digest: str
-    completion: Literal["complete", "incomplete"]
-    conclusion: Literal["passed", "findings", "inconclusive"]
-    diagnostics: tuple[Diagnostic, ...] = ()
-    execution_issues: tuple[ExecutionIssue, ...] = ()
     summary: dict[str, int] = field(default_factory=dict)
     input_provenance: InputProvenance | None = None
     ratchet: RatchetComparison | None = None
 
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PassedReport(_AnalysisReportBase):
+    completion: Literal["complete"] = field(init=False, default="complete")
+    conclusion: Literal["passed"] = field(init=False, default="passed")
+    diagnostics: tuple[Diagnostic, ...] = field(init=False, default=())
+    execution_issues: tuple[ExecutionIssue, ...] = field(init=False, default=())
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FindingsReport(_AnalysisReportBase):
+    diagnostics: tuple[Diagnostic, ...]
+    completion: Literal["complete"] = field(init=False, default="complete")
+    conclusion: Literal["findings"] = field(init=False, default="findings")
+    execution_issues: tuple[ExecutionIssue, ...] = field(init=False, default=())
+
     def __post_init__(self) -> None:
-        if self.completion == "incomplete":
-            if self.conclusion != "inconclusive" or not self.execution_issues or self.diagnostics:
-                message = (
-                    "incomplete reports must be inconclusive, contain execution issues, "
-                    "and contain no diagnostics"
-                )
-                raise ValueError(message)
-            return
-        if self.conclusion == "inconclusive" or self.execution_issues:
-            message = "complete reports cannot be inconclusive or contain execution issues"
+        if not self.diagnostics:
+            message = "findings reports require at least one diagnostic"
             raise ValueError(message)
-        if (self.conclusion == "passed") == bool(self.diagnostics):
-            message = "passed reports require no diagnostics; findings reports require diagnostics"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class IncompleteReport(_AnalysisReportBase):
+    execution_issues: tuple[ExecutionIssue, ...]
+    completion: Literal["incomplete"] = field(init=False, default="incomplete")
+    conclusion: Literal["inconclusive"] = field(init=False, default="inconclusive")
+    diagnostics: tuple[Diagnostic, ...] = field(init=False, default=())
+
+    def __post_init__(self) -> None:
+        if not self.execution_issues:
+            message = "incomplete reports require at least one execution issue"
             raise ValueError(message)
+
+
+type AnalysisReport = PassedReport | FindingsReport | IncompleteReport

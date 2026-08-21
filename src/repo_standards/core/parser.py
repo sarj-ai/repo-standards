@@ -221,19 +221,14 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
     fields = {
         "schema_version",
         "repository_id",
-        "policy",
-        "policy_version",
         "components",
         "migration_paths",
         "exceptions",
     }
-    required = {"schema_version", "repository_id", "policy", "policy_version", "components"}
+    required = {"schema_version", "repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
     if data["schema_version"] != _INPUT_SCHEMA_VERSION:
         ConfigurationError.fail(f"manifest.schema_version must be {_INPUT_SCHEMA_VERSION}")
-    policy_version = data["policy_version"]
-    if not isinstance(policy_version, int) or isinstance(policy_version, bool):
-        ConfigurationError.fail("manifest.policy_version must be an integer")
     raw_components = _list(data["components"], "manifest.components")
     if len(raw_components) > _MAX_COMPONENTS:
         ConfigurationError.fail(f"manifest may contain at most {_MAX_COMPONENTS} components")
@@ -251,8 +246,6 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         repository_id=RepositoryId(
             _identifier(_string(data, "repository_id", "manifest"), "repository_id")
         ),
-        policy_id=PolicyId(_identifier(_string(data, "policy", "manifest"), "policy")),
-        policy_version=policy_version,
         components=components,
         migration_paths=tuple(
             parse_migration(item, index) for index, item in enumerate(raw_migrations)

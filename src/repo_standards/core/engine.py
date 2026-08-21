@@ -12,8 +12,10 @@ from .models import (
     ComponentId,
     Diagnostic,
     ExceptionUse,
+    FindingsReport,
     Manifest,
     Mode,
+    PassedReport,
     Policy,
     RatchetClassification,
     RatchetComparison,
@@ -193,11 +195,6 @@ def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a
     additional_diagnostics: tuple[Diagnostic, ...] = (),
     enabled_rules: frozenset[RuleVersion] | None = None,
 ) -> AnalysisReport:
-    if manifest.policy_id != policy.policy_id or manifest.policy_version != policy.policy_version:
-        ConfigurationError.fail(
-            f"manifest selects {manifest.policy_id}@{manifest.policy_version}; "
-            f"installed policy is {policy.policy_id}@{policy.policy_version}"
-        )
     emitted = core_diagnostics(manifest) + policy.evaluate(manifest) + additional_diagnostics
     if enabled_rules is not None:
         emitted = tuple(
@@ -225,21 +222,29 @@ def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a
     )
     warning_count = sum(item.severity == "warning" for item in diagnostics)
     excepted_count = sum(item.disposition == "excepted" for item in diagnostics)
-    return AnalysisReport(
+    summary = {
+        "diagnostics": len(diagnostics),
+        "errors": error_count,
+        "warnings": warning_count,
+        "excepted": excepted_count,
+    }
+    if diagnostics:
+        return FindingsReport(
+            mode=mode,
+            repository_id=manifest.repository_id,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+            scope_digest=scope_digest(manifest),
+            diagnostics=diagnostics,
+            summary=summary,
+        )
+    return PassedReport(
         mode=mode,
         repository_id=manifest.repository_id,
         policy_id=policy.policy_id,
         policy_version=policy.policy_version,
         scope_digest=scope_digest(manifest),
-        completion="complete",
-        conclusion="findings" if diagnostics else "passed",
-        diagnostics=diagnostics,
-        summary={
-            "diagnostics": len(diagnostics),
-            "errors": error_count,
-            "warnings": warning_count,
-            "excepted": excepted_count,
-        },
+        summary=summary,
     )
 
 
@@ -287,21 +292,3 @@ def classify_baseline(report: AnalysisReport, baseline: Baseline) -> RatchetComp
         for fingerprint in sorted(known - set(current))
     )
     return RatchetComparison(entries=tuple(entries))
-
-
-def with_ratchet_diagnostics(
-    report: AnalysisReport, baseline_diagnostics: tuple[Diagnostic, ...]
-) -> AnalysisReport:
-    if not baseline_diagnostics:
-        return report
-    return replace(
-        report,
-        conclusion="findings",
-        diagnostics=tuple(
-            sorted(report.diagnostics + baseline_diagnostics, key=lambda item: item.fingerprint)
-        ),
-        summary={
-            **report.summary,
-            "ratchet_regressions": len(baseline_diagnostics),
-        },
-    )

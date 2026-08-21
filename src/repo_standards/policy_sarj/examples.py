@@ -12,7 +12,6 @@ from repo_standards.core.models import (
     Dependency,
     FixtureId,
     Manifest,
-    PolicyId,
     RepositoryId,
     RuleId,
 )
@@ -70,8 +69,6 @@ def _manifest(*, fixture_id: str, source: str) -> Manifest:
     components = _manifest_components(fixture_id=fixture_id, source=source)
     return Manifest(
         repository_id=RepositoryId("example-repository"),
-        policy_id=PolicyId("sarj"),
-        policy_version=SarjPolicy.policy_version,
         components=components,
     )
 

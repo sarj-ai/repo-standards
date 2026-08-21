@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     import typer
 
 
-_CATALOG_KIND = "repo-lint.catalog"
+_CATALOG_KIND = "repo-standards.catalog"
 _CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v7.schema.json"
 _PUBLIC_REFERENCE_HOSTS = frozenset(
     {
@@ -62,7 +62,6 @@ _PUBLIC_REFERENCE_HOSTS = frozenset(
 )
 _JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
 _ANNOTATION_OBJECT = TypeAdapter(dict[str, object])
-_POLICY_API_VERSION = 2
 
 CommandId = NewType("CommandId", str)
 CapabilityId = NewType("CapabilityId", str)
@@ -129,7 +128,6 @@ class ProductDescriptor(CatalogModel):
 class ProvenanceDescriptor(CatalogModel):
     distribution: str
     package_version: str
-    policy_api_version: int
     repository_url: str
     content_digest: str
 
@@ -292,7 +290,7 @@ class SchemaDescriptor(CatalogModel):
 
 
 class Catalog(CatalogModel):
-    kind: Literal["repo-lint.catalog"] = _CATALOG_KIND
+    kind: Literal["repo-standards.catalog"] = _CATALOG_KIND
     schema_version: Literal[7] = 7
     catalog_version: str
     product: ProductDescriptor
@@ -537,7 +535,6 @@ def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
         provenance=ProvenanceDescriptor(
             distribution="repo-standards",
             package_version=package_version,
-            policy_api_version=_POLICY_API_VERSION,
             repository_url="https://github.com/sarj-ai/repo-standards",
             content_digest="",
         ),
@@ -600,7 +597,7 @@ def _policies(policy: Policy) -> tuple[PolicyDescriptor, ...]:
         PolicyDescriptor(
             policy_id=str(policy.policy_id),
             policy_version=policy.policy_version,
-            title=POLICY_SPEC.profile.title,
+            title=POLICY_SPEC.title,
             bindings=tuple(bindings),
         ),
     )
@@ -856,11 +853,11 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
 
 def _schemas() -> tuple[SchemaDescriptor, ...]:
     documents = (
-        ("report", "Repository analysis report", 2, "report", report_schema()),
+        ("report", "Repository analysis report", 3, "report", report_schema()),
         (
             "openapi-analysis",
             "OpenAPI analysis report",
-            2,
+            3,
             "openapi-analysis",
             openapi_report_schema(),
         ),

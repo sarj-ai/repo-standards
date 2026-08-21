@@ -4,14 +4,29 @@ import importlib.util
 from pathlib import Path
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - isolated import smoke test
 import sys
+from typing import NotRequired, TypedDict
 
+from pydantic import TypeAdapter
 import pytest
 from typer.testing import CliRunner
+import yaml
 
 from repo_standards.cli import app
 from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.pull_request import analyze_pull_request_size
 from repo_standards.repository import inspect_repository
+
+
+class _ActionStep(TypedDict):
+    run: NotRequired[str]
+
+
+class _ActionRuns(TypedDict):
+    steps: list[_ActionStep]
+
+
+class _ActionDocument(TypedDict):
+    runs: _ActionRuns
 
 
 def test_root_import_is_lightweight() -> None:
@@ -34,10 +49,15 @@ def test_root_import_is_lightweight() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
-def test_removed_import_names_and_commands_are_absent() -> None:
-    assert importlib.util.find_spec("repo_lint") is None
-    assert importlib.util.find_spec("repo_standards.github") is None
-    assert importlib.util.find_spec("repo_standards.core.registry") is None
+@pytest.mark.parametrize(
+    "module_name",
+    ["repo_lint", "repo_standards.github", "repo_standards.core.registry"],
+)
+def test_removed_import_name_is_absent(module_name: str) -> None:
+    assert importlib.util.find_spec(module_name) is None
+
+
+def test_removed_commands_are_absent() -> None:
 
     runner = CliRunner()
     root_help = runner.invoke(app, ["--help"])
@@ -45,6 +65,7 @@ def test_removed_import_names_and_commands_are_absent() -> None:
 
     assert root_help.exit_code == check_help.exit_code == 0
     assert "github" not in {command.name for command in app.registered_commands}
+    assert "list-rules" not in {command.name for command in app.registered_commands}
     assert "--policy" not in check_help.stdout
     assert "--github-repository" not in check_help.stdout
     assert "--require-github-evidence" not in check_help.stdout
@@ -59,8 +80,6 @@ def test_manifest_rejects_removed_delivery_configuration() -> None:
     manifest = b"""
 schema_version = 2
 repository_id = "example"
-policy = "sarj"
-policy_version = 5
 components = []
 
 [delivery]
@@ -73,4 +92,9 @@ provider = "github"
 
 def test_action_keeps_the_stable_executable() -> None:
     action = Path(__file__).parents[1] / "action.yml"
-    assert "repo-standards pull-request size" in action.read_text(encoding="utf-8")
+    document = TypeAdapter(_ActionDocument).validate_python(
+        yaml.safe_load(action.read_text(encoding="utf-8"))
+    )
+    steps = document["runs"]["steps"]
+    commands = [step["run"] for step in steps if "run" in step]
+    assert sum("repo-standards pull-request size" in command for command in commands) == 1

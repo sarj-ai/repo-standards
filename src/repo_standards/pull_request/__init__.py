@@ -1,5 +1,3 @@
-"""Pull-request measurement APIs."""
-
 from repo_standards.core.pull_request_size import (
     PullRequestFileSize,
     PullRequestSize,

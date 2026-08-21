@@ -9,7 +9,14 @@ from jsonschema import ValidationError as JSONSchemaValidationError
 from jsonschema import validate
 import pytest
 
-from repo_standards.openapi import AnalysisReport, DocumentInput, analyze_bytes, rules
+from repo_standards.openapi import (
+    AnalysisReport,
+    DocumentInput,
+    FindingsReport,
+    IncompleteReport,
+    analyze_bytes,
+    rules,
+)
 from repo_standards.openapi.schema import analysis_schema
 
 
@@ -66,16 +73,18 @@ def test_minimal_json_document_is_clean_and_deterministic() -> None:
     assert first == second
 
 
-def test_openapi_report_rejects_incoherent_outcome_states() -> None:
-    with pytest.raises(ValueError, match="complete OpenAPI reports cannot be inconclusive"):
-        AnalysisReport(2, "complete", "inconclusive", "openapi.json", None, (), ())
+def test_openapi_report_variants_reject_empty_required_payloads() -> None:
+    with pytest.raises(ValueError, match="at least one diagnostic"):
+        FindingsReport(entrypoint="openapi.json", openapi_version=None, diagnostics=())
+    with pytest.raises(ValueError, match="at least one execution issue"):
+        IncompleteReport(entrypoint="openapi.json", openapi_version=None, execution_issues=())
 
 
 def test_openapi_schema_rejects_incoherent_outcome_states() -> None:
     with pytest.raises(JSONSchemaValidationError):
         validate(
             instance={
-                "schema_version": 2,
+                "schema_version": 3,
                 "completion": "complete",
                 "conclusion": "inconclusive",
                 "entrypoint": "openapi.json",

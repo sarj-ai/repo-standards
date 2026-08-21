@@ -249,8 +249,8 @@ def test_catalog_schema_descriptor_versions_match_public_contracts() -> None:
 
     assert versions == {
         "catalog": 7,
-        "openapi-analysis": 2,
-        "report": 2,
+        "openapi-analysis": 3,
+        "report": 3,
     }
 
 

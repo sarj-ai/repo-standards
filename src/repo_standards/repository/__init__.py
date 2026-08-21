@@ -1,5 +1,3 @@
-"""Repository inspection and analysis APIs."""
-
 from repo_standards.core.engine import analyze, check_baseline, classify_baseline
 from repo_standards.core.inspection import (
     GitIdentity,

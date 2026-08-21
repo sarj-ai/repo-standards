@@ -89,7 +89,5 @@ def with_fingerprint(diagnostic: Diagnostic) -> Diagnostic:
 def scope_digest(manifest: Manifest) -> str:
     payload: dict[str, object] = {
         "repository_id": manifest.repository_id,
-        "policy_id": manifest.policy_id,
-        "policy_version": manifest.policy_version,
     }
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()

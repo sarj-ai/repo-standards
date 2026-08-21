@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - 'apps/docs/**'
-      - 'src/repo_lint/**'
+      - 'src/repo_standards/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/docs.yml'
@@ -12,7 +12,7 @@ on:
     branches: [main]
     paths:
       - 'apps/docs/**'
-      - 'src/repo_lint/**'
+      - 'src/repo_standards/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/docs.yml'

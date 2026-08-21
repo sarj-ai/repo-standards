@@ -17,7 +17,7 @@ const { rows } = Astro.props;
           <RuleTypeMark categoryId={rule.category_id} label={category} />
           <span class="rule-row__main">
             <strong>{rule.title}</strong>
-            <span>{'description' in rule ? rule.description : rule.summary}</span>
+            <span>{rule.description}</span>
           </span>
           <code>{rule.slug}</code>
           <span class:list={['severity', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>

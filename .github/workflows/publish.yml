@@ -145,7 +145,7 @@ jobs:
           uv pip install --python "$SMOKE_ROOT/wheel/bin/python" \
             dist/packages/repo-standards/repo_standards-*.whl
           "$SMOKE_ROOT/wheel/bin/repo-standards" --version | grep -Fx "$RELEASE_VERSION"
-          "$SMOKE_ROOT/wheel/bin/python" -c 'import repo_lint, repo_lint.core, repo_lint.github, repo_lint.openapi, repo_lint.policy_sarj, repo_lint.rest'
+          "$SMOKE_ROOT/wheel/bin/python" -c 'import repo_standards, repo_standards.catalog, repo_standards.openapi, repo_standards.pull_request, repo_standards.repository'
           uv venv --python 3.14 "$SMOKE_ROOT/sdist"
           uv pip install --python "$SMOKE_ROOT/sdist/bin/python" \
             dist/packages/repo-standards/repo_standards-*.tar.gz

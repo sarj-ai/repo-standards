@@ -23,6 +23,9 @@ from .models import (
     Diagnostic,
     DocumentInput,
     ExecutionIssue,
+    FindingsReport,
+    IncompleteReport,
+    PassedReport,
     Remediation,
     SourceLocation,
 )
@@ -315,15 +318,15 @@ def _report(entrypoint: str, version: str | None, collector: _Collector) -> Anal
         )
     )
     issues = tuple(sorted(collector.issues, key=lambda item: (item.phase, item.code, item.message)))
-    completion: Literal["complete", "incomplete"] = "incomplete" if issues else "complete"
-    conclusion: Literal["passed", "findings", "inconclusive"]
     if issues:
-        conclusion = "inconclusive"
-    elif diagnostics:
-        conclusion = "findings"
-    else:
-        conclusion = "passed"
-    return AnalysisReport(2, completion, conclusion, entrypoint, version, diagnostics, issues)
+        return IncompleteReport(
+            entrypoint=entrypoint, openapi_version=version, execution_issues=issues
+        )
+    if diagnostics:
+        return FindingsReport(
+            entrypoint=entrypoint, openapi_version=version, diagnostics=diagnostics
+        )
+    return PassedReport(entrypoint=entrypoint, openapi_version=version)
 
 
 def _prepare_documents(request: AnalysisRequest, collector: _Collector) -> dict[str, bytes] | None:

@@ -122,7 +122,7 @@ class SiteSchema(SiteCatalogModel):
 
 
 class SiteCatalog(SiteCatalogModel):
-    kind: Literal["repo-lint.catalog"]
+    kind: Literal["repo-standards.catalog"]
     schema_version: Literal[7]
     provenance: SiteProvenance
     rules: tuple[SiteRule, ...]
@@ -255,7 +255,8 @@ def verify_distributions(
     allowed_wheel_names = {
         name
         for name in wheel_names
-        if name.startswith("repo_standards/") and (name.endswith(".py") or name == "repo_standards/py.typed")
+        if name.startswith("repo_standards/")
+        and (name.endswith(".py") or name == "repo_standards/py.typed")
     }
     allowed_wheel_names.update(
         f"{wheel_metadata.dist_info}/{name}" for name in WHEEL_METADATA_FILES
@@ -463,8 +464,8 @@ def verify_rule_page(
         violations.append(f"site:{relative}: rule navigation is missing")
     expected_examples = len(rule.examples)
     if (
-        parser.example_kinds.count("flagged") != expected_examples
-        or parser.example_kinds.count("passes") != expected_examples
+        parser.example_kinds.count("before") != expected_examples
+        or parser.example_kinds.count("after") != expected_examples
     ):
         violations.append(f"site:{relative}: example pairs differ from catalog")
     return violations

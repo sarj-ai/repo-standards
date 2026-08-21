@@ -147,7 +147,7 @@ def inspect_repository(root: Path, *, identity: GitIdentity | None = None) -> Re
 def load_repository_snapshot(
     root: Path,
     *,
-    manifest_path: str = ".repo-lint/repository.toml",
+    manifest_path: str = ".repo-standards/repository.toml",
     baseline_path: str | None = None,
     identity: GitIdentity | None = None,
 ) -> RepositorySnapshot:

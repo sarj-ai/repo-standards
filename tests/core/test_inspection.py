@@ -6,16 +6,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from repo_standards.core import (
-    ConfigurationError,
-    InventoryKind,
-    core_rules,
+from repo_standards.core.catalog import core_rules
+from repo_standards.core.errors import ConfigurationError
+from repo_standards.core.inspection import (
     load_repository_snapshot,
-    migration_diagnostics,
     parse_project_metadata,
     parse_workspace_metadata,
     read_tracked_blob_contents,
 )
+from repo_standards.core.migration import migration_diagnostics
+from repo_standards.core.models import InventoryKind
 
 
 if TYPE_CHECKING:
@@ -25,9 +25,6 @@ if TYPE_CHECKING:
 _MANIFEST = b"""\
 schema_version = 2
 repository_id = "example-repository"
-policy = "example"
-policy_version = 1
-
 [[components]]
 id = "application"
 kind = "service"
@@ -50,8 +47,8 @@ def _git(repository: Path, *arguments: str) -> None:
 def _committed_repository(tmp_path: Path) -> Path:
     repository = tmp_path / "repository"
     repository.mkdir()
-    (repository / ".repo-lint").mkdir()
-    (repository / ".repo-lint" / "repository.toml").write_bytes(_MANIFEST)
+    (repository / ".repo-standards").mkdir()
+    (repository / ".repo-standards" / "repository.toml").write_bytes(_MANIFEST)
     (repository / "apps" / "application").mkdir(parents=True)
     (repository / "apps" / "application" / "package.json").write_text(
         '{"name":"@example/application","private":true}', encoding="utf-8"
@@ -148,7 +145,7 @@ def test_snapshot_joins_manifest_and_inventory_from_one_git_tree(tmp_path: Path)
     }
 
     dirty_manifest = _MANIFEST.replace(b"example-repository", b"dirty-repository")
-    (repository / ".repo-lint" / "repository.toml").write_bytes(dirty_manifest)
+    (repository / ".repo-standards" / "repository.toml").write_bytes(dirty_manifest)
     repeated = load_repository_snapshot(repository)
     assert repeated.manifest.repository_id == "example-repository"
     assert repeated.provenance == snapshot.provenance
@@ -180,7 +177,7 @@ def test_core_catalog_is_stable_and_complete() -> None:
 def test_migration_diagnostics_verify_tree_and_workspace_state(tmp_path: Path) -> None:
     repository = _committed_repository(tmp_path)
     manifest = _manifest_with_migration(source="apps/application", target="applications/alpha/api")
-    (repository / ".repo-lint" / "repository.toml").write_bytes(manifest)
+    (repository / ".repo-standards" / "repository.toml").write_bytes(manifest)
     (repository / "applications" / "alpha" / "api").mkdir(parents=True)
     (repository / "applications" / "alpha" / "api" / "package.json").write_text(
         '{"name":"@example/application","private":true}', encoding="utf-8"
@@ -218,7 +215,7 @@ def test_migration_diagnostics_verify_tree_and_workspace_state(tmp_path: Path) -
 def test_migration_target_must_exist_in_selected_tree(tmp_path: Path) -> None:
     repository = _committed_repository(tmp_path)
     manifest = _manifest_with_migration(source="apps/application", target="applications/alpha/api")
-    (repository / ".repo-lint" / "repository.toml").write_bytes(manifest)
+    (repository / ".repo-standards" / "repository.toml").write_bytes(manifest)
     _git(repository, "add", ".")
     _git(
         repository,
@@ -245,7 +242,7 @@ def test_workspace_rule_ignores_packages_that_were_never_members(tmp_path: Path)
     manifest = _manifest_with_migration(
         source="external/application", target="applications/alpha/api"
     )
-    (repository / ".repo-lint" / "repository.toml").write_bytes(manifest)
+    (repository / ".repo-standards" / "repository.toml").write_bytes(manifest)
     (repository / "applications" / "alpha" / "api").mkdir(parents=True)
     (repository / "applications" / "alpha" / "api" / "package.json").write_text(
         '{"name":"@example/application","private":true}', encoding="utf-8"
@@ -270,7 +267,7 @@ def test_workspace_rule_ignores_packages_that_were_never_members(tmp_path: Path)
 
 def test_completed_move_has_no_migration_diagnostics(tmp_path: Path) -> None:
     repository = _committed_repository(tmp_path)
-    (repository / ".repo-lint" / "repository.toml").write_bytes(
+    (repository / ".repo-standards" / "repository.toml").write_bytes(
         _manifest_with_migration(source="apps/application", target="applications/alpha/api")
     )
     (repository / "apps" / "application" / "package.json").unlink()
@@ -314,7 +311,7 @@ owner = "@example/alpha"
 
 [[migration_paths]]""",
     )
-    (repository / ".repo-lint" / "repository.toml").write_bytes(manifest)
+    (repository / ".repo-standards" / "repository.toml").write_bytes(manifest)
     (repository / "applications" / "alpha" / "api").mkdir(parents=True)
     (repository / "applications" / "alpha" / "api" / "marker.txt").write_text(
         "moved\n", encoding="utf-8"
@@ -341,7 +338,7 @@ def test_install_artifacts_are_not_a_migration_policy(
     tmp_path: Path,
 ) -> None:
     repository = _committed_repository(tmp_path)
-    (repository / ".repo-lint" / "repository.toml").write_bytes(
+    (repository / ".repo-standards" / "repository.toml").write_bytes(
         _manifest_with_migration(source="apps/application", target="applications/alpha/api")
     )
     (repository / "applications" / "alpha" / "api").mkdir(parents=True)
@@ -413,7 +410,7 @@ component_id = "worker"
 from = "apps/worker"
 to = "applications/alpha/worker"
 """
-    (repository / ".repo-lint" / "repository.toml").write_bytes(manifest)
+    (repository / ".repo-standards" / "repository.toml").write_bytes(manifest)
     for component in ("api", "worker"):
         target = repository / "applications" / "alpha" / component / "marker.txt"
         target.parent.mkdir(parents=True)

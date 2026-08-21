@@ -2,8 +2,6 @@ import { diffLines } from 'diff';
 
 import type { Rule } from './catalog';
 
-type UnknownRecord = Readonly<Record<string, unknown>>;
-
 export interface RuleExampleView {
   readonly exampleId: string;
   readonly title: string;
@@ -18,41 +16,27 @@ export interface RuleExampleView {
 }
 
 export function ruleDescription(rule: Rule): string {
-  return textField(rule, 'description') ?? textField(rule, 'summary') ?? rule.title;
+  return rule.description;
 }
 
 export function ruleWhy(rule: Rule): string {
-  return textField(rule, 'why') ?? textField(rule, 'impact') ?? ruleDescription(rule);
+  return rule.why;
 }
 
 export function ruleFix(rule: Rule): string {
-  const direct = textField(rule, 'fix');
-  if (direct !== undefined) return direct;
-  const remediation = field(rule, 'remediation');
-  return isRecord(remediation) && typeof remediation.summary === 'string'
-    ? remediation.summary
-    : 'Update the repository so it satisfies this rule.';
+  return rule.fix;
 }
 
 export function ruleExamples(rule: Rule): readonly RuleExampleView[] {
-  const rawExamples = field(rule, 'examples');
-  if (!Array.isArray(rawExamples)) return [];
-  return rawExamples.flatMap((value, index) => {
-    if (!isRecord(value)) return [];
-    const before = textField(value, 'before') ?? textField(value, 'flagged');
-    const after = textField(value, 'after') ?? textField(value, 'passes');
-    if (before === undefined || after === undefined) return [];
-    const exampleId = textField(value, 'example_id') ?? textField(value, 'fixture_id') ?? `case-${String(index + 1)}`;
-    return [{
-      exampleId,
-      title: textField(value, 'title') ?? `Case ${String(index + 1)}`,
-      before,
-      after,
-      expectedSeverity: textField(value, 'expected_severity') ?? textField(value, 'severity') ?? 'error',
-      language: textField(value, 'language') ?? inferLanguage(before),
-      marks: changedLineMarks(before, after),
-    }];
-  });
+  return rule.examples.map((example) => ({
+    exampleId: example.id,
+    title: example.title,
+    before: example.before,
+    after: example.after,
+    expectedSeverity: example.expected_severity,
+    language: example.language,
+    marks: changedLineMarks(example.before, example.after),
+  }));
 }
 
 function changedLineMarks(before: string, after: string): RuleExampleView['marks'] {
@@ -96,25 +80,4 @@ function lineSpec(lines: readonly number[]): { readonly range: string } | undefi
   }
   ranges.push(first === last ? String(first) : `${String(first)}-${String(last)}`);
   return { range: ranges.join(',') };
-}
-
-function inferLanguage(value: string): string {
-  const trimmed = value.trimStart();
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
-  if (trimmed.startsWith('openapi:') || trimmed.startsWith('components:')) return 'yaml';
-  if (trimmed.includes('[tool.') || trimmed.includes('[project')) return 'toml';
-  return 'text';
-}
-
-function field(value: UnknownRecord, name: string): unknown {
-  return value[name];
-}
-
-function textField(value: UnknownRecord, name: string): string | undefined {
-  const candidate = field(value, name);
-  return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
-}
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === 'object' && value !== null;
 }

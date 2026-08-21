@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, NewType
 
 from repo_standards.core.models import EvidenceLevel, PolicyId, RuleId
 
 
-PROFILE_ID = "sarj/public"
+ProfileId = NewType("ProfileId", str)
+PROFILE_ID = ProfileId("sarj/public")
 
 
 class RuleMaturity(StrEnum):
@@ -80,29 +81,16 @@ class PathTemplate:
 
 
 @dataclass(frozen=True, slots=True)
-class ProfileDescriptor:
-    profile_id: str
-    title: str
-    product_registry_mode: Literal["open"]
-    repository_overrides: bool
-    target_repository_plugins: bool
-
-
-@dataclass(frozen=True, slots=True)
 class PolicySpec:
     schema_version: int
     policy_id: PolicyId
     policy_version: int
-    profile: ProfileDescriptor
+    profile_id: ProfileId
+    title: str
     component_kinds: tuple[str, ...]
     edge_kinds: tuple[str, ...]
     path_templates: tuple[PathTemplate, ...]
     rule_governance: tuple[RuleGovernance, ...]
-
-    @property
-    def profile_id(self) -> str:
-        """Return the selected profile's stable ID."""
-        return self.profile.profile_id
 
 
 PATH_TEMPLATES = (

@@ -12,7 +12,6 @@ from repo_standards.core.engine import apply_exceptions, check_baseline, core_di
 from repo_standards.core.inspection import parse_project_metadata, parse_workspace_metadata
 from repo_standards.core.migration import migration_diagnostics
 from repo_standards.core.models import (
-    AnalysisReport,
     ComponentId,
     Diagnostic,
     ExceptionRecord,
@@ -22,7 +21,7 @@ from repo_standards.core.models import (
     Manifest,
     Mode,
     PackageEvidence,
-    PolicyId,
+    PassedReport,
     Remediation,
     RepositoryId,
     RepositoryInspection,
@@ -41,9 +40,6 @@ _STRING_MAPPING = TypeAdapter(dict[str, str])
 _SINGLE_MIGRATION = b"""\
 schema_version = 2
 repository_id = "example-repository"
-policy = "example"
-policy_version = 1
-
 [[components]]
 id = "api"
 kind = "service"
@@ -100,7 +96,7 @@ def _snapshot(
             mode="git-tree",
             source_revision="a" * 40,
             tree_digest="b" * 40,
-            manifest_path=".repo-lint/repository.toml",
+            manifest_path=".repo-standards/repository.toml",
             manifest_object_id=GitObjectId("c" * 40),
             manifest_digest="d" * 64,
         ),
@@ -176,8 +172,6 @@ def _run_exception(content: bytes) -> tuple[str, ...]:
     )
     manifest = Manifest(
         repository_id=RepositoryId("example-repository"),
-        policy_id=PolicyId("example"),
-        policy_version=1,
         components=(),
         exceptions=(exception,),
     )
@@ -196,7 +190,7 @@ def _run_exception(content: bytes) -> tuple[str, ...]:
         remediation=Remediation(
             summary="Give each component one disjoint ownership root.",
             steps=("Move one component to a disjoint root.",),
-            validation=("Run repo-lint check again.",),
+            validation=("Run repo-standards check again.",),
         ),
         fingerprint=exception.fingerprint,
     )
@@ -205,14 +199,12 @@ def _run_exception(content: bytes) -> tuple[str, ...]:
 
 def _run_baseline(content: bytes) -> tuple[str, ...]:
     baseline = parse_baseline_bytes(content)
-    report = AnalysisReport(
+    report = PassedReport(
         mode=Mode.RATCHET,
         repository_id=baseline.repository_id,
         policy_id=baseline.policy_id,
         policy_version=baseline.policy_version,
         scope_digest=baseline.scope_digest,
-        completion="complete",
-        conclusion="passed",
     )
     return _rule_ids(check_baseline(report, baseline))
 
