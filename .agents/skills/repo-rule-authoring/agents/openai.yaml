@@ -1,0 +1,6 @@
+interface:
+  display_name: "Repo rule authoring"
+  short_description: "Propose and calibrate repository lint rules"
+  default_prompt: "Use $repo-rule-authoring to propose and calibrate a deterministic repository lint rule."
+policy:
+  allow_implicit_invocation: true

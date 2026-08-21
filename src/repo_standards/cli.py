@@ -40,6 +40,7 @@ from repo_standards.core.models import (
     PolicyId,
     RepositoryId,
     RepositoryInspection,
+    RepositoryPolicy,
     Rule,
     RuleId,
 )
@@ -1046,12 +1047,15 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         if mode is Mode.RATCHET and "baseline" in str(error):
             raise BaselineError(str(error)) from error
         raise
+    repository_diagnostics = (
+        policy.evaluate_repository(snapshot) if isinstance(policy, RepositoryPolicy) else ()
+    )
     report = analyze(
         snapshot.manifest,
         policy,
         mode=mode,
         as_of=_parse_date(as_of),
-        additional_diagnostics=migration_diagnostics(snapshot),
+        additional_diagnostics=migration_diagnostics(snapshot) + repository_diagnostics,
         enabled_rules=activated_rule_versions(enabled_rule_ids),
     )
     report = replace(report, input_provenance=snapshot.provenance)

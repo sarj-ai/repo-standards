@@ -13,11 +13,13 @@ GitObjectId = NewType("GitObjectId", str)
 FixtureId = NewType("FixtureId", str)
 RuleCategoryId = NewType("RuleCategoryId", str)
 RuleTopicId = NewType("RuleTopicId", str)
+AuthorityId = NewType("AuthorityId", str)
 
 
 Severity = Literal["warning", "error"]
 ExampleLanguage = Literal["json", "text", "toml", "yaml"]
 EvidenceLevel = Literal["verified", "declared", "external", "unknown"]
+DeploymentAuthorityRole = Literal["primary", "recovery"]
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 MAX_RULE_TITLE_LENGTH = 72
@@ -49,6 +51,13 @@ class RatchetClassification(StrEnum):
     NEW = "new"
     KNOWN = "known"
     RESOLVED = "resolved"
+
+
+class ConfigurationFormat(StrEnum):
+    DOTENV = "dotenv"
+    JSON = "json"
+    TOML = "toml"
+    YAML = "yaml"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,11 +99,42 @@ class ExceptionRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class DeliveryConfig:
+    authorities: tuple[DeploymentAuthority, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentationConfig:
+    entrypoints: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveConfiguration:
+    component_id: ComponentId
+    path: str
+    format: ConfigurationFormat
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentAuthority:
+    authority_id: AuthorityId
+    component_id: ComponentId
+    environment: str
+    mechanism: str
+    path: str
+    authority: DeploymentAuthorityRole
+    delegates: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Manifest:
     repository_id: RepositoryId
     components: tuple[Component, ...]
     migration_paths: tuple[MigrationPath, ...] = ()
     exceptions: tuple[ExceptionRecord, ...] = ()
+    delivery: DeliveryConfig | None = None
+    documentation: DocumentationConfig | None = None
+    active_configuration: tuple[ActiveConfiguration, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +314,14 @@ class TrackedFileEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class TrackedContentEvidence:
+    path: str
+    object_id: str
+    content_digest: str
+    content: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class PackageEvidence:
     ecosystem: str
     path: str
@@ -338,6 +386,12 @@ class RepositorySnapshot:
     baseline: Baseline | None
     inspection: RepositoryInspection
     provenance: InputProvenance
+    content: tuple[TrackedContentEvidence, ...] = ()
+
+
+@runtime_checkable
+class RepositoryPolicy(Protocol):
+    def evaluate_repository(self, snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)

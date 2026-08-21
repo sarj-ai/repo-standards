@@ -90,4 +90,26 @@ def scope_digest(manifest: Manifest) -> str:
     payload: dict[str, object] = {
         "repository_id": manifest.repository_id,
     }
+    if manifest.delivery is not None:
+        payload["delivery"] = {
+            "authorities": [
+                {
+                    "id": item.authority_id,
+                    "component_id": item.component_id,
+                    "environment": item.environment,
+                    "mechanism": item.mechanism,
+                    "path": item.path,
+                    "authority": item.authority,
+                    "delegates": list(item.delegates),
+                }
+                for item in manifest.delivery.authorities
+            ]
+        }
+    if manifest.documentation is not None:
+        payload["documentation"] = {"entrypoints": list(manifest.documentation.entrypoints)}
+    if manifest.active_configuration:
+        payload["active_configuration"] = [
+            {"component_id": item.component_id, "path": item.path, "format": item.format}
+            for item in manifest.active_configuration
+        ]
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()

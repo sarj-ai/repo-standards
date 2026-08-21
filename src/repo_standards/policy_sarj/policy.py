@@ -1,23 +1,38 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from enum import StrEnum
+import json
+from pathlib import PurePosixPath
+import posixpath
 import re
+import tomllib
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
+from urllib.parse import unquote, urlsplit
+
+from markdown_it import MarkdownIt
+from pydantic import TypeAdapter
+import yaml
 
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import (
     Component,
     ComponentId,
+    ConfigurationFormat,
+    DeploymentAuthority,
     Diagnostic,
     ExampleLanguage,
     FixtureId,
+    JSONValue,
     Manifest,
     PolicyId,
     Remediation,
+    RepositorySnapshot,
     Rule,
     RuleExamplePair,
     RuleId,
+    SourceLocation,
 )
 from repo_standards.core.taxonomy import (
     ARCHITECTURE,
@@ -60,6 +75,11 @@ class _CodeBoundary(NamedTuple):
     expected: str
 
 
+class _ScalarLocation(NamedTuple):
+    pointer: str
+    value: str
+
+
 class ComponentKind(StrEnum):
     """Closed component kinds understood by the Sarj policy."""
 
@@ -95,6 +115,28 @@ EDGE_KINDS = frozenset(
 CODE_EDGES = frozenset({"source-import", "package-dependency"})
 _MIN_CYCLE_COMPONENTS = 2
 _PATH_TOKEN = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"  # ruff: ignore[hardcoded-password-string] - regex, not a secret
+_DOCUMENTATION_ROOTS = frozenset({"adr", "architecture", "docs"})
+_PACKAGE_DOCUMENT_NAMES = frozenset(
+    {
+        "CHANGELOG.md",
+        "CODE_OF_CONDUCT.md",
+        "CONTRIBUTING.md",
+        "HISTORY.md",
+        "LICENSE.md",
+        "README.md",
+        "SECURITY.md",
+    }
+)
+_AGENT_CONTRACT_NAMES = frozenset({"AGENTS.md", "CLAUDE.md", "SKILL.md"})
+_AGENT_CONTRACT_ROOTS = (
+    (".agents", "skills"),
+    (".claude", "commands"),
+    (".claude", "skills"),
+    (".codex", "skills"),
+)
+_NON_OPERATIONAL_COMPONENT_KINDS = frozenset(
+    {"application", "contract", "foundation-service", "product-library", "shared-library", "tool"}
+)
 _COMPONENT_FIELDS: Mapping[ComponentKind, tuple[frozenset[str], frozenset[str]]] = MappingProxyType(
     {
         ComponentKind.APPLICATION: (frozenset({"product"}), frozenset({"capability"})),
@@ -327,6 +369,104 @@ RULES = (
             ),
         ),
     ),
+    Rule(
+        rule_id=RuleId("repository/artifacts/terraform-examples"),
+        version=1,
+        default_severity="error",
+        title="Do not commit example tfvars files",
+        description="Tracked filenames ending in .tfvars.example are prohibited.",
+        why="One typed variable interface prevents copied configuration from drifting.",
+        fix="Delete the example file and document validated inputs in variables.tf.",
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-artifact-no-example-tfvars",
+                title="Terraform example variables",
+                language="text",
+                before="deployments/alpha/terraform/terraform.tfvars.example",
+                after="deployments/alpha/terraform/variables.tf",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("repository/documentation/placement"),
+        version=1,
+        default_severity="error",
+        title="Keep Markdown in durable owned locations",
+        description="Tracked Markdown must have a durable documentation or tool-contract role.",
+        why="Owned documentation stays discoverable instead of becoming repository debris.",
+        fix="Move durable guidance into an approved docs root or delete transient notes.",
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-layout-markdown-placement",
+                title="Markdown placement",
+                language="text",
+                before="deployments/alpha/terraform/README.md",
+                after="docs/deployment/alpha-terraform.md",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("repository/documentation/reachability"),
+        version=1,
+        default_severity="warning",
+        title="Keep durable documentation reachable",
+        description="Declared documentation entrypoints lead to every durable Markdown page.",
+        why="Connected documentation remains discoverable and maintainable.",
+        fix="Link the page from a reachable index, declare it as an entrypoint, or remove it.",
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-documentation-reachability",
+                title="Documentation reachability",
+                language="text",
+                before="README.md -> docs/index.md\ndocs/orphan.md",
+                after="README.md -> docs/index.md -> docs/guide.md",
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("repository/configuration/unresolved-placeholders"),
+        version=1,
+        default_severity="warning",
+        title="Resolve active configuration placeholders",
+        description="Declared active configuration contains reviewed deployable values.",
+        why="Placeholder values can make configured deployments fail at runtime.",
+        fix="Replace the sentinel with reviewed configuration or remove the unused setting.",
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-configuration-unresolved-placeholder",
+                title="Active configuration placeholder",
+                language="yaml",
+                before="endpoint: change-me",
+                after="endpoint: ${SERVICE_ENDPOINT}",
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("architecture/delivery/authority"),
+        version=1,
+        default_severity="warning",
+        title="Keep one deployment authority",
+        description="Each workload and environment has one declared primary deployment writer.",
+        why="A single writer makes release and rollback ownership deterministic.",
+        fix="Retain one primary authority and classify helpers as delegates or recovery paths.",
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-delivery-duplicate-authority",
+                title="Deployment authority",
+                language="toml",
+                before="two primary production writers",
+                after="one primary plus delegates",
+                expected_severity="warning",
+            ),
+        ),
+    ),
 )
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
@@ -334,6 +474,11 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("architecture/layout/component-paths"): RuleClassification.OBJECTIVE,
         RuleId("architecture/schema/component"): RuleClassification.SCHEMA,
         RuleId("architecture/dependencies/policy"): RuleClassification.OBJECTIVE,
+        RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
+        RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
+        RuleId("repository/documentation/reachability"): RuleClassification.JUDGMENT,
+        RuleId("repository/configuration/unresolved-placeholders"): RuleClassification.JUDGMENT,
+        RuleId("architecture/delivery/authority"): RuleClassification.OPERATIONAL,
     }
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
@@ -341,6 +486,11 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("architecture/schema/component"): 10,
         RuleId("architecture/dependencies/policy"): 20,
         RuleId("architecture/layout/component-paths"): 30,
+        RuleId("repository/artifacts/terraform-examples"): 40,
+        RuleId("repository/documentation/placement"): 50,
+        RuleId("repository/documentation/reachability"): 60,
+        RuleId("repository/configuration/unresolved-placeholders"): 70,
+        RuleId("architecture/delivery/authority"): 80,
     }
 )
 _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = MappingProxyType(
@@ -360,7 +510,10 @@ _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = Mapp
 )
 
 _RULE_EVIDENCE: Mapping[RuleId, Literal["declared", "verified", "external"]] = MappingProxyType(
-    {rule.rule_id: "declared" for rule in RULES}
+    {
+        rule.rule_id: ("verified" if str(rule.rule_id).startswith("repository/") else "declared")
+        for rule in RULES
+    }
 )
 
 RULE_GOVERNANCE = tuple(
@@ -380,7 +533,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=5,
+    policy_version=7,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -475,6 +628,431 @@ def _expected_path(template: PathTemplate, component: Component) -> str:
     return "/".join(rendered)
 
 
+def _repository_artifact_diagnostics(
+    snapshot: RepositorySnapshot,
+) -> tuple[Diagnostic, ...]:
+    package_roots = frozenset(
+        _parent_path(project.path) for project in snapshot.inspection.packages
+    )
+    diagnostics: list[Diagnostic] = []
+    for tracked in snapshot.inspection.tracked_files:
+        path = tracked.path
+        component = _nearest_component(path, snapshot.manifest.components)
+        if path.casefold().endswith(".tfvars.example"):
+            diagnostics.append(
+                _repository_diagnostic(
+                    rule_id=RuleId("repository/artifacts/terraform-examples"),
+                    component=component,
+                    subject_kind="tracked-terraform-example",
+                    observed=path,
+                    expected="no tracked filename ending in .tfvars.example",
+                    message="tracked Terraform example variable file is prohibited",
+                    path=path,
+                    remediation=Remediation(
+                        summary=(
+                            "Remove the example file and keep one authoritative input contract."
+                        ),
+                        steps=(
+                            "Delete the tracked .tfvars.example file.",
+                            "Describe inputs and validation in variables.tf.",
+                        ),
+                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    ),
+                )
+            )
+        if path.casefold().endswith(".md") and not _markdown_path_is_owned(
+            path,
+            package_roots=package_roots,
+            component=component,
+        ):
+            diagnostics.append(
+                _repository_diagnostic(
+                    rule_id=RuleId("repository/documentation/placement"),
+                    component=component,
+                    subject_kind="tracked-markdown",
+                    observed=path,
+                    expected="a root, durable docs, package, generated, GitHub, or agent path",
+                    message="tracked Markdown is outside an approved owned location",
+                    path=path,
+                    remediation=Remediation(
+                        summary=(
+                            "Move durable guidance to an owned documentation surface or remove it."
+                        ),
+                        steps=(
+                            "Move durable guidance beneath docs, architecture, or adr.",
+                            (
+                                "Delete transient plans, handoffs, summaries, and "
+                                "implementation notes."
+                            ),
+                        ),
+                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    ),
+                )
+            )
+    diagnostics.extend(_documentation_reachability_diagnostics(snapshot, package_roots))
+    diagnostics.extend(_active_configuration_diagnostics(snapshot))
+    diagnostics.extend(_deployment_authority_diagnostics(snapshot))
+    return tuple(
+        sorted(diagnostics, key=lambda item: (item.path, item.rule_id, item.manifest_anchor))
+    )
+
+
+def _parent_path(path: str) -> str:
+    parent = PurePosixPath(path).parent.as_posix()
+    return "" if parent == "." else parent
+
+
+def _nearest_component(path: str, components: tuple[Component, ...]) -> Component | None:
+    owners = tuple(
+        component
+        for component in components
+        if path == component.path or path.startswith(f"{component.path}/")
+    )
+    return max(owners, key=lambda item: len(item.path), default=None)
+
+
+def _markdown_path_is_owned(
+    path: str,
+    *,
+    package_roots: frozenset[str],
+    component: Component | None,
+) -> bool:
+    pure_path = PurePosixPath(path)
+    parts = pure_path.parts
+    is_root_document = len(parts) == 1
+    is_durable_tree = parts[0] in _DOCUMENTATION_ROOTS or parts[0] == ".github"
+    is_agent_contract = pure_path.name in _AGENT_CONTRACT_NAMES or any(
+        parts[: len(root)] == root for root in _AGENT_CONTRACT_ROOTS
+    )
+    if is_root_document or is_durable_tree or is_agent_contract:
+        return True
+    parent = _parent_path(path)
+    if pure_path.name in _PACKAGE_DOCUMENT_NAMES and parent in package_roots:
+        return True
+    if component is None:
+        return False
+    if component.kind == "generated-client":
+        return True
+    return (
+        component.kind in _NON_OPERATIONAL_COMPONENT_KINDS
+        and parent == component.path
+        and pure_path.name in _PACKAGE_DOCUMENT_NAMES
+    )
+
+
+_MARKDOWN = MarkdownIt("commonmark")
+_CONFIG_VALUE: TypeAdapter[JSONValue] = TypeAdapter(JSONValue)
+_PLACEHOLDER_SENTINELS = frozenset(
+    {
+        "<replace-me>",
+        "<required>",
+        "change-me",
+        "change_me",
+        "changeme",
+        "replace-me",
+        "replace-this",
+        "replace_me",
+        "your-value-here",
+        "your_value_here",
+    }
+)
+_MIN_QUOTED_VALUE_LENGTH = 2
+_MIN_COMPETING_AUTHORITIES = 2
+
+
+def _documentation_reachability_diagnostics(  # ruff: ignore[too-many-branches]
+    snapshot: RepositorySnapshot, package_roots: frozenset[str]
+) -> tuple[Diagnostic, ...]:
+    documentation = snapshot.manifest.documentation
+    if documentation is None:
+        return ()
+    contents = {
+        item.path: item.content for item in snapshot.content if item.path.casefold().endswith(".md")
+    }
+    tracked = frozenset(item.path for item in snapshot.inspection.tracked_files)
+    eligible: set[str] = set()
+    candidates: set[str] = set()
+    seeds: set[str] = set(documentation.entrypoints)
+    for path in sorted(contents):
+        component = _nearest_component(path, snapshot.manifest.components)
+        if not _markdown_path_is_owned(path, package_roots=package_roots, component=component):
+            continue
+        pure = PurePosixPath(path)
+        parts = pure.parts
+        if (
+            parts[0] == ".github"
+            or pure.name in _AGENT_CONTRACT_NAMES
+            or any(parts[: len(root)] == root for root in _AGENT_CONTRACT_ROOTS)
+            or (component is not None and component.kind == "generated-client")
+        ):
+            continue
+        eligible.add(path)
+        parent = _parent_path(path)
+        if pure.name in _PACKAGE_DOCUMENT_NAMES and (not parent or parent in package_roots):
+            seeds.add(path)
+        else:
+            candidates.add(path)
+    graph: dict[str, set[str]] = {path: set() for path in eligible}
+    for source in sorted(eligible):
+        try:
+            tokens = _MARKDOWN.parse(contents[source].decode("utf-8"))
+        except UnicodeDecodeError:
+            ConfigurationError.fail("declared documentation must be UTF-8")
+        for parent in tokens:
+            for token in parent.children or ():
+                if token.type == "link_open":
+                    href = token.attrGet("href")
+                    target = _markdown_link_target(
+                        source, href if isinstance(href, str) else None, tracked
+                    )
+                    if target in eligible:
+                        graph[source].add(target)
+    reachable = set(seeds & eligible)
+    pending = list(reachable)
+    while pending:
+        for target in graph.get(pending.pop(), ()):
+            if target not in reachable:
+                reachable.add(target)
+                pending.append(target)
+    return tuple(
+        replace(
+            _repository_diagnostic(
+                rule_id=RuleId("repository/documentation/reachability"),
+                component=_nearest_component(path, snapshot.manifest.components),
+                subject_kind="unreachable-documentation",
+                observed=path,
+                expected="reachable from a declared documentation entrypoint",
+                message="durable Markdown is unreachable from declared documentation entrypoints",
+                path=path,
+                remediation=Remediation(
+                    summary="Connect the page to the documentation graph or remove it.",
+                    steps=("Link it from a reachable index or declare it as an entrypoint.",),
+                    validation=("Rerun repo-standards.",),
+                ),
+            ),
+            manifest_anchor=f"documentation.reachability.{path}",
+        )
+        for path in sorted(candidates - reachable)
+    )
+
+
+def _markdown_link_target(source: str, href: str | None, tracked: frozenset[str]) -> str | None:
+    if not href:
+        return None
+    parsed = urlsplit(href)
+    if parsed.scheme or parsed.netloc or not parsed.path:
+        return None
+    decoded = unquote(parsed.path)
+    raw = (
+        decoded.removeprefix("/")
+        if decoded.startswith("/")
+        else posixpath.join(_parent_path(source), decoded)
+    )
+    normalized = posixpath.normpath(raw)
+    if normalized in {".", ".."} or normalized.startswith("../"):
+        return None
+    if normalized in tracked and normalized.casefold().endswith(".md"):
+        return normalized
+    index = f"{normalized.rstrip('/')}/README.md"
+    return index if index in tracked else None
+
+
+def _active_configuration_diagnostics(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
+    content_by_path = {item.path: item.content for item in snapshot.content}
+    components = {item.component_id: item for item in snapshot.manifest.components}
+    diagnostics: list[Diagnostic] = []
+    for declaration in snapshot.manifest.active_configuration:
+        for pointer, value in _parse_active_configuration(
+            declaration.path, declaration.format, content_by_path[declaration.path]
+        ):
+            if value.strip().casefold() not in _PLACEHOLDER_SENTINELS:
+                continue
+            diagnostics.append(
+                replace(
+                    _repository_diagnostic(
+                        rule_id=RuleId("repository/configuration/unresolved-placeholders"),
+                        component=components[declaration.component_id],
+                        subject_kind="active-configuration-placeholder",
+                        observed=f"unresolved placeholder sentinel at {pointer}",
+                        expected="reviewed active configuration or a typed runtime reference",
+                        message="active configuration contains an unresolved placeholder sentinel",
+                        path=declaration.path,
+                        remediation=Remediation(
+                            summary="Replace the sentinel or remove the setting.",
+                            steps=("Use typed configuration or a secret reference.",),
+                            validation=("Rerun repo-standards.",),
+                        ),
+                    ),
+                    manifest_anchor=f"active_configuration.{declaration.path}.{pointer}",
+                    observed_value={"category": "unresolved-placeholder", "pointer": pointer},
+                )
+            )
+    return tuple(diagnostics)
+
+
+def _parse_active_configuration(
+    path: str, format_name: ConfigurationFormat, content: bytes
+) -> tuple[tuple[str, str], ...]:
+    try:
+        text = content.decode("utf-8")
+        decoded = _decode_active_configuration(format_name, text)
+        value = _CONFIG_VALUE.validate_python(decoded, strict=True)
+    except (
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+        tomllib.TOMLDecodeError,
+        yaml.YAMLError,
+    ):
+        ConfigurationError.fail(f"cannot parse declared active configuration: {path}")
+    return tuple(_string_scalars(value))
+
+
+def _decode_active_configuration(format_name: ConfigurationFormat, text: str) -> object:
+    match format_name:
+        case ConfigurationFormat.JSON:
+            return json.loads(  # pyright: ignore[reportAny]
+                text, object_pairs_hook=_unique_json_mapping
+            )
+        case ConfigurationFormat.TOML:
+            return tomllib.loads(text)
+        case ConfigurationFormat.YAML:
+            return yaml.safe_load(text)  # pyright: ignore[reportAny]
+        case ConfigurationFormat.DOTENV:
+            return _parse_dotenv(text)
+
+
+def _unique_json_mapping(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            ConfigurationError.fail("active JSON configuration contains a duplicate key")
+        result[key] = value
+    return result
+
+
+def _parse_dotenv(text: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, value = line.partition("=")
+        key = key.strip()
+        if (
+            separator != "="
+            or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None
+            or key in result
+        ):
+            ConfigurationError.fail(
+                f"active dotenv configuration has an invalid assignment at line {number}"
+            )
+        value = value.strip()
+        if len(value) >= _MIN_QUOTED_VALUE_LENGTH and value[0] in {'"', "'"}:
+            closing = value.find(value[0], 1)
+            if closing < 1 or (
+                value[closing + 1 :].strip() and not value[closing + 1 :].strip().startswith("#")
+            ):
+                ConfigurationError.fail(
+                    f"active dotenv configuration has an invalid value at line {number}"
+                )
+            value = value[1:closing]
+        elif " #" in value:
+            value = value.partition(" #")[0].rstrip()
+        result[key] = value
+    return result
+
+
+def _string_scalars(value: JSONValue, pointer: str = "$") -> list[_ScalarLocation]:
+    match value:
+        case str():
+            return [_ScalarLocation(pointer, value)]
+        case dict():
+            return [
+                item
+                for key in sorted(value, key=str)
+                for item in _string_scalars(
+                    value[key], f"{pointer}/{str(key).replace('~', '~0').replace('/', '~1')}"
+                )
+            ]
+        case list():
+            return [
+                item
+                for index, child in enumerate(value)
+                for item in _string_scalars(child, f"{pointer}/{index}")
+            ]
+        case _:
+            return []
+
+
+def _deployment_authority_diagnostics(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
+    if snapshot.manifest.delivery is None:
+        return ()
+    groups: dict[tuple[ComponentId, str], list[DeploymentAuthority]] = {}
+    for authority in snapshot.manifest.delivery.authorities:
+        if authority.authority == "primary":
+            groups.setdefault((authority.component_id, authority.environment), []).append(authority)
+    diagnostics: list[Diagnostic] = []
+    for (component_id, environment), values in sorted(groups.items()):
+        if len(values) < _MIN_COMPETING_AUTHORITIES:
+            continue
+        authorities = sorted(values, key=lambda item: item.authority_id)
+        first = authorities[0]
+        diagnostics.append(
+            replace(
+                _diagnostic(
+                    rule_id=RuleId("architecture/delivery/authority"),
+                    component_id=component_id,
+                    subject_kind="deployment-authority",
+                    observed=", ".join(item.authority_id for item in authorities),
+                    expected=f"one primary authority for {component_id} in {environment}",
+                    message=(
+                        "multiple primary deployment authorities target one workload environment"
+                    ),
+                    path=first.path,
+                    anchor=f"delivery.authorities.{component_id}.{environment}",
+                    remediation=_remediation(
+                        "Retain one primary deployment authority.",
+                        "Move helpers to delegates or recovery.",
+                    ),
+                ),
+                related_locations=tuple(SourceLocation(path=item.path) for item in authorities[1:]),
+            )
+        )
+    return tuple(diagnostics)
+
+
+def _repository_diagnostic(  # ruff: ignore[too-many-arguments] - fields are explicit
+    *,
+    rule_id: RuleId,
+    component: Component | None,
+    subject_kind: str,
+    observed: str,
+    expected: str,
+    message: str,
+    path: str,
+    remediation: Remediation,
+) -> Diagnostic:
+    rule = next(item for item in RULES if item.rule_id == rule_id)
+    component_id = component.component_id if component is not None else ComponentId("repository")
+    return Diagnostic(
+        rule_id=rule.rule_id,
+        rule_version=rule.version,
+        severity=rule.severity,
+        evidence_level="verified",
+        component_id=component_id,
+        subject_kind=subject_kind,
+        observed=observed,
+        expected=expected,
+        message=message,
+        path=path,
+        manifest_anchor=f"tracked_files.{path}",
+        remediation=remediation,
+    )
+
+
 def _component_field_value(
     component: Component, field: Literal["product", "capability"]
 ) -> str | None:
@@ -495,6 +1073,10 @@ class SarjPolicy:
     @staticmethod
     def rules() -> tuple[Rule, ...]:
         return RULES
+
+    @staticmethod
+    def evaluate_repository(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
+        return _repository_artifact_diagnostics(snapshot)
 
     @staticmethod
     def evaluate(manifest: Manifest) -> tuple[Diagnostic, ...]:
