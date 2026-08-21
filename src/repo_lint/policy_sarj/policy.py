@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from enum import StrEnum
 import re
 from types import MappingProxyType
@@ -19,19 +18,12 @@ from repo_lint.core.models import (
     Rule,
     RuleExamplePair,
     RuleId,
-    RuleRemediation,
 )
 from repo_lint.core.taxonomy import (
     ARCHITECTURE,
     COMPONENT_SCHEMA,
-    DELIVERY,
     DEPENDENCY_BOUNDARIES,
-    GITHUB_ACTIONS,
-    NAMING,
-    RELEASE_FLOW,
-    REPOSITORY_GOVERNANCE,
     REPOSITORY_LAYOUT,
-    REUSE,
     taxonomy,
 )
 
@@ -172,781 +164,169 @@ _ALLOWED_CODE_TARGETS: Mapping[ComponentKind, frozenset[ComponentKind]] = Mappin
     }
 )
 
-_WARNING_EXAMPLE_FIXTURES = frozenset(
-    {
-        "sarj-graph-code-cycle",
-        "sarj-reuse-vague-capability",
-        "sarj-naming-application-role",
-        "sarj-github-actions-sha-pinning",
-        "sarj-github-explicit-permissions",
-        "sarj-github-job-timeouts",
-        "sarj-github-immutable-installs",
-        "sarj-github-vulnerability-gate",
-        "sarj-github-merge-queue-trigger",
-        "sarj-github-repository-governance",
-    }
-)
 
-
-def _example(
-    fixture_id: str, language: ExampleLanguage, flagged: str, passes: str
-) -> tuple[RuleExamplePair, ...]:
-    title_source = fixture_id.removeprefix("sarj-").partition("-")[2]
-    title = " ".join(
-        {"github": "GitHub", "sha": "SHA", "id": "ID"}.get(word, word.title())
-        for word in title_source.split("-")
-    )
-    return (
-        RuleExamplePair(
-            fixture_id=FixtureId(fixture_id),
-            language=language,
-            flagged=flagged,
-            passes=passes,
-            title=title,
-            severity="warning" if fixture_id in _WARNING_EXAMPLE_FIXTURES else "error",
-        ),
+def _example(  # ruff: ignore[too-many-arguments, too-many-positional-arguments] - compact data
+    example_id: str,
+    title: str,
+    language: ExampleLanguage,
+    before: str,
+    after: str,
+    expected_severity: Literal["warning", "error"] = "error",
+) -> RuleExamplePair:
+    return RuleExamplePair(
+        example_id=FixtureId(example_id),
+        title=title,
+        language=language,
+        before=before,
+        after=after,
+        expected_severity=expected_severity,
     )
 
 
-def _rule_remediation(summary: str, *steps: str) -> RuleRemediation:
-    return RuleRemediation(
-        summary=summary,
-        steps=steps,
-        validation=("Run repo-standards again and confirm the rule passes.",),
-    )
-
-
-_RULE_PARTS = (
+RULES = (
     Rule(
-        rule_id=RuleId("sarj/layout/component-path"),
+        rule_id=RuleId("architecture/dependencies/policy"),
+        version=1,
+        default_severity="error",
+        title="Enforce dependency boundaries",
+        description="Every dependency edge is legal, ownership-safe, and acyclic.",
+        why="One dependency policy keeps ownership, release, and build direction explicit.",
+        fix="Remove the edge or replace it with an allowed dependency or runtime contract.",
+        taxonomy=taxonomy(ARCHITECTURE, DEPENDENCY_BOUNDARIES),
+        examples=(
+            _example(
+                "sarj-graph-edge-endpoints",
+                "Edge endpoints",
+                "text",
+                "library --implements-contract--> application",
+                "application --implements-contract--> contract",
+            ),
+            _example(
+                "sarj-graph-application-dependency",
+                "Application dependency",
+                "text",
+                "application A --source-import--> application B",
+                "application A --package-dependency--> product library B",
+            ),
+            _example(
+                "sarj-graph-library-application-dependency",
+                "Library application dependency",
+                "text",
+                "product library --source-import--> application",
+                "application --package-dependency--> product library",
+            ),
+            _example(
+                "sarj-graph-self-dependency",
+                "Self dependency",
+                "text",
+                "component A --source-import--> component A",
+                "component A has no edge to itself",
+            ),
+            _example(
+                "sarj-graph-cross-product-dependency",
+                "Cross-product dependency",
+                "text",
+                "beta library --source-import--> alpha library",
+                "beta application --runtime-call--> alpha API",
+            ),
+            _example(
+                "sarj-graph-shared-product-dependency",
+                "Shared-product dependency",
+                "text",
+                "shared library --package-dependency--> beta library",
+                "beta application --package-dependency--> shared library",
+            ),
+            _example(
+                "sarj-graph-contract-implementation-dependency",
+                "Contract implementation dependency",
+                "text",
+                "contract --source-import--> product library",
+                "product contract --package-dependency--> shared contract",
+            ),
+            _example(
+                "sarj-graph-disallowed-code-dependency",
+                "Disallowed code dependency",
+                "text",
+                "migration set --source-import--> contract",
+                "migration set --package-dependency--> shared library",
+            ),
+            _example(
+                "sarj-graph-code-cycle",
+                "Code cycle",
+                "text",
+                "library A -> library B -> library A",
+                "application -> product library -> shared library",
+                "warning",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("architecture/layout/component-paths"),
         version=1,
         default_severity="error",
         title="Use canonical component paths",
-        summary="Component paths match their declared ownership kind.",
-        detects="A non-operational component path does not match its kind and ownership fields.",
-        impact=(
-            "Canonical paths make ownership, impact analysis, and merge preflight deterministic."
-        ),
+        description="Every component has one canonical ownership root.",
+        why="Canonical disjoint roots make ownership and impact analysis deterministic.",
+        fix="Move the component to its canonical path and keep ownership roots disjoint.",
         taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
-        remediation=_rule_remediation(
-            "Move the component through an explicit path-only migration.",
-            "Add an old-to-new migration path declaration.",
-            "Move only this component and update path-sensitive references.",
-        ),
-        examples=_example(
-            "sarj-layout-component-path",
-            "toml",
-            "path = 'python/agent'",
-            "path = 'applications/alpha/agent'",
-        ),
-        evidence_required=("component kind, ownership fields, and declared path",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/layout/operational-path"),
-        version=1,
-        default_severity="warning",
-        title="Use canonical operational paths",
-        summary="Operational components use canonical deployment paths.",
-        detects="An operational component path does not match its kind and ownership fields.",
-        impact=(
-            "Operational configuration moves can affect build context, state, triggers, and "
-            "runtime behavior, so target placement remains advisory until verified."
-        ),
-        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
-        remediation=_rule_remediation(
-            "Move the component through an explicit path-only migration.",
-            "Preserve state, build context, triggers, and runtime identity during the move.",
-        ),
-        examples=_example(
-            "sarj-layout-operational-path",
-            "toml",
-            "path = 'iac/alpha'",
-            "path = 'deployments/alpha/terraform'",
-        ),
-        evidence_required=("operational component kind, ownership fields, and path",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/schema/component-fields"),
-        version=1,
-        default_severity="error",
-        title="Match fields to component kind",
-        summary="Each component kind has exact required and forbidden identity fields.",
-        detects="A component omits a required identity field or declares a forbidden field.",
-        impact=(
-            "Contradictory ownership fields make path and component-name derivation ambiguous."
-        ),
-        taxonomy=taxonomy(ARCHITECTURE, COMPONENT_SCHEMA),
-        remediation=_rule_remediation(
-            "Make the component fields match the selected component kind.",
-            "Add required identity fields and remove fields forbidden for this kind.",
-        ),
-        examples=_example(
-            "sarj-schema-component-fields",
-            "toml",
-            "kind = 'shared-library'\nproduct = 'alpha'",
-            "kind = 'shared-library'\ncapability = 'request-signing'",
-        ),
-        evidence_required=("component kind, product, and capability fields",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/graph/edge-endpoints"),
-        version=1,
-        default_severity="error",
-        title="Use compatible edge endpoints",
-        summary="Constrained non-code edges connect compatible component kinds.",
-        detects="A constrained non-code edge has an incompatible source or target kind.",
-        impact="An edge whose endpoints contradict its meaning is invalid dependency evidence.",
-        taxonomy=taxonomy(ARCHITECTURE, DEPENDENCY_BOUNDARIES),
-        remediation=_rule_remediation(
-            "Replace implementation coupling with an owned library or runtime contract.",
-            "Correct the edge type or connect component kinds allowed for that edge.",
-        ),
-        examples=_example(
-            "sarj-graph-edge-endpoints",
-            "text",
-            "library --implements-contract--> application",
-            "application --implements-contract--> contract",
-        ),
-        evidence_required=("declared edge kind and endpoint component kinds",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/graph/application-imports-application"),
-        version=1,
-        default_severity="error",
-        title="Keep applications independent",
-        summary="Applications do not depend on another application's implementation.",
-        detects="An application has a code dependency on another application.",
-        impact="Application-to-application coupling prevents independent release and rollback.",
-        taxonomy=taxonomy(ARCHITECTURE, DEPENDENCY_BOUNDARIES),
-        remediation=_rule_remediation(
-            "Replace implementation coupling with an owned library or runtime contract.",
-            "Move reusable code into a product library or use a runtime-call edge.",
-        ),
-        examples=_example(
-            "sarj-graph-application-dependency",
-            "text",
-            "application A --source-import--> application B",
-            "application A --package-dependency--> product library B",
-        ),
-        evidence_required=("component kinds and declared code dependencies",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/graph/library-imports-application"),
-        version=1,
-        default_severity="error",
-        title="Keep libraries below applications",
-        summary="Libraries do not depend on application implementation.",
-        detects="A product or shared library has a code dependency on an application.",
-        impact=("Reusable code must remain below deployable applications in the dependency graph."),
-        taxonomy=taxonomy(ARCHITECTURE, DEPENDENCY_BOUNDARIES),
-        remediation=_rule_remediation(
-            "Replace implementation coupling with an owned library or runtime contract.",
-            "Reverse the dependency or move the shared contract below the application.",
-        ),
-        examples=_example(
-            "sarj-graph-library-application-dependency",
-            "text",
-            "product library --source-import--> application",
-            "application --package-dependency--> product library",
-        ),
-        evidence_required=("component kinds and declared code dependencies",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/graph/self-dependency"),
-        version=1,
-        default_severity="error",
-        title="Remove self-dependencies",
-        summary="Components do not declare dependencies on themselves.",
-        detects="A component declares a code dependency on its own component ID.",
-        impact="Self edges are invalid graph evidence and can hide resolver mistakes.",
-        taxonomy=taxonomy(ARCHITECTURE, DEPENDENCY_BOUNDARIES),
-        remediation=_rule_remediation(
-            "Replace implementation coupling with an owned library or runtime contract.",
-            "Remove the redundant self edge.",
-        ),
-        examples=_example(
-            "sarj-graph-self-dependency",
-            "text",
-            "component A --source-import--> component A",
-            "component A has no edge to itself",
-        ),
-        evidence_required=("component IDs and declared code dependencies",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/graph/cross-product-import"),
-        version=1,
-        default_severity="error",
-        title="Avoid cross-product code dependencies",
-        summary="Product code does not depend on another product's implementation.",
-        detects="A code dependency crosses two distinct declared product IDs.",
-        impact="Cross-product implementation coupling hides ownership and release dependencies.",
-        taxonomy=taxonomy(ARCHITECTURE, DEPENDENCY_BOUNDARIES),
-        remediation=_rule_remediation(
-            "Replace implementation coupling with an owned library or runtime contract.",
-            "Use a shared contract or a runtime-call edge across products.",
-        ),
-        examples=_example(
-            "sarj-graph-cross-product-dependency",
-            "text",
-            "beta library --source-import--> alpha library",
-            "beta application --runtime-call--> alpha API",
-        ),
-        evidence_required=("product ownership and declared code dependencies",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/graph/shared-imports-product"),
-        version=1,
-        default_severity="error",
-        title="Keep shared code product-neutral",
-        summary="Shared components do not depend on product implementation.",
-        detects="A shared component has a code dependency on a product-owned component.",
-        impact="A shared dependency on one product reverses the intended ownership direction.",
-        taxonomy=taxonomy(ARCHITECTURE, DEPENDENCY_BOUNDARIES),
-        remediation=_rule_remediation(
-            "Replace implementation coupling with an owned library or runtime contract.",
-            "Move the dependency behind a shared contract or reverse its direction.",
-        ),
-        examples=_example(
-            "sarj-graph-shared-product-dependency",
-            "text",
-            "shared library --package-dependency--> beta library",
-            "beta application --package-dependency--> shared library",
-        ),
-        evidence_required=("ownership and declared code dependencies",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/graph/contract-imports-implementation"),
-        version=1,
-        default_severity="error",
-        title="Keep contracts implementation-free",
-        summary="Contracts depend only on other contracts.",
-        detects="A contract has a code dependency on a non-contract component.",
-        impact="A contract coupled to implementation cannot remain a stable boundary.",
-        taxonomy=taxonomy(ARCHITECTURE, DEPENDENCY_BOUNDARIES),
-        remediation=_rule_remediation(
-            "Replace implementation coupling with an owned library or runtime contract.",
-            "Keep contract dependencies limited to contract components.",
-        ),
-        examples=_example(
-            "sarj-graph-contract-implementation-dependency",
-            "text",
-            "contract --source-import--> product library",
-            "product contract --package-dependency--> shared contract",
-        ),
-        evidence_required=("component kinds and declared code dependencies",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/graph/disallowed-code-dependency"),
-        version=1,
-        default_severity="error",
-        title="Follow the code dependency matrix",
-        summary="Production code dependencies follow the closed component-kind matrix.",
-        detects="A code dependency targets a component kind not allowed for its source kind.",
-        impact="The closed matrix keeps reusable and deployable layers independently releasable.",
-        taxonomy=taxonomy(ARCHITECTURE, DEPENDENCY_BOUNDARIES),
-        remediation=_rule_remediation(
-            "Replace implementation coupling with an owned library or runtime contract.",
-            "Target an allowed library, contract, or generated-client kind.",
-        ),
-        examples=_example(
-            "sarj-graph-disallowed-code-dependency",
-            "text",
-            "migration set --source-import--> contract",
-            "migration set --package-dependency--> shared library",
-        ),
-        evidence_required=("source and target kinds plus declared code dependency",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/graph/code-cycle"),
-        version=1,
-        default_severity="warning",
-        title="Keep code dependencies acyclic",
-        summary="Boundary-clean production code dependencies are acyclic.",
-        detects="Accepted production code dependencies form a cycle of two or more components.",
-        impact=(
-            "Cycles often conceal a missing contract, but remediation requires design judgment."
-        ),
-        taxonomy=taxonomy(ARCHITECTURE, DEPENDENCY_BOUNDARIES),
-        remediation=_rule_remediation(
-            "Break the cycle at a stable semantic boundary.",
-            "Move the smallest shared contract below the cycle.",
-        ),
-        examples=_example(
-            "sarj-graph-code-cycle",
-            "text",
-            "library A -> library B -> library A",
-            "application -> product library -> shared library",
-        ),
-        evidence_required=("boundary-clean production code dependency graph",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/reuse/vague-capability"),
-        version=1,
-        default_severity="warning",
-        title="Use specific capability names",
-        summary="Reusable libraries avoid controlled generic capability names.",
-        detects=(
-            "A reusable library uses common, core, helpers, shared, or utils as its capability."
-        ),
-        impact="Generic names become dependency magnets and conceal ownership.",
-        taxonomy=taxonomy(ARCHITECTURE, REUSE),
-        remediation=_rule_remediation(
-            "Name the stable capability rather than its generic utility role.",
-            "Choose the cohesive public contract as the capability name.",
-        ),
-        examples=_example(
-            "sarj-reuse-vague-capability",
-            "toml",
-            "capability = 'utils'",
-            "capability = 'request-signing'",
-        ),
-        evidence_required=("reusable component kind and capability",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/naming/application-role"),
-        version=1,
-        default_severity="warning",
-        title="Name the application role",
-        summary="Application names end in a controlled deployable role.",
-        detects="A canonically placed application name lacks an api, agent, worker, or web suffix.",
-        impact=("Role-bearing names make deployment ownership and repository navigation explicit."),
-        taxonomy=taxonomy(ARCHITECTURE, NAMING),
-        remediation=_rule_remediation(
-            "Name the deployable by its role or domain and role.",
-            "Use api, agent, worker, or web as the final role token.",
-        ),
-        examples=_example(
-            "sarj-naming-application-role",
-            "text",
-            "applications/alpha/integration",
-            "applications/alpha/integration-api",
-        ),
-        evidence_required=("canonical application path",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/naming/component-id"),
-        version=1,
-        default_severity="error",
-        title="Align IDs with ownership",
-        summary="Stable component IDs include their declared ownership namespace.",
-        detects="A valid component ID does not start with its product or shared ownership prefix.",
-        impact=(
-            "An ID that disagrees with product ownership makes diagnostics and "
-            "migrations ambiguous."
-        ),
-        taxonomy=taxonomy(ARCHITECTURE, NAMING),
-        remediation=_rule_remediation(
-            "Use the declared ownership namespace in the stable component ID.",
-            "Update exact manifest references and migration evidence together.",
-        ),
-        examples=_example(
-            "sarj-naming-component-id",
-            "toml",
-            "id = 'beta.agent'\nproduct = 'alpha'",
-            "id = 'alpha.agent'\nproduct = 'alpha'",
-        ),
-        evidence_required=("component kind, ownership, and stable ID",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/naming/capability-token"),
-        version=1,
-        default_severity="error",
-        title="Use kebab-case capabilities",
-        summary="Capabilities use one lowercase ASCII kebab-case token.",
-        detects="A capability is not one lowercase ASCII kebab-case token.",
-        impact="One canonical token derives stable paths without ecosystem-specific ambiguity.",
-        taxonomy=taxonomy(ARCHITECTURE, NAMING),
-        remediation=_rule_remediation(
-            "Choose one lowercase ASCII kebab-case capability token.",
-            "Keep distribution, import, and runtime aliases separate from this identity.",
-        ),
-        examples=_example(
-            "sarj-naming-capability-token",
-            "toml",
-            "capability = 'request.signing'",
-            "capability = 'request-signing'",
-        ),
-        evidence_required=("declared component capability",),
-    ),
-    Rule(
-        rule_id=RuleId("sarj/delivery/hotfix-backsync"),
-        version=1,
-        default_severity="error",
-        title="Back-sync production hotfixes",
-        summary="Production hotfixes automatically flow through preview to development.",
-        detects=(
-            "An active main, preview, and development chain lacks a guarded pull-request "
-            "back-sync edge or its required repository controls."
-        ),
-        impact="A later promotion can reintroduce a production fix that was not back-synced.",
-        taxonomy=taxonomy(DELIVERY, RELEASE_FLOW),
-        remediation=_rule_remediation(
-            "Add idempotent PR-based backsync workflows and protect every long-lived branch.",
-            "Implement guarded main-to-preview and preview-to-development pull requests.",
-            "Require CI and auto-merge only the verified source commit.",
-        ),
-        examples=_example(
-            "sarj-delivery-hotfix-backsync",
-            "text",
-            "main -> preview; preview -/-> dev",
-            "main -> preview -> dev through guarded pull requests and required CI",
-        ),
-        evidence_required=(
-            "all three delivery branches exist or are explicitly declared",
-            "both synchronization edges have guarded pull-request workflow structure",
-            "live repository settings expose protected branches and required CI",
-        ),
-        non_goals=(
-            "creating branches or workflows",
-            "merging pull requests",
-            "automatically resolving merge conflicts",
-        ),
-        upstream=("GitHub Actions", "GitHub branch protection", "GitHub rulesets"),
-        references=(
-            "https://docs.github.com/en/actions/concepts/security/github_token",
-            "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets",
-        ),
-        precedence="Evaluate after delivery branch discovery and before advisory CI/CD rules.",
-    ),
-    Rule(
-        rule_id=RuleId("sarj/github/actions-sha-pinning"),
-        version=1,
-        default_severity="warning",
-        title="Pin workflow dependencies",
-        summary="Non-local workflow dependencies are pinned to immutable digests.",
-        detects=(
-            "A non-local uses reference is not a full 40-character Action SHA or sha256 "
-            "container digest."
-        ),
-        impact="A mutable tag can change trusted workflow code without repository review.",
-        taxonomy=taxonomy(DELIVERY, GITHUB_ACTIONS),
-        remediation=_rule_remediation(
-            "Replace the mutable reference with a reviewed immutable digest.",
-            "Pin an Action to its full commit SHA or a container to its sha256 digest.",
-        ),
-        examples=_example(
-            "sarj-github-actions-sha-pinning",
-            "yaml",
-            "uses: third-party/action@v2",
-            "uses: third-party/action@0123456789abcdef0123456789abcdef01234567 # v2",
-        ),
-        evidence_required=("tracked workflow action references from the selected Git tree",),
-        non_goals=("executing actions", "automatically updating action references"),
-        upstream=("GitHub secure use reference",),
-        references=(
-            "https://docs.github.com/en/actions/how-tos/security-for-github-actions/security-guides/security-hardening-for-github-actions",
-        ),
-        precedence="Evaluate tracked workflow references independently of GitHub runtime state.",
-        maturity="beta",
-    ),
-    Rule(
-        rule_id=RuleId("sarj/github/explicit-permissions"),
-        version=1,
-        default_severity="warning",
-        title="Declare Actions permissions",
-        summary="GitHub workflows declare token permissions explicitly.",
-        detects=(
-            "A workflow has neither top-level permissions nor explicit permissions on every job."
-        ),
-        impact="Jobs inherit repository defaults that may grant more token access than intended.",
-        taxonomy=taxonomy(DELIVERY, GITHUB_ACTIONS),
-        remediation=_rule_remediation(
-            "Declare permissions at workflow or job scope.",
-            "Add top-level permissions or declare permissions on every job.",
-        ),
-        examples=_example(
-            "sarj-github-explicit-permissions",
-            "yaml",
-            "jobs:\n  test:\n    timeout-minutes: 15\n    steps:\n      - run: echo ok",
-            (
-                "permissions:\n  contents: read\njobs:\n  test:\n"
-                "    timeout-minutes: 15\n    steps:\n      - run: echo ok"
+        examples=(
+            _example(
+                "sarj-layout-component-path",
+                "Component path",
+                "toml",
+                "path = 'python/agent'",
+                "path = 'applications/alpha/agent'",
+            ),
+            _example(
+                "sarj-layout-operational-path",
+                "Operational path",
+                "toml",
+                "path = 'iac/alpha'",
+                "path = 'deployments/alpha/terraform'",
+            ),
+            _example(
+                "sarj-layout-overlapping-roots",
+                "Overlapping component roots",
+                "text",
+                "services/payments\nservices/payments/worker",
+                "services/payments\nservices/worker",
             ),
         ),
-        evidence_required=("parsed workflow and job permission declarations",),
-        non_goals=("proving every declared permission is semantically minimal",),
-        upstream=("GitHub Actions workflow syntax",),
-        precedence="Evaluate each parsed workflow independently.",
-        maturity="beta",
     ),
     Rule(
-        rule_id=RuleId("sarj/github/job-timeouts"),
+        rule_id=RuleId("architecture/schema/component"),
         version=1,
-        default_severity="warning",
-        title="Set job timeouts",
-        summary="Executable GitHub Actions jobs have explicit time bounds.",
-        detects="An executable job omits timeout-minutes; reusable-workflow call jobs are exempt.",
-        impact="A hung job can consume runner capacity indefinitely.",
-        taxonomy=taxonomy(DELIVERY, GITHUB_ACTIONS),
-        remediation=_rule_remediation(
-            "Bound every executable job with timeout-minutes.",
-            "Choose a reviewed upper bound for each executable job.",
+        default_severity="error",
+        title="Keep component identity consistent",
+        description="Component kind, ownership, ID, and capability token agree.",
+        why="Trustworthy component identity prevents cascading layout and dependency mistakes.",
+        fix="Add required fields, remove forbidden fields, and align IDs and capability tokens.",
+        taxonomy=taxonomy(ARCHITECTURE, COMPONENT_SCHEMA),
+        examples=(
+            _example(
+                "sarj-schema-component-fields",
+                "Component fields",
+                "toml",
+                "kind = 'shared-library'\nproduct = 'alpha'",
+                "kind = 'shared-library'\ncapability = 'request-signing'",
+            ),
+            _example(
+                "sarj-naming-capability-token",
+                "Capability token",
+                "toml",
+                "capability = 'request.signing'",
+                "capability = 'request-signing'",
+            ),
+            _example(
+                "sarj-naming-component-id",
+                "Component ID",
+                "toml",
+                "id = 'beta.agent'\nproduct = 'alpha'",
+                "id = 'alpha.agent'\nproduct = 'alpha'",
+            ),
         ),
-        examples=_example(
-            "sarj-github-job-timeouts",
-            "yaml",
-            "jobs:\n  test:\n    steps:\n      - run: echo ok",
-            "jobs:\n  test:\n    timeout-minutes: 15\n    steps:\n      - run: echo ok",
-        ),
-        evidence_required=("parsed executable job definitions",),
-        non_goals=("requiring timeout-minutes on reusable-workflow call jobs",),
-        upstream=("GitHub Actions workflow syntax",),
-        precedence="Evaluate after safe workflow parsing.",
-        maturity="beta",
-    ),
-    Rule(
-        rule_id=RuleId("sarj/github/immutable-installs"),
-        version=1,
-        default_severity="warning",
-        title="Use lock-enforcing installs",
-        summary="Recognized CI installs use lock-enforcing modes.",
-        detects=(
-            "A recognized uv, pnpm, Yarn, or npm install command does not use its immutable mode."
-        ),
-        impact="CI can resolve dependencies differently from the reviewed lockfile.",
-        taxonomy=taxonomy(DELIVERY, GITHUB_ACTIONS),
-        remediation=_rule_remediation(
-            "Use the package manager's lock-enforcing install mode in CI.",
-            "Use uv --locked, pnpm --frozen-lockfile, Yarn --immutable, or npm ci.",
-        ),
-        examples=_example(
-            "sarj-github-immutable-installs",
-            "yaml",
-            "run: uv sync",
-            "run: uv sync --locked",
-        ),
-        evidence_required=("recognized dependency install commands in executable workflow steps",),
-        non_goals=("executing package managers", "requiring lockfiles for global tool installs"),
-        upstream=("uv", "npm", "pnpm", "Yarn"),
-        precedence="Evaluate only recognized direct CI install commands.",
-        maturity="beta",
-    ),
-    Rule(
-        rule_id=RuleId("sarj/github/vulnerability-gate"),
-        version=1,
-        default_severity="warning",
-        title="Keep scanner failures blocking",
-        summary="Recognized vulnerability scanner failures propagate to CI.",
-        detects=("A recognized scanner runs with continue-on-error or shell failure suppression."),
-        impact="CI can pass while the scanner reports vulnerabilities or fails to run correctly.",
-        taxonomy=taxonomy(DELIVERY, GITHUB_ACTIONS),
-        remediation=_rule_remediation(
-            "Remove failure suppression from the vulnerability scanning gate.",
-            "Let the scanner's nonzero exit status fail its workflow job.",
-        ),
-        examples=_example(
-            "sarj-github-vulnerability-gate",
-            "yaml",
-            "run: pip-audit || true",
-            "run: pip-audit",
-        ),
-        evidence_required=("workflow steps invoking a recognized vulnerability scanner",),
-        non_goals=("choosing vulnerability policy", "calling vulnerability alert APIs"),
-        upstream=("pip-audit", "OSV Scanner", "npm audit", "pnpm audit"),
-        precedence="Evaluate only workflows that invoke a recognized vulnerability scanner.",
-        maturity="beta",
-    ),
-    Rule(
-        rule_id=RuleId("sarj/github/merge-queue-trigger"),
-        version=1,
-        default_severity="warning",
-        title="Handle merge-group events",
-        summary="An inspected workflow handles merge-group events when a merge queue is active.",
-        detects=(
-            "An active branch merge queue exists, but no inspected workflow declares merge_group."
-        ),
-        impact="Required checks may never run for queued merge groups.",
-        taxonomy=taxonomy(DELIVERY, GITHUB_ACTIONS),
-        remediation=_rule_remediation(
-            "Add merge_group to the required CI workflow triggers.",
-            "Run the same required checks for pull_request and merge_group events.",
-        ),
-        examples=_example(
-            "sarj-github-merge-queue-trigger",
-            "yaml",
-            "on: [pull_request]",
-            "on: [pull_request, merge_group]",
-        ),
-        evidence_required=("active branch ruleset evidence", "parsed workflow triggers"),
-        non_goals=("enabling a merge queue",),
-        upstream=("GitHub merge queues", "GitHub Actions"),
-        references=(
-            "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue",
-        ),
-        precedence="Evaluate only when active merge-queue evidence is complete.",
-        maturity="beta",
-    ),
-    Rule(
-        rule_id=RuleId("sarj/github/repository-governance"),
-        version=1,
-        default_severity="warning",
-        title="Configure repository safeguards",
-        summary="Repositories provide baseline ownership, maintenance, and review safeguards.",
-        detects=(
-            "CODEOWNERS, dependency updates, long-lived branch protection, or read-only default "
-            "Actions permissions are missing."
-        ),
-        impact=(
-            "Protected long-lived branches, ownership metadata, dependency-update automation, "
-            "and read-only Actions defaults provide a reviewable governance baseline."
-        ),
-        taxonomy=taxonomy(DELIVERY, REPOSITORY_GOVERNANCE),
-        remediation=_rule_remediation(
-            "Add the missing ownership, maintenance, and GitHub repository controls.",
-            "Add each missing file or repository setting named by the diagnostic.",
-        ),
-        examples=_example(
-            "sarj-github-repository-governance",
-            "text",
-            "protected branches; Dependabot; no CODEOWNERS; read-only Actions",
-            "protected branches; Dependabot; CODEOWNERS; read-only Actions",
-        ),
-        evidence_required=(
-            "live branch-protection and Actions-default settings",
-            "tracked CODEOWNERS and dependency-updater file presence",
-        ),
-        non_goals=("changing GitHub settings", "opening dependency update pull requests"),
-        upstream=("GitHub rulesets", "CODEOWNERS", "Dependabot"),
-        references=(
-            "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners",
-            "https://docs.github.com/en/code-security/dependabot",
-        ),
-        precedence="Evaluate after branch discovery; unavailable external facts are inconclusive.",
-        maturity="beta",
     ),
 )
-
-
-def _consolidated_rules(parts: tuple[Rule, ...]) -> tuple[Rule, ...]:
-    by_id = {str(rule.rule_id): rule for rule in parts}
-    groups = (
-        (
-            "architecture/layout/component-paths",
-            ("sarj/layout/component-path", "sarj/layout/operational-path"),
-            "Use canonical component paths",
-            "Every component has one canonical ownership root.",
-            "Reports a component path that violates its kind template or overlaps another root.",
-            "Canonical disjoint roots make ownership and impact analysis deterministic.",
-            "error",
-        ),
-        (
-            "architecture/schema/component",
-            (
-                "sarj/schema/component-fields",
-                "sarj/naming/capability-token",
-                "sarj/naming/component-id",
-            ),
-            "Keep component identity consistent",
-            "Component kind, ownership fields, identifiers, and capability tokens agree.",
-            (
-                "Reports missing or forbidden fields, invalid capability tokens, or "
-                "ownership-ID mismatches."
-            ),
-            "Trustworthy component identity prevents cascading layout and dependency mistakes.",
-            "error",
-        ),
-        (
-            "architecture/dependencies/policy",
-            (
-                "sarj/graph/edge-endpoints",
-                "sarj/graph/application-imports-application",
-                "sarj/graph/library-imports-application",
-                "sarj/graph/self-dependency",
-                "sarj/graph/cross-product-import",
-                "sarj/graph/shared-imports-product",
-                "sarj/graph/contract-imports-implementation",
-                "sarj/graph/disallowed-code-dependency",
-                "sarj/graph/code-cycle",
-            ),
-            "Enforce dependency boundaries",
-            "Every dependency edge is legal, ownership-safe, and acyclic.",
-            (
-                "Reports self edges, forbidden code coupling, cross-product imports, or "
-                "invalid typed endpoints and dependency cycles."
-            ),
-            "One dependency policy keeps ownership, release, and build direction explicit.",
-            "error",
-        ),
-    )
-    compact_content = {
-        "architecture/layout/component-paths": (
-            _rule_remediation(
-                "Move the component to one canonical, disjoint ownership root.",
-                "Declare the old and new paths before moving tracked files.",
-            ),
-            ("component kinds, ownership fields, and declared paths",),
-            (),
-        ),
-        "architecture/schema/component": (
-            _rule_remediation(
-                "Align component fields and identifiers with its kind and ownership.",
-                "Add required fields, remove forbidden fields, and correct IDs and tokens.",
-            ),
-            ("component kind, ownership fields, stable ID, and capability token",),
-            (),
-        ),
-        "architecture/dependencies/policy": (
-            _rule_remediation(
-                "Correct or remove the invalid dependency edge.",
-                "Use an allowed edge type and compatible source and target component kinds.",
-            ),
-            ("edge type, endpoint kinds, component IDs, and product ownership",),
-            (),
-        ),
-    }
-    merged: list[Rule] = []
-    for target, source_ids, title, summary, detects, impact, severity in groups:
-        sources = tuple(by_id[source_id] for source_id in source_ids)
-        representative = sources[0]
-        compact = compact_content.get(target)
-        examples = tuple(example for rule in sources for example in rule.examples)
-        if target == "architecture/layout/component-paths":
-            examples += (
-                RuleExamplePair(
-                    fixture_id=FixtureId("sarj-layout-overlapping-roots"),
-                    language="text",
-                    flagged="services/payments\nservices/payments/worker",
-                    passes="services/payments\nservices/worker",
-                    title="Overlapping component roots",
-                    severity="error",
-                ),
-            )
-        merged.append(
-            replace(
-                representative,
-                rule_id=RuleId(target),
-                default_severity=severity,
-                title=title,
-                summary=summary,
-                detects=detects,
-                impact=impact,
-                remediation=compact[0] if compact else representative.remediation,
-                examples=examples,
-                evidence_required=(
-                    compact[1]
-                    if compact
-                    else tuple(
-                        dict.fromkeys(item for rule in sources for item in rule.evidence_required)
-                    )
-                ),
-                non_goals=(
-                    compact[2]
-                    if compact
-                    else tuple(dict.fromkeys(item for rule in sources for item in rule.non_goals))
-                ),
-                false_positive_controls=tuple(
-                    dict.fromkeys(item for rule in sources for item in rule.false_positive_controls)
-                ),
-                upstream=tuple(dict.fromkeys(item for rule in sources for item in rule.upstream)),
-                references=tuple(
-                    dict.fromkeys(item for rule in sources for item in rule.references)
-                ),
-            )
-        )
-    return tuple(sorted(merged, key=lambda item: item.rule_id))
-
-
-RULES = _consolidated_rules(_RULE_PARTS)
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
     {
@@ -990,7 +370,7 @@ RULE_GOVERNANCE = tuple(
         ),
         classification=_RULE_CLASSIFICATION[rule.rule_id],
         evidence=_RULE_EVIDENCE[rule.rule_id],
-        upstream=rule.upstream or _UPSTREAM_BY_CLASSIFICATION[_RULE_CLASSIFICATION[rule.rule_id]],
+        upstream=_UPSTREAM_BY_CLASSIFICATION[_RULE_CLASSIFICATION[rule.rule_id]],
         precedence=_RULE_PRECEDENCE[rule.rule_id],
     )
     for rule in RULES

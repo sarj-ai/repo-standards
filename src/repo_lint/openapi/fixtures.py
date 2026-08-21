@@ -37,12 +37,12 @@ class OpenApiRuleFixture:
     @property
     def example(self) -> RuleExamplePair:
         return RuleExamplePair(
-            fixture_id=self.fixture_id,
-            language="json",
-            flagged=render_request(self.flagged),
-            passes=render_request(self.passes),
+            example_id=self.fixture_id,
             title=_example_title(self.fixture_id),
-            severity=self.expected_findings[0].severity,
+            language="json",
+            before=render_request(self.flagged),
+            after=render_request(self.passes),
+            expected_severity=self.expected_findings[0].severity,
         )
 
 

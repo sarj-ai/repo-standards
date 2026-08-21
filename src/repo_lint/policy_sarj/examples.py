@@ -59,7 +59,7 @@ class _GovernanceInput(NamedTuple):
 
 def rule_example_cases() -> tuple[RuleExampleCase, ...]:
     return tuple(
-        RuleExampleCase(example.fixture_id, rule.rule_id, example.flagged, example.passes)
+        RuleExampleCase(example.example_id, rule.rule_id, example.before, example.after)
         for rule in RULES
         for example in rule.examples
     )

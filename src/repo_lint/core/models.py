@@ -21,7 +21,6 @@ ExampleLanguage = Literal["json", "text", "toml", "yaml"]
 EvidenceLevel = Literal["verified", "declared", "external", "unknown"]
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
-RuleMaturity = Literal["experimental", "beta", "stable", "deprecated"]
 AdapterStatus = Literal["complete", "incomplete", "failed"]
 DeliveryProvider = Literal["github"]
 MAX_RULE_TITLE_LENGTH = 72
@@ -129,27 +128,26 @@ class Remediation:
 class RuleTaxonomy:
     category_id: RuleCategoryId
     topic_id: RuleTopicId
-    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class RuleExamplePair:
-    fixture_id: FixtureId
-    language: ExampleLanguage
-    flagged: str
-    passes: str
+    example_id: FixtureId
     title: str
-    severity: Severity
+    language: ExampleLanguage
+    before: str
+    after: str
+    expected_severity: Severity
 
     def __post_init__(self) -> None:
         if (
             any(
                 not value
                 for value in (
-                    self.fixture_id,
+                    self.example_id,
                     self.language,
-                    self.flagged,
-                    self.passes,
+                    self.before,
+                    self.after,
                     self.title,
                 )
             )
@@ -157,27 +155,11 @@ class RuleExamplePair:
             or len(self.title) > MAX_RULE_EXAMPLE_TITLE_LENGTH
         ):
             message = (
-                "rule examples require an id, concise title, severity, language, flagged "
-                "input, and passing input"
+                "rule examples require an id, concise title, severity, language, before, and after"
             )
             raise ValueError(message)
-        if self.flagged == self.passes:
-            message = f"rule example inputs must differ: {self.fixture_id}"
-            raise ValueError(message)
-
-
-@dataclass(frozen=True, slots=True)
-class RuleRemediation:
-    summary: str
-    steps: tuple[str, ...]
-    validation: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        if not self.summary or not self.steps or not self.validation:
-            message = "rule remediation requires a summary, steps, and validation"
-            raise ValueError(message)
-        if any(not item for item in (*self.steps, *self.validation)):
-            message = "rule remediation entries must be nonempty"
+        if self.before == self.after:
+            message = f"rule example inputs must differ: {self.example_id}"
             raise ValueError(message)
 
 
@@ -247,19 +229,12 @@ class RuleDefinition:
     version: int
     default_severity: Severity
     title: str
-    summary: str
-    detects: str
-    impact: str
+    description: str
+    why: str
+    fix: str
     taxonomy: RuleTaxonomy
-    remediation: RuleRemediation
     examples: tuple[RuleExamplePair, ...]
-    evidence_required: tuple[str, ...]
-    non_goals: tuple[str, ...] = ()
-    false_positive_controls: tuple[str, ...] = ()
-    upstream: tuple[str, ...] = ()
     references: tuple[str, ...] = ()
-    precedence: str = ""
-    maturity: RuleMaturity = "stable"
 
     def __post_init__(self) -> None:
         if self.version < 1:
@@ -268,23 +243,17 @@ class RuleDefinition:
         if not self.title or "\n" in self.title or len(self.title) > MAX_RULE_TITLE_LENGTH:
             message = f"rule title must be one concise line: {self.rule_id}"
             raise ValueError(message)
-        prose = (self.summary, self.detects, self.impact, self.remediation.summary)
+        prose = (self.description, self.why, self.fix)
         normalized = tuple(" ".join(value.casefold().split()) for value in prose)
         if any(not value for value in normalized) or len(set(normalized)) != len(normalized):
             message = f"rule clarity fields must be nonempty and distinct: {self.rule_id}"
             raise ValueError(message)
-        if not self.evidence_required or any(not item for item in self.evidence_required):
-            message = f"rule must describe its evidence: {self.rule_id}"
-            raise ValueError(message)
         if not self.examples:
             message = f"rule must provide an example pair: {self.rule_id}"
             raise ValueError(message)
-        fixture_ids = tuple(example.fixture_id for example in self.examples)
+        fixture_ids = tuple(example.example_id for example in self.examples)
         if len(fixture_ids) != len(set(fixture_ids)):
             message = f"rule example fixture ids must be unique: {self.rule_id}"
-            raise ValueError(message)
-        if self.taxonomy.tags != tuple(sorted(set(self.taxonomy.tags))):
-            message = f"rule tags must be sorted and unique: {self.rule_id}"
             raise ValueError(message)
 
     @property
@@ -293,7 +262,7 @@ class RuleDefinition:
 
     @property
     def fixture_ids(self) -> tuple[FixtureId, ...]:
-        return tuple(example.fixture_id for example in self.examples)
+        return tuple(example.example_id for example in self.examples)
 
 
 Rule = RuleDefinition

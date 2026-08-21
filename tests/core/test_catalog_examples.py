@@ -239,26 +239,26 @@ _EXAMPLES: tuple[tuple[RuleDefinition, RuleExamplePair], ...] = tuple(
 @pytest.mark.parametrize(
     ("rule", "example"),
     _EXAMPLES,
-    ids=[str(example.fixture_id) for _, example in _EXAMPLES],
+    ids=[str(example.example_id) for _, example in _EXAMPLES],
 )
 def test_core_rule_examples_execute_exact_catalog_bytes(
     rule: RuleDefinition,
     example: RuleExamplePair,
 ) -> None:
-    runner = _RUNNERS[example.fixture_id]
+    runner = _RUNNERS[example.example_id]
 
-    flagged = runner(example.flagged.encode("utf-8"))
-    passes = runner(example.passes.encode("utf-8"))
+    flagged = runner(example.before.encode("utf-8"))
+    passes = runner(example.after.encode("utf-8"))
 
-    assert flagged == _EXPECTED_FLAGGED[example.fixture_id]
-    assert passes == _EXPECTED_PASSES[example.fixture_id]
+    assert flagged == _EXPECTED_FLAGGED[example.example_id]
+    assert passes == _EXPECTED_PASSES[example.example_id]
     assert str(rule.rule_id) in flagged
     assert str(rule.rule_id) not in passes
 
 
 def test_every_core_rule_has_one_registered_executable_example() -> None:
     rules = core_rules()
-    fixture_ids = tuple(example.fixture_id for rule in rules for example in rule.examples)
+    fixture_ids = tuple(example.example_id for rule in rules for example in rule.examples)
 
     assert len(rules) == 1
     assert len(_RUNNERS) == len(set(fixture_ids)) == 3

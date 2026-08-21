@@ -27,7 +27,6 @@ from repo_lint.core.models import (
     RuleCategoryId,
     RuleExamplePair,
     RuleId,
-    RuleRemediation,
     RuleTaxonomy,
     RuleTopicId,
     SourceLocation,
@@ -120,29 +119,22 @@ def test_rule_metadata_is_complete_and_examples_expose_fixture_ids() -> None:
         version=1,
         default_severity="warning",
         title="Example rule",
-        summary="The example remains valid.",
-        detects="The example is invalid.",
-        impact="Invalid examples confuse consumers.",
+        description="The example remains valid.",
+        why="Invalid examples confuse consumers.",
+        fix="Correct the example input.",
         taxonomy=RuleTaxonomy(RuleCategoryId("examples"), RuleTopicId("example-rules")),
-        remediation=RuleRemediation(
-            "Correct the example.",
-            ("Change the input.",),
-            ("Run the rule again.",),
-        ),
         examples=(
             RuleExamplePair(
-                FixtureId("example-rule"),
-                "text",
-                "invalid",
-                "valid",
-                "Example violation",
-                "error",
+                example_id=FixtureId("example-rule"),
+                title="Example violation",
+                language="text",
+                before="invalid",
+                after="valid",
+                expected_severity="error",
             ),
         ),
-        evidence_required=("Example input",),
     )
 
-    assert rule.maturity == "stable"
     assert rule.references == ()
     assert rule.fixture_ids == (FixtureId("example-rule"),)
 

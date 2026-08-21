@@ -54,8 +54,8 @@ SITE_SUFFIXES = frozenset(
 )
 REQUIRED_SITE_FILES = frozenset(
     {
-        "api/v6/catalog.json",
-        "api/v6/catalog.schema.json",
+        "api/v7/catalog.json",
+        "api/v7/catalog.schema.json",
         "health.json",
         "index.html",
         "review/index.html",
@@ -102,7 +102,7 @@ class SiteCatalogModel(BaseModel):
 
 
 class SiteExample(SiteCatalogModel):
-    fixture_id: str
+    id: str
 
 
 class SiteRule(SiteCatalogModel):
@@ -123,7 +123,7 @@ class SiteSchema(SiteCatalogModel):
 
 class SiteCatalog(SiteCatalogModel):
     kind: Literal["repo-lint.catalog"]
-    schema_version: Literal[6]
+    schema_version: Literal[7]
     provenance: SiteProvenance
     rules: tuple[SiteRule, ...]
     schemas: tuple[SiteSchema, ...]
@@ -345,10 +345,12 @@ def verify_site_catalog(directory: Path, observed: set[str]) -> list[str]:
     violations = [
         f"site:{name}: legacy API contract is not publishable"
         for name in sorted(observed)
-        if name.startswith(("api/v1/", "api/v2/", "api/v3/", "api/v4/", "api/v5/"))
+        if name.startswith(
+            ("api/v1/", "api/v2/", "api/v3/", "api/v4/", "api/v5/", "api/v6/")
+        )
     ]
-    catalog_path = directory / "api/v6/catalog.json"
-    schema_path = directory / "api/v6/catalog.schema.json"
+    catalog_path = directory / "api/v7/catalog.json"
+    schema_path = directory / "api/v7/catalog.schema.json"
     if not catalog_path.is_file() or not schema_path.is_file():
         return violations
     try:
@@ -356,14 +358,14 @@ def verify_site_catalog(directory: Path, observed: set[str]) -> list[str]:
         schema_document = _JSON_OBJECT.validate_json(schema_path.read_bytes(), strict=True)
         catalog = SiteCatalog.model_validate(catalog_document)
     except ValidationError as error:
-        violations.append(f"site:api/v6/catalog.json: invalid catalog v6: {error}")
+        violations.append(f"site:api/v7/catalog.json: invalid catalog v7: {error}")
         return violations
     if "tombstones" in catalog_document:
-        violations.append("site:api/v6/catalog.json: tombstones are not part of catalog v6")
+        violations.append("site:api/v7/catalog.json: tombstones are not part of catalog v7")
     try:
         _validate_schema(Draft202012Validator(schema_document), catalog_document)
     except JsonSchemaValidationError as error:
-        violations.append(f"site:api/v6/catalog.json: schema validation failed: {error.message}")
+        violations.append(f"site:api/v7/catalog.json: schema validation failed: {error.message}")
     embedded = next(
         (
             descriptor.document
@@ -373,17 +375,17 @@ def verify_site_catalog(directory: Path, observed: set[str]) -> list[str]:
         None,
     )
     if embedded != schema_document:
-        violations.append("site:api/v6/catalog.schema.json: must equal the embedded catalog schema")
+        violations.append("site:api/v7/catalog.schema.json: must equal the embedded catalog schema")
     schema_id = schema_document.get("$id")
-    if not isinstance(schema_id, str) or not schema_id.endswith("/catalog-v6.schema.json"):
-        violations.append("site:api/v6/catalog.schema.json: must identify catalog-v6.schema.json")
+    if not isinstance(schema_id, str) or not schema_id.endswith("/catalog-v7.schema.json"):
+        violations.append("site:api/v7/catalog.schema.json: must identify catalog-v7.schema.json")
     unsigned = dict(catalog_document)
     provenance = dict(_JSON_OBJECT.validate_python(catalog_document["provenance"], strict=True))
     provenance["content_digest"] = ""
     unsigned["provenance"] = provenance
     expected_digest = hashlib.sha256(canonical_json(unsigned).encode()).hexdigest()
     if catalog.provenance.content_digest != expected_digest:
-        violations.append("site:api/v6/catalog.json: content digest does not match catalog bytes")
+        violations.append("site:api/v7/catalog.json: content digest does not match catalog bytes")
     return violations
 
 
@@ -412,7 +414,7 @@ def _verify_site_csp(directory: Path) -> list[str]:
 
 def _verify_site_semantics(directory: Path) -> list[str]:
     violations: list[str] = []
-    catalog_path = directory / "api/v6/catalog.json"
+    catalog_path = directory / "api/v7/catalog.json"
     if not catalog_path.is_file():
         return violations
     payload = SiteCatalog.model_validate_json(catalog_path.read_bytes())

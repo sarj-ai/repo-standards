@@ -26,7 +26,7 @@ class _SiteDocuments(NamedTuple):
 
 
 def _site(directory: Path) -> _SiteDocuments:
-    api = directory / "api" / "v6"
+    api = directory / "api" / "v7"
     api.mkdir(parents=True)
     catalog = _JSON_OBJECT.validate_python(
         build_catalog(app, package_version=version("repo-standards")).model_dump(mode="json"),
@@ -39,15 +39,15 @@ def _site(directory: Path) -> _SiteDocuments:
 
 
 def _write(directory: Path, name: str, value: dict[str, JSONValue]) -> None:
-    (directory / "api" / "v6" / name).write_text(canonical_json(value), encoding="utf-8")
+    (directory / "api" / "v7" / name).write_text(canonical_json(value), encoding="utf-8")
 
 
-def test_release_site_accepts_the_exact_catalog_v6_contract(tmp_path: Path) -> None:
+def test_release_site_accepts_the_exact_catalog_v7_contract(tmp_path: Path) -> None:
     _site(tmp_path)
 
     assert verify_site_catalog(
         tmp_path,
-        {"api/v6/catalog.json", "api/v6/catalog.schema.json"},
+        {"api/v7/catalog.json", "api/v7/catalog.schema.json"},
     ) == []
 
 
@@ -63,7 +63,8 @@ def test_release_site_rejects_legacy_routes_and_tombstones(tmp_path: Path) -> No
             "api/v4/catalog.json",
             "api/v5/catalog.json",
             "api/v6/catalog.json",
-            "api/v6/catalog.schema.json",
+            "api/v7/catalog.json",
+            "api/v7/catalog.schema.json",
         },
     )
 
@@ -83,21 +84,21 @@ def test_release_site_rejects_a_forged_schema_or_catalog_digest(tmp_path: Path) 
 
     violations = verify_site_catalog(
         tmp_path,
-        {"api/v6/catalog.json", "api/v6/catalog.schema.json"},
+        {"api/v7/catalog.json", "api/v7/catalog.schema.json"},
     )
 
     assert any("embedded catalog schema" in item for item in violations)
     assert any("content digest" in item for item in violations)
 
 
-def test_release_site_rejects_a_non_v6_catalog(tmp_path: Path) -> None:
+def test_release_site_rejects_a_non_v7_catalog(tmp_path: Path) -> None:
     catalog, _schema = _site(tmp_path)
     catalog["schema_version"] = 3
     _write(tmp_path, "catalog.json", catalog)
 
     violations = verify_site_catalog(
         tmp_path,
-        {"api/v6/catalog.json", "api/v6/catalog.schema.json"},
+        {"api/v7/catalog.json", "api/v7/catalog.schema.json"},
     )
 
-    assert any("invalid catalog v6" in item for item in violations)
+    assert any("invalid catalog v7" in item for item in violations)

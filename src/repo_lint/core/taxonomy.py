@@ -76,5 +76,5 @@ CATEGORIES = (
 )
 
 
-def taxonomy(category_id: RuleCategoryId, topic_id: RuleTopicId, *tags: str) -> RuleTaxonomy:
-    return RuleTaxonomy(category_id=category_id, topic_id=topic_id, tags=tuple(sorted(tags)))
+def taxonomy(category_id: RuleCategoryId, topic_id: RuleTopicId) -> RuleTaxonomy:
+    return RuleTaxonomy(category_id=category_id, topic_id=topic_id)

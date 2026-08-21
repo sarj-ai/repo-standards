@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
 
 _CATALOG_KIND = "repo-lint.catalog"
-_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v6.schema.json"
+_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v7.schema.json"
 _PUBLIC_REFERENCE_HOSTS = frozenset(
     {
         "docs.github.com",
@@ -142,12 +142,12 @@ class SafetyDescriptor(CatalogModel):
 
 
 class ExampleDescriptor(CatalogModel):
-    fixture_id: NonEmptyText
+    id: NonEmptyText
     title: Annotated[str, Field(min_length=1, max_length=56)]
-    severity: Literal["warning", "error"]
     language: ExampleLanguage
-    flagged: NonEmptyText
-    passes: NonEmptyText
+    before: NonEmptyText
+    after: NonEmptyText
+    expected_severity: Literal["warning", "error"]
 
 
 class SourcePointer(CatalogModel):
@@ -161,37 +161,6 @@ class SourcePointer(CatalogModel):
             message = "catalog source paths must be repository-relative"
             raise ValueError(message)
         return value
-
-
-class LifecycleDescriptor(CatalogModel):
-    status: Literal["experimental", "beta", "stable", "deprecated"]
-    introduced_in: str | None = None
-    deprecated_in: str | None = None
-    replacement_rule_id: str | None = None
-    removal_not_before: str | None = None
-
-    @model_validator(mode="after")
-    def validate_state(self) -> Self:
-        deprecation_values = (
-            self.deprecated_in,
-            self.replacement_rule_id,
-            self.removal_not_before,
-        )
-        if self.status != "deprecated" and any(value is not None for value in deprecation_values):
-            message = "active rule lifecycles cannot contain deprecation metadata"
-            raise ValueError(message)
-        if self.status == "deprecated" and (
-            self.deprecated_in is None or self.removal_not_before is None
-        ):
-            message = "deprecated rule lifecycles require deprecation and removal versions"
-            raise ValueError(message)
-        return self
-
-
-class RemediationDescriptor(CatalogModel):
-    summary: NonEmptyText
-    steps: Annotated[tuple[NonEmptyText, ...], Field(min_length=1)]
-    validation: Annotated[tuple[NonEmptyText, ...], Field(min_length=1)]
 
 
 class PendingRuleReviewDescriptor(CatalogModel):
@@ -231,37 +200,24 @@ class RuleDescriptor(CatalogModel):
     title: Annotated[str, Field(min_length=1, max_length=72)]
     category_id: RuleCategoryId
     topic_id: RuleTopicId
-    tags: tuple[str, ...]
     default_severity: Literal["warning", "error"]
-    lifecycle: LifecycleDescriptor
-    summary: NonEmptyText
-    detects: NonEmptyText
-    impact: NonEmptyText
-    remediation: RemediationDescriptor
-    non_goals: tuple[str, ...]
-    evidence_required: Annotated[tuple[NonEmptyText, ...], Field(min_length=1)]
-    upstream: tuple[str, ...]
+    description: NonEmptyText
+    why: NonEmptyText
+    fix: NonEmptyText
     references: tuple[HttpsUrl, ...]
     examples: Annotated[tuple[ExampleDescriptor, ...], Field(min_length=1)]
-    false_positive_controls: tuple[str, ...]
     source: SourcePointer
     review: RuleReviewDescriptor
 
     @model_validator(mode="after")
     def validate_clarity(self) -> Self:
-        prose = (self.summary, self.detects, self.impact, self.remediation.summary)
+        prose = (self.description, self.why, self.fix)
         normalized = tuple(" ".join(value.casefold().split()) for value in prose)
         if any(not value for value in normalized) or len(set(normalized)) != len(normalized):
             message = f"rule clarity fields must be nonempty and distinct: {self.rule_id}"
             raise ValueError(message)
-        if not self.evidence_required:
-            message = f"rule must describe its evidence: {self.rule_id}"
-            raise ValueError(message)
         if not self.examples:
             message = f"rule must provide an example pair: {self.rule_id}"
-            raise ValueError(message)
-        if self.tags != tuple(sorted(set(self.tags))):
-            message = f"rule tags must be sorted and unique: {self.rule_id}"
             raise ValueError(message)
         return self
 
@@ -336,7 +292,7 @@ class SchemaDescriptor(CatalogModel):
 
 class Catalog(CatalogModel):
     kind: Literal["repo-lint.catalog"] = _CATALOG_KIND
-    schema_version: Literal[6] = 6
+    schema_version: Literal[7] = 7
     catalog_version: str
     product: ProductDescriptor
     provenance: ProvenanceDescriptor
@@ -395,7 +351,7 @@ def _validate_rule_graph(catalog: Catalog) -> None:
     if catalog.catalog_version != catalog.provenance.package_version:
         message = "catalog and provenance package versions must match"
         raise ValueError(message)
-    fixture_ids = [example.fixture_id for rule in catalog.rules for example in rule.examples]
+    fixture_ids = [example.id for rule in catalog.rules for example in rule.examples]
     if len(fixture_ids) != len(set(fixture_ids)):
         message = "catalog example fixture ids must be unique"
         raise ValueError(message)
@@ -461,34 +417,6 @@ def _validate_command_graph(catalog: Catalog) -> None:
 def catalog_schema() -> dict[str, JSONValue]:
     schema = _JSON_OBJECT.validate_python(Catalog.model_json_schema(), strict=True)
     schema["$id"] = _CATALOG_SCHEMA_ID
-    definitions = schema.get("$defs")
-    if isinstance(definitions, dict):
-        lifecycle = definitions.get("LifecycleDescriptor")
-        if isinstance(lifecycle, dict):
-            lifecycle["oneOf"] = [
-                {
-                    "properties": {
-                        "status": {"enum": ["experimental", "beta", "stable"]},
-                        "deprecated_in": {"const": None},
-                        "replacement_rule_id": {"const": None},
-                        "removal_not_before": {"const": None},
-                    },
-                    "required": [
-                        "status",
-                        "deprecated_in",
-                        "replacement_rule_id",
-                        "removal_not_before",
-                    ],
-                },
-                {
-                    "properties": {
-                        "status": {"const": "deprecated"},
-                        "deprecated_in": {"type": "string"},
-                        "removal_not_before": {"type": "string"},
-                    },
-                    "required": ["status", "deprecated_in", "removal_not_before"],
-                },
-            ]
     return schema
 
 
@@ -723,33 +651,22 @@ def _rule_descriptor(rule: Rule, source_path: str) -> RuleDescriptor:
         title=rule.title,
         category_id=rule.taxonomy.category_id,
         topic_id=rule.taxonomy.topic_id,
-        tags=rule.taxonomy.tags,
         default_severity=rule.default_severity,
-        lifecycle=LifecycleDescriptor(status=rule.maturity),
-        summary=rule.summary,
-        detects=rule.detects,
-        impact=rule.impact,
-        remediation=RemediationDescriptor(
-            summary=rule.remediation.summary,
-            steps=rule.remediation.steps,
-            validation=rule.remediation.validation,
-        ),
-        non_goals=rule.non_goals,
-        evidence_required=rule.evidence_required,
-        upstream=rule.upstream,
+        description=rule.description,
+        why=rule.why,
+        fix=rule.fix,
         references=rule.references,
         examples=tuple(
             ExampleDescriptor(
-                fixture_id=str(example.fixture_id),
+                id=str(example.example_id),
                 title=example.title,
-                severity=example.severity,
                 language=example.language,
-                flagged=example.flagged,
-                passes=example.passes,
+                before=example.before,
+                after=example.after,
+                expected_severity=example.expected_severity,
             )
             for example in rule.examples
         ),
-        false_positive_controls=rule.false_positive_controls,
         source=SourcePointer(path=source_path, symbol=str(rule.rule_id)),
         review=review_descriptor,
     )
@@ -963,7 +880,7 @@ def _schemas() -> tuple[SchemaDescriptor, ...]:
             "openapi-analysis",
             openapi_report_schema(),
         ),
-        ("catalog", "Repo-lint public catalog", 6, "catalog", catalog_schema()),
+        ("catalog", "Repo-lint public catalog", 7, "catalog", catalog_schema()),
     )
     return tuple(
         SchemaDescriptor(

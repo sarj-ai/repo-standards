@@ -364,7 +364,7 @@ def test_rule_catalog_is_complete_unique_and_source_backed() -> None:
     assert [item.rule_id for item in catalog] == sorted(item.rule_id for item in catalog)
     assert len({item.rule_id for item in catalog}) == len(catalog) == 4
     assert all(
-        item.title and item.detects and item.impact and item.remediation.steps and item.references
+        item.title and item.description and item.why and item.fix and item.references
         for item in catalog
     )
 
