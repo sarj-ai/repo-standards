@@ -1,0 +1,22 @@
+---
+import { Code } from '@astrojs/starlight/components';
+
+import type { RuleExampleView } from '../lib/rule-view';
+
+interface Props { example: RuleExampleView }
+const { example } = Astro.props;
+---
+
+<section class="example-pair" aria-label={example.title} data-example-pair={example.exampleId}>
+  <h3 class="example-pair-title">{example.title}</h3>
+  <div class="examples-grid">
+    <figure class="example example--bad" data-example-kind="before">
+      <figcaption><span>Before · {example.expectedSeverity}</span></figcaption>
+      <Code code={example.before} lang={example.language} del={example.marks.before} wrap />
+    </figure>
+    <figure class="example example--good" data-example-kind="after">
+      <figcaption><span>After</span></figcaption>
+      <Code code={example.after} lang={example.language} ins={example.marks.after} wrap />
+    </figure>
+  </div>
+</section>

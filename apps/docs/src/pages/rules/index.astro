@@ -11,6 +11,6 @@ const rows = referenceCatalog.flatMap((category) => category.topics.flatMap((top
 <ReferencePage title="Rules" description="Reviewed repository rules available for explicit activation.">
   <h1 class="sr-only">Rules</h1>
   {rows.length > 0
-    ? <RuleDirectory rows={rows} mode="approved" />
+    ? <RuleDirectory rows={rows} />
     : <div class="directory-empty-state"><p>No rules are approved yet.</p><a href="/review/">Review pending rules</a></div>}
 </ReferencePage>
