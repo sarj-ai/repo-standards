@@ -69,9 +69,7 @@ def activated_rule_versions(requested_rules: tuple[str, ...]) -> frozenset[RuleV
     if len(requested) != len(set(requested)):
         ConfigurationError.fail("enabled rule ID and version selectors must be unique")
     approved = approved_rule_versions()
-    unavailable = sorted(
-        f"{item.rule_id}@{item.version}" for item in set(requested) - approved
-    )
+    unavailable = sorted(f"{item.rule_id}@{item.version}" for item in set(requested) - approved)
     if unavailable:
         ConfigurationError.fail(f"rules are not approved for activation: {', '.join(unavailable)}")
     return frozenset(requested)

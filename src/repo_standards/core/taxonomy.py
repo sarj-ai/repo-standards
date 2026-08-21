@@ -54,9 +54,7 @@ CATEGORIES = (
         category_id=CHANGE_SAFETY,
         label="Repository changes",
         order=20,
-        topics=(
-            RuleTopic(MIGRATIONS, "Migrations", 10),
-        ),
+        topics=(RuleTopic(MIGRATIONS, "Migrations", 10),),
     ),
     RuleCategory(
         category_id=API_CONTRACTS,

@@ -437,9 +437,7 @@ def test_ratchet_report_has_explicit_verified_baseline_status(tmp_path: Path) ->
     assert _object(payload["baseline"])["status"] == "verified"
     assert _object(payload["ratchet"])["status"] == "clean"
 
-    (tmp_path / ".repo-standards" / "baseline.json").write_text(
-        "not-json", encoding="utf-8"
-    )
+    (tmp_path / ".repo-standards" / "baseline.json").write_text("not-json", encoding="utf-8")
     dirty = runner.invoke(
         app,
         ["check", str(tmp_path), "--mode", "ratchet", "--format", "json"],

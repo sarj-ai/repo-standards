@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 import re
 import tomllib
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
@@ -11,9 +12,11 @@ from .canonical import canonical_path
 from .errors import ConfigurationError
 from .models import (
     ActiveConfiguration,
+    AuthorityId,
     Baseline,
     Component,
     ComponentId,
+    ConfigurationFormat,
     DeliveryConfig,
     Dependency,
     DeploymentAuthority,
@@ -43,6 +46,14 @@ _MANIFEST_SCHEMA_VERSION = 3
 _LEGACY_MANIFEST_SCHEMA_VERSION = 2
 _BASELINE_SCHEMA_VERSION = 2
 _OBJECT_MAPPING = TypeAdapter(dict[str, object])
+_CONFIG_SUFFIXES = MappingProxyType(
+    {
+        ConfigurationFormat.DOTENV: (".env",),
+        ConfigurationFormat.JSON: (".json",),
+        ConfigurationFormat.TOML: (".toml",),
+        ConfigurationFormat.YAML: (".yaml", ".yml"),
+    }
+)
 
 
 def _read_bounded(path: Path, kind: str) -> bytes:
@@ -246,7 +257,7 @@ def parse_deployment_authority(value: object, index: int) -> DeploymentAuthority
     if len(delegates) != len(set(delegates)) or path in delegates:
         ConfigurationError.fail(f"{context}.delegates must be unique subordinate paths")
     return DeploymentAuthority(
-        authority_id=_identifier(_string(data, "id", context), f"{context}.id"),
+        authority_id=AuthorityId(_identifier(_string(data, "id", context), f"{context}.id")),
         component_id=ComponentId(
             _identifier(_string(data, "component_id", context), f"{context}.component_id")
         ),
@@ -292,22 +303,18 @@ def parse_active_configuration(value: object, index: int) -> ActiveConfiguration
     _strict_keys(data, fields, fields, context)
     path = canonical_path(_string(data, "path", context))
     format_value = _string(data, "format", context)
-    suffixes = {
-        "dotenv": (".env",),
-        "json": (".json",),
-        "toml": (".toml",),
-        "yaml": (".yaml", ".yml"),
-    }
-    if format_value not in suffixes:
+    try:
+        configuration_format = ConfigurationFormat(format_value)
+    except ValueError:
         ConfigurationError.fail(f"{context}.format must be dotenv, json, toml, or yaml")
-    if not path.casefold().endswith(suffixes[format_value]):
+    if not path.casefold().endswith(_CONFIG_SUFFIXES[configuration_format]):
         ConfigurationError.fail(f"{context}.path does not match its declared format")
     return ActiveConfiguration(
         component_id=ComponentId(
             _identifier(_string(data, "component_id", context), f"{context}.component_id")
         ),
         path=path,
-        format=format_value,  # pyright: ignore[reportArgumentType]
+        format=configuration_format,
     )
 
 

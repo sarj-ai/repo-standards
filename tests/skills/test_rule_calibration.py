@@ -6,6 +6,7 @@ import shutil
 import stat
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local fixture only
 import sys
+from typing import NamedTuple
 
 from pydantic import TypeAdapter
 
@@ -25,6 +26,11 @@ _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECTS = TypeAdapter(list[dict[str, object]])
 
 
+class _CalibrationFixture(NamedTuple):
+    repository: Path
+    corpus: Path
+
+
 def _git(repository: Path, *arguments: str) -> str:
     executable = shutil.which("git")
     assert executable is not None
@@ -38,7 +44,7 @@ def _git(repository: Path, *arguments: str) -> str:
     return completed.stdout.strip()
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path]:
+def _fixture(tmp_path: Path) -> _CalibrationFixture:
     repository = tmp_path / "private-consumer-name"
     repository.mkdir()
     (repository / "docs").mkdir()
@@ -79,7 +85,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     corpus.chmod(0o600)
-    return repository, corpus
+    return _CalibrationFixture(repository, corpus)
 
 
 def _run(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:

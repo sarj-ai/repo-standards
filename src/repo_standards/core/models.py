@@ -13,12 +13,12 @@ GitObjectId = NewType("GitObjectId", str)
 FixtureId = NewType("FixtureId", str)
 RuleCategoryId = NewType("RuleCategoryId", str)
 RuleTopicId = NewType("RuleTopicId", str)
+AuthorityId = NewType("AuthorityId", str)
 
 
 Severity = Literal["warning", "error"]
 ExampleLanguage = Literal["json", "text", "toml", "yaml"]
 EvidenceLevel = Literal["verified", "declared", "external", "unknown"]
-ConfigurationFormat = Literal["dotenv", "json", "toml", "yaml"]
 DeploymentAuthorityRole = Literal["primary", "recovery"]
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
@@ -51,6 +51,13 @@ class RatchetClassification(StrEnum):
     NEW = "new"
     KNOWN = "known"
     RESOLVED = "resolved"
+
+
+class ConfigurationFormat(StrEnum):
+    DOTENV = "dotenv"
+    JSON = "json"
+    TOML = "toml"
+    YAML = "yaml"
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +117,7 @@ class ActiveConfiguration:
 
 @dataclass(frozen=True, slots=True)
 class DeploymentAuthority:
-    authority_id: str
+    authority_id: AuthorityId
     component_id: ComponentId
     environment: str
     mechanism: str

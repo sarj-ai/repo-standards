@@ -19,6 +19,7 @@ from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import (
     Component,
     ComponentId,
+    ConfigurationFormat,
     DeploymentAuthority,
     Diagnostic,
     ExampleLanguage,
@@ -72,6 +73,11 @@ class _DependencyAnalysis(NamedTuple):
 class _CodeBoundary(NamedTuple):
     rule_id: RuleId
     expected: str
+
+
+class _ScalarLocation(NamedTuple):
+    pointer: str
+    value: str
 
 
 class ComponentKind(StrEnum):
@@ -885,7 +891,7 @@ def _active_configuration_diagnostics(snapshot: RepositorySnapshot) -> tuple[Dia
 
 
 def _parse_active_configuration(
-    path: str, format_name: str, content: bytes
+    path: str, format_name: ConfigurationFormat, content: bytes
 ) -> tuple[tuple[str, str], ...]:
     try:
         text = content.decode("utf-8")
@@ -902,16 +908,18 @@ def _parse_active_configuration(
     return tuple(_string_scalars(value))
 
 
-def _decode_active_configuration(format_name: str, text: str) -> object:
-    if format_name == "json":
-        return json.loads(  # pyright: ignore[reportAny]
-            text, object_pairs_hook=_unique_json_mapping
-        )
-    if format_name == "toml":
-        return tomllib.loads(text)
-    if format_name == "yaml":
-        return yaml.safe_load(text)  # pyright: ignore[reportAny]
-    return _parse_dotenv(text)
+def _decode_active_configuration(format_name: ConfigurationFormat, text: str) -> object:
+    match format_name:
+        case ConfigurationFormat.JSON:
+            return json.loads(  # pyright: ignore[reportAny]
+                text, object_pairs_hook=_unique_json_mapping
+            )
+        case ConfigurationFormat.TOML:
+            return tomllib.loads(text)
+        case ConfigurationFormat.YAML:
+            return yaml.safe_load(text)  # pyright: ignore[reportAny]
+        case ConfigurationFormat.DOTENV:
+            return _parse_dotenv(text)
 
 
 def _unique_json_mapping(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -957,24 +965,26 @@ def _parse_dotenv(text: str) -> dict[str, str]:
     return result
 
 
-def _string_scalars(value: JSONValue, pointer: str = "$") -> list[tuple[str, str]]:
-    if isinstance(value, str):
-        return [(pointer, value)]
-    if isinstance(value, dict):
-        return [
-            item
-            for key in sorted(value, key=str)
-            for item in _string_scalars(
-                value[key], f"{pointer}/{str(key).replace('~', '~0').replace('/', '~1')}"
-            )
-        ]
-    if isinstance(value, list):
-        return [
-            item
-            for index, child in enumerate(value)
-            for item in _string_scalars(child, f"{pointer}/{index}")
-        ]
-    return []
+def _string_scalars(value: JSONValue, pointer: str = "$") -> list[_ScalarLocation]:
+    match value:
+        case str():
+            return [_ScalarLocation(pointer, value)]
+        case dict():
+            return [
+                item
+                for key in sorted(value, key=str)
+                for item in _string_scalars(
+                    value[key], f"{pointer}/{str(key).replace('~', '~0').replace('/', '~1')}"
+                )
+            ]
+        case list():
+            return [
+                item
+                for index, child in enumerate(value)
+                for item in _string_scalars(child, f"{pointer}/{index}")
+            ]
+        case _:
+            return []
 
 
 def _deployment_authority_diagnostics(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:

@@ -220,7 +220,6 @@ def load_calibration_snapshot(
     *,
     identity: GitIdentity | None = None,
 ) -> RepositorySnapshot:
-    """Load an immutable Git tree with an external, calibration-only manifest."""
     resolved = root.resolve(strict=True)
     if not resolved.is_dir():
         ConfigurationError.fail("repository root must be a directory")

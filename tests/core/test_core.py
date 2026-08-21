@@ -78,7 +78,8 @@ def test_analysis_report_variants_reject_empty_required_payloads() -> None:
 
     findings = FindingsReport(diagnostics=(finding,), **common)  # type: ignore[arg-type]
     incomplete = IncompleteReport(
-        execution_issues=(_execution_issue(),), **common  # type: ignore[arg-type]
+        execution_issues=(_execution_issue(),),
+        **common,  # type: ignore[arg-type]
     )
     passed = PassedReport(**common)  # type: ignore[arg-type]
     assert findings.conclusion == "findings"

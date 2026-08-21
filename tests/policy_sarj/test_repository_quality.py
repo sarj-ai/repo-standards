@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from repo_standards.core.models import (
     ActiveConfiguration,
+    AuthorityId,
     Component,
     ComponentId,
+    ConfigurationFormat,
     DeliveryConfig,
     DeploymentAuthority,
     DocumentationConfig,
@@ -147,7 +149,11 @@ def test_exact_placeholder_is_reported_without_value_disclosure() -> None:
     component = _component()
     snapshot = _snapshot(
         {"config/active.yaml": b"nested:\n  endpoint: CHANGE_ME\n"},
-        active=(ActiveConfiguration(component.component_id, "config/active.yaml", "yaml"),),
+        active=(
+            ActiveConfiguration(
+                component.component_id, "config/active.yaml", ConfigurationFormat.YAML
+            ),
+        ),
     )
     finding = next(
         item
@@ -170,7 +176,11 @@ def test_placeholder_near_misses_are_clean() -> None:
                 b'"name":"changeme-service","empty":""}'
             )
         },
-        active=(ActiveConfiguration(component.component_id, "config/active.json", "json"),),
+        active=(
+            ActiveConfiguration(
+                component.component_id, "config/active.json", ConfigurationFormat.JSON
+            ),
+        ),
     )
     assert RuleId("repository/configuration/unresolved-placeholders") not in _rule_ids(snapshot)
 
@@ -179,7 +189,11 @@ def test_dotenv_quotes_comments_and_case_are_normalized() -> None:
     component = _component()
     snapshot = _snapshot(
         {"config/prod.env": b"export ENDPOINT='Replace-Me' # unresolved\n"},
-        active=(ActiveConfiguration(component.component_id, "config/prod.env", "dotenv"),),
+        active=(
+            ActiveConfiguration(
+                component.component_id, "config/prod.env", ConfigurationFormat.DOTENV
+            ),
+        ),
     )
     assert (
         _rule_ids(snapshot).count(RuleId("repository/configuration/unresolved-placeholders")) == 1
@@ -194,7 +208,7 @@ def _authority(
 ) -> DeploymentAuthority:
     component = _component()
     return DeploymentAuthority(
-        authority_id=authority_id,
+        authority_id=AuthorityId(authority_id),
         component_id=component.component_id,
         environment=environment,
         mechanism="cloud-deploy",

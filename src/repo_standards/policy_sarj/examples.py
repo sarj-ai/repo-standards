@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING, NoReturn
 from repo_standards.core.engine import core_diagnostics
 from repo_standards.core.models import (
     ActiveConfiguration,
+    AuthorityId,
     Component,
     ComponentId,
+    ConfigurationFormat,
     DeliveryConfig,
     Dependency,
     DeploymentAuthority,
@@ -183,7 +185,9 @@ def _run_configuration_example(source: str) -> RuleExampleResult:
         manifest=Manifest(
             RepositoryId("example-repository"),
             (component,),
-            active_configuration=(ActiveConfiguration(component.component_id, path, "yaml"),),
+            active_configuration=(
+                ActiveConfiguration(component.component_id, path, ConfigurationFormat.YAML),
+            ),
         ),
         files={path: source.encode()},
     )
@@ -198,7 +202,7 @@ def _run_authority_example(source: str) -> RuleExampleResult:
     count = 2 if "two primary" in source else 1
     authorities = tuple(
         DeploymentAuthority(
-            f"writer-{index}",
+            AuthorityId(f"writer-{index}"),
             component.component_id,
             "production",
             "cloud-deploy",
