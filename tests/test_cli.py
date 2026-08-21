@@ -384,6 +384,9 @@ def test_capabilities_are_machine_discoverable() -> None:
     assert result.exit_code == 0
     capabilities = _json_object(result.stdout)
     assert capabilities["schema_version"] == 2
+    commands = capabilities["commands"]
+    assert isinstance(commands, list)
+    assert "catalog" in commands
     safety = _object(capabilities["safety"])
     assert safety["repository_code_execution"] is False
     assert safety["mutation"] is False

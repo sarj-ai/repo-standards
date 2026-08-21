@@ -861,7 +861,7 @@ def _schemas() -> tuple[SchemaDescriptor, ...]:
             "openapi-analysis",
             openapi_report_schema(),
         ),
-        ("catalog", "Repo-lint public catalog", 7, "catalog", catalog_schema()),
+        ("catalog", "Repo Standards public catalog", 7, "catalog", catalog_schema()),
     )
     return tuple(
         SchemaDescriptor(
