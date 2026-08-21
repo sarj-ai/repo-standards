@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from pathlib import PurePosixPath
 import re
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
@@ -15,6 +16,7 @@ from repo_standards.core.models import (
     Manifest,
     PolicyId,
     Remediation,
+    RepositorySnapshot,
     Rule,
     RuleExamplePair,
     RuleId,
@@ -95,6 +97,27 @@ EDGE_KINDS = frozenset(
 CODE_EDGES = frozenset({"source-import", "package-dependency"})
 _MIN_CYCLE_COMPONENTS = 2
 _PATH_TOKEN = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"  # ruff: ignore[hardcoded-password-string] - regex, not a secret
+_DOCUMENTATION_ROOTS = frozenset({"adr", "architecture", "docs"})
+_PACKAGE_DOCUMENT_NAMES = frozenset(
+    {
+        "CHANGELOG.md",
+        "CODE_OF_CONDUCT.md",
+        "CONTRIBUTING.md",
+        "LICENSE.md",
+        "README.md",
+        "SECURITY.md",
+    }
+)
+_AGENT_CONTRACT_NAMES = frozenset({"AGENTS.md", "CLAUDE.md", "SKILL.md"})
+_AGENT_CONTRACT_ROOTS = (
+    (".agents", "skills"),
+    (".claude", "commands"),
+    (".claude", "skills"),
+    (".codex", "skills"),
+)
+_NON_OPERATIONAL_COMPONENT_KINDS = frozenset(
+    {"application", "contract", "foundation-service", "product-library", "shared-library", "tool"}
+)
 _COMPONENT_FIELDS: Mapping[ComponentKind, tuple[frozenset[str], frozenset[str]]] = MappingProxyType(
     {
         ComponentKind.APPLICATION: (frozenset({"product"}), frozenset({"capability"})),
@@ -327,6 +350,44 @@ RULES = (
             ),
         ),
     ),
+    Rule(
+        rule_id=RuleId("repository/artifacts/terraform-examples"),
+        version=1,
+        default_severity="error",
+        title="Do not commit example tfvars files",
+        description="Tracked filenames ending in .tfvars.example are prohibited.",
+        why="One typed variable interface prevents copied configuration from drifting.",
+        fix="Delete the example file and document validated inputs in variables.tf.",
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-artifact-no-example-tfvars",
+                title="Terraform example variables",
+                language="text",
+                before="deployments/alpha/terraform/terraform.tfvars.example",
+                after="deployments/alpha/terraform/variables.tf",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("repository/documentation/placement"),
+        version=1,
+        default_severity="error",
+        title="Keep Markdown in durable owned locations",
+        description="Tracked Markdown must have a durable documentation or tool-contract role.",
+        why="Owned documentation stays discoverable instead of becoming repository debris.",
+        fix="Move durable guidance into an approved docs root or delete transient notes.",
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-layout-markdown-placement",
+                title="Markdown placement",
+                language="text",
+                before="deployments/alpha/terraform/README.md",
+                after="docs/deployment/alpha-terraform.md",
+            ),
+        ),
+    ),
 )
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
@@ -334,6 +395,8 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("architecture/layout/component-paths"): RuleClassification.OBJECTIVE,
         RuleId("architecture/schema/component"): RuleClassification.SCHEMA,
         RuleId("architecture/dependencies/policy"): RuleClassification.OBJECTIVE,
+        RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
+        RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
     }
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
@@ -341,6 +404,8 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("architecture/schema/component"): 10,
         RuleId("architecture/dependencies/policy"): 20,
         RuleId("architecture/layout/component-paths"): 30,
+        RuleId("repository/artifacts/terraform-examples"): 40,
+        RuleId("repository/documentation/placement"): 50,
     }
 )
 _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = MappingProxyType(
@@ -360,7 +425,10 @@ _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = Mapp
 )
 
 _RULE_EVIDENCE: Mapping[RuleId, Literal["declared", "verified", "external"]] = MappingProxyType(
-    {rule.rule_id: "declared" for rule in RULES}
+    {
+        rule.rule_id: ("verified" if str(rule.rule_id).startswith("repository/") else "declared")
+        for rule in RULES
+    }
 )
 
 RULE_GOVERNANCE = tuple(
@@ -380,7 +448,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=5,
+    policy_version=6,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -475,6 +543,142 @@ def _expected_path(template: PathTemplate, component: Component) -> str:
     return "/".join(rendered)
 
 
+def _repository_artifact_diagnostics(
+    snapshot: RepositorySnapshot,
+) -> tuple[Diagnostic, ...]:
+    package_roots = frozenset(
+        _parent_path(project.path) for project in snapshot.inspection.packages
+    )
+    diagnostics: list[Diagnostic] = []
+    for tracked in snapshot.inspection.tracked_files:
+        path = tracked.path
+        component = _nearest_component(path, snapshot.manifest.components)
+        if path.casefold().endswith(".tfvars.example"):
+            diagnostics.append(
+                _repository_diagnostic(
+                    rule_id=RuleId("repository/artifacts/terraform-examples"),
+                    component=component,
+                    subject_kind="tracked-terraform-example",
+                    observed=path,
+                    expected="no tracked filename ending in .tfvars.example",
+                    message="tracked Terraform example variable file is prohibited",
+                    path=path,
+                    remediation=Remediation(
+                        summary=(
+                            "Remove the example file and keep one authoritative input contract."
+                        ),
+                        steps=(
+                            "Delete the tracked .tfvars.example file.",
+                            "Describe inputs and validation in variables.tf.",
+                        ),
+                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    ),
+                )
+            )
+        if path.casefold().endswith(".md") and not _markdown_path_is_owned(
+            path,
+            package_roots=package_roots,
+            component=component,
+        ):
+            diagnostics.append(
+                _repository_diagnostic(
+                    rule_id=RuleId("repository/documentation/placement"),
+                    component=component,
+                    subject_kind="tracked-markdown",
+                    observed=path,
+                    expected="a root, durable docs, package, generated, GitHub, or agent path",
+                    message="tracked Markdown is outside an approved owned location",
+                    path=path,
+                    remediation=Remediation(
+                        summary=(
+                            "Move durable guidance to an owned documentation surface or remove it."
+                        ),
+                        steps=(
+                            "Move durable guidance beneath docs, architecture, or adr.",
+                            (
+                                "Delete transient plans, handoffs, summaries, and "
+                                "implementation notes."
+                            ),
+                        ),
+                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    ),
+                )
+            )
+    return tuple(sorted(diagnostics, key=lambda item: (item.path, item.rule_id)))
+
+
+def _parent_path(path: str) -> str:
+    parent = PurePosixPath(path).parent.as_posix()
+    return "" if parent == "." else parent
+
+
+def _nearest_component(path: str, components: tuple[Component, ...]) -> Component | None:
+    owners = tuple(
+        component
+        for component in components
+        if path == component.path or path.startswith(f"{component.path}/")
+    )
+    return max(owners, key=lambda item: len(item.path), default=None)
+
+
+def _markdown_path_is_owned(
+    path: str,
+    *,
+    package_roots: frozenset[str],
+    component: Component | None,
+) -> bool:
+    pure_path = PurePosixPath(path)
+    parts = pure_path.parts
+    is_root_document = len(parts) == 1
+    is_durable_tree = parts[0] in _DOCUMENTATION_ROOTS or parts[0] == ".github"
+    is_agent_contract = pure_path.name in _AGENT_CONTRACT_NAMES or any(
+        parts[: len(root)] == root for root in _AGENT_CONTRACT_ROOTS
+    )
+    if is_root_document or is_durable_tree or is_agent_contract:
+        return True
+    parent = _parent_path(path)
+    if pure_path.name in _PACKAGE_DOCUMENT_NAMES and parent in package_roots:
+        return True
+    if component is None:
+        return False
+    if component.kind == "generated-client":
+        return True
+    return (
+        component.kind in _NON_OPERATIONAL_COMPONENT_KINDS
+        and parent == component.path
+        and pure_path.name in _PACKAGE_DOCUMENT_NAMES
+    )
+
+
+def _repository_diagnostic(  # ruff: ignore[too-many-arguments] - fields are explicit
+    *,
+    rule_id: RuleId,
+    component: Component | None,
+    subject_kind: str,
+    observed: str,
+    expected: str,
+    message: str,
+    path: str,
+    remediation: Remediation,
+) -> Diagnostic:
+    rule = next(item for item in RULES if item.rule_id == rule_id)
+    component_id = component.component_id if component is not None else ComponentId("repository")
+    return Diagnostic(
+        rule_id=rule.rule_id,
+        rule_version=rule.version,
+        severity=rule.severity,
+        evidence_level="verified",
+        component_id=component_id,
+        subject_kind=subject_kind,
+        observed=observed,
+        expected=expected,
+        message=message,
+        path=path,
+        manifest_anchor=f"tracked_files.{path}",
+        remediation=remediation,
+    )
+
+
 def _component_field_value(
     component: Component, field: Literal["product", "capability"]
 ) -> str | None:
@@ -495,6 +699,10 @@ class SarjPolicy:
     @staticmethod
     def rules() -> tuple[Rule, ...]:
         return RULES
+
+    @staticmethod
+    def evaluate_repository(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
+        return _repository_artifact_diagnostics(snapshot)
 
     @staticmethod
     def evaluate(manifest: Manifest) -> tuple[Diagnostic, ...]:

@@ -97,6 +97,8 @@ _RULE_SLUGS: dict[str, RuleSlug] = {
     "architecture/layout/component-paths": "component-paths",
     "architecture/schema/component": "component-identity",
     "repository/migration/consistency": "migration-consistency",
+    "repository/artifacts/terraform-examples": "terraform-examples",
+    "repository/documentation/placement": "documentation-placement",
 }
 
 

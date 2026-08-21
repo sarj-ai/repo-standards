@@ -340,6 +340,11 @@ class RepositorySnapshot:
     provenance: InputProvenance
 
 
+@runtime_checkable
+class RepositoryPolicy(Protocol):
+    def evaluate_repository(self, snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class RatchetEntry:
     fingerprint: str

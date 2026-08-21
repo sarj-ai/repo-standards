@@ -11,9 +11,14 @@ from repo_standards.core.models import (
     ComponentId,
     Dependency,
     FixtureId,
+    GitObjectId,
+    InputProvenance,
     Manifest,
     RepositoryId,
+    RepositoryInspection,
+    RepositorySnapshot,
     RuleId,
+    TrackedFileEvidence,
 )
 
 from .policy import RULES, SarjPolicy
@@ -54,12 +59,50 @@ def rule_example_cases() -> tuple[RuleExampleCase, ...]:
 
 def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
     identifier = str(fixture_id)
+    if identifier in {
+        "sarj-artifact-no-example-tfvars",
+        "sarj-layout-markdown-placement",
+    }:
+        return _run_repository_path(source)
     manifest = _manifest(fixture_id=identifier, source=source)
     diagnostics = (
         core_diagnostics(manifest)
         if identifier == "sarj-layout-overlapping-roots"
         else SarjPolicy().evaluate(manifest)
     )
+    return RuleExampleResult(
+        tuple(sorted((item.rule_id for item in diagnostics), key=str)), complete=True
+    )
+
+
+def _run_repository_path(source: str) -> RuleExampleResult:
+    path = source.strip()
+    snapshot = RepositorySnapshot(
+        manifest=Manifest(repository_id=RepositoryId("example-repository"), components=()),
+        baseline=None,
+        inspection=RepositoryInspection(
+            completion="complete",
+            source_revision="b" * 40,
+            tree_digest="c" * 40,
+            tracked_file_count=1,
+            packages=(),
+            workflow_paths=(),
+            cloudbuild_paths=(),
+            dockerfile_paths=(),
+            terraform_modules=(),
+            issues=(),
+            tracked_files=(TrackedFileEvidence(path=path, object_id="a" * 40),),
+        ),
+        provenance=InputProvenance(
+            mode="git-tree",
+            source_revision="b" * 40,
+            tree_digest="c" * 40,
+            manifest_path=".repo-lint/repository.toml",
+            manifest_object_id=GitObjectId("d" * 40),
+            manifest_digest="e" * 64,
+        ),
+    )
+    diagnostics = SarjPolicy.evaluate_repository(snapshot)
     return RuleExampleResult(
         tuple(sorted((item.rule_id for item in diagnostics), key=str)), complete=True
     )

@@ -60,8 +60,8 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     assert catalog.schema_version == 7
     assert {rule.review.status for rule in catalog.rules} == {"pending"}
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 8
-    assert len({rule.slug for rule in catalog.rules}) == 8
+    assert len(rule_ids) == len(set(rule_ids)) == 10
+    assert len({rule.slug for rule in catalog.rules}) == 10
     assert {
         binding.default_activation for policy in catalog.policies for binding in policy.bindings
     } == {"disabled"}
@@ -112,7 +112,7 @@ def test_catalog_graph_is_complete() -> None:
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 8
+    assert len(rule_ids) == len(set(rule_ids)) == 10
     assert {policy.policy_id for policy in catalog.policies} == {
         str(policy.policy_id) for policy in registry
     }
