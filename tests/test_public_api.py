@@ -76,9 +76,9 @@ def test_feature_apis_are_explicit() -> None:
     assert callable(inspect_repository)
 
 
-def test_manifest_rejects_removed_delivery_configuration() -> None:
+def test_manifest_rejects_removed_delivery_provider_configuration() -> None:
     manifest = b"""
-schema_version = 2
+schema_version = 3
 repository_id = "example"
 components = []
 
@@ -86,7 +86,7 @@ components = []
 provider = "github"
 """
 
-    with pytest.raises(ValueError, match="unknown fields: delivery"):
+    with pytest.raises(ValueError, match="delivery has unknown fields: provider"):
         parse_manifest_bytes(manifest)
 
 

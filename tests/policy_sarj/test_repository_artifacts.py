@@ -21,7 +21,7 @@ from repo_standards.policy_sarj import SarjPolicy
 def _snapshot(
     *paths: str,
     components: tuple[Component, ...] = (),
-    projects: tuple[PackageEvidence, ...] = (),
+    packages: tuple[PackageEvidence, ...] = (),
 ) -> RepositorySnapshot:
     tracked = tuple(
         TrackedFileEvidence(path=path, object_id=f"{index + 1:040x}")
@@ -38,7 +38,7 @@ def _snapshot(
             source_revision="a" * 40,
             tree_digest="b" * 40,
             tracked_file_count=len(tracked),
-            packages=projects,
+            packages=packages,
             workflow_paths=(),
             cloudbuild_paths=(),
             dockerfile_paths=(),
@@ -108,7 +108,7 @@ def test_package_root_readme_is_clean() -> None:
     snapshot = _snapshot(
         "applications/alpha/api/README.md",
         "applications/alpha/api/pyproject.toml",
-        projects=(
+        packages=(
             PackageEvidence(
                 ecosystem="python",
                 path="applications/alpha/api/pyproject.toml",

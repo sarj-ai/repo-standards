@@ -10,10 +10,15 @@ from pydantic import TypeAdapter
 from .canonical import canonical_path
 from .errors import ConfigurationError
 from .models import (
+    ActiveConfiguration,
     Baseline,
     Component,
     ComponentId,
+    DeliveryConfig,
     Dependency,
+    DeploymentAuthority,
+    DeploymentAuthorityRole,
+    DocumentationConfig,
     ExceptionRecord,
     Manifest,
     MigrationPath,
@@ -34,7 +39,9 @@ _MAX_INPUT_BYTES = 1_048_576
 _MAX_COMPONENTS = 10_000
 _MAX_MIGRATIONS = 10_000
 _MAX_EXCEPTIONS = 1_000
-_INPUT_SCHEMA_VERSION = 2
+_MANIFEST_SCHEMA_VERSION = 3
+_LEGACY_MANIFEST_SCHEMA_VERSION = 2
+_BASELINE_SCHEMA_VERSION = 2
 _OBJECT_MAPPING = TypeAdapter(dict[str, object])
 
 
@@ -210,6 +217,100 @@ def parse_exception(value: object, index: int) -> ExceptionRecord:
     )
 
 
+def _string_list(value: object, context: str) -> list[str]:
+    values = _list(value, context)
+    if not all(isinstance(item, str) and item for item in values):
+        ConfigurationError.fail(f"{context} must contain non-empty strings")
+    return [item for item in values if isinstance(item, str)]
+
+
+def parse_deployment_authority(value: object, index: int) -> DeploymentAuthority:
+    context = f"delivery.authorities[{index}]"
+    data = _mapping(value, context)
+    fields = {"id", "component_id", "environment", "mechanism", "path", "authority", "delegates"}
+    _strict_keys(
+        data,
+        fields,
+        {"id", "component_id", "environment", "mechanism", "path", "authority"},
+        context,
+    )
+    role_value = _string(data, "authority", context)
+    if role_value not in {"primary", "recovery"}:
+        ConfigurationError.fail(f"{context}.authority must be 'primary' or 'recovery'")
+    role: DeploymentAuthorityRole = "primary" if role_value == "primary" else "recovery"
+    path = canonical_path(_string(data, "path", context))
+    delegates = tuple(
+        canonical_path(item)
+        for item in _string_list(data.get("delegates", []), f"{context}.delegates")
+    )
+    if len(delegates) != len(set(delegates)) or path in delegates:
+        ConfigurationError.fail(f"{context}.delegates must be unique subordinate paths")
+    return DeploymentAuthority(
+        authority_id=_identifier(_string(data, "id", context), f"{context}.id"),
+        component_id=ComponentId(
+            _identifier(_string(data, "component_id", context), f"{context}.component_id")
+        ),
+        environment=_identifier(_string(data, "environment", context), f"{context}.environment"),
+        mechanism=_identifier(_string(data, "mechanism", context), f"{context}.mechanism"),
+        path=path,
+        authority=role,
+        delegates=delegates,
+    )
+
+
+def parse_delivery(value: object) -> DeliveryConfig:
+    data = _mapping(value, "delivery")
+    _strict_keys(data, {"authorities"}, set(), "delivery")
+    authorities = tuple(
+        parse_deployment_authority(item, index)
+        for index, item in enumerate(_list(data.get("authorities", []), "delivery.authorities"))
+    )
+    ids = tuple(item.authority_id for item in authorities)
+    if len(ids) != len(set(ids)):
+        ConfigurationError.fail("delivery.authorities must have unique IDs")
+    return DeliveryConfig(authorities=authorities)
+
+
+def parse_documentation(value: object) -> DocumentationConfig:
+    data = _mapping(value, "documentation")
+    _strict_keys(data, {"entrypoints"}, {"entrypoints"}, "documentation")
+    entrypoints = tuple(
+        canonical_path(item)
+        for item in _string_list(data["entrypoints"], "documentation.entrypoints")
+    )
+    if not entrypoints or len(entrypoints) != len(set(entrypoints)):
+        ConfigurationError.fail("documentation.entrypoints must be non-empty and unique")
+    if any(not path.casefold().endswith(".md") for path in entrypoints):
+        ConfigurationError.fail("documentation.entrypoints must be Markdown paths")
+    return DocumentationConfig(entrypoints=entrypoints)
+
+
+def parse_active_configuration(value: object, index: int) -> ActiveConfiguration:
+    context = f"active_configuration[{index}]"
+    data = _mapping(value, context)
+    fields = {"component_id", "path", "format"}
+    _strict_keys(data, fields, fields, context)
+    path = canonical_path(_string(data, "path", context))
+    format_value = _string(data, "format", context)
+    suffixes = {
+        "dotenv": (".env",),
+        "json": (".json",),
+        "toml": (".toml",),
+        "yaml": (".yaml", ".yml"),
+    }
+    if format_value not in suffixes:
+        ConfigurationError.fail(f"{context}.format must be dotenv, json, toml, or yaml")
+    if not path.casefold().endswith(suffixes[format_value]):
+        ConfigurationError.fail(f"{context}.path does not match its declared format")
+    return ActiveConfiguration(
+        component_id=ComponentId(
+            _identifier(_string(data, "component_id", context), f"{context}.component_id")
+        ),
+        path=path,
+        format=format_value,  # pyright: ignore[reportArgumentType]
+    )
+
+
 def parse_manifest_bytes(content: bytes) -> Manifest:
     try:
         parsed_manifest: object = tomllib.loads(
@@ -224,11 +325,19 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         "components",
         "migration_paths",
         "exceptions",
+        "delivery",
+        "documentation",
+        "active_configuration",
     }
     required = {"schema_version", "repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
-    if data["schema_version"] != _INPUT_SCHEMA_VERSION:
-        ConfigurationError.fail(f"manifest.schema_version must be {_INPUT_SCHEMA_VERSION}")
+    schema_version = data["schema_version"]
+    if schema_version not in {_LEGACY_MANIFEST_SCHEMA_VERSION, _MANIFEST_SCHEMA_VERSION}:
+        ConfigurationError.fail("manifest.schema_version must be 2 or 3")
+    if schema_version == _LEGACY_MANIFEST_SCHEMA_VERSION and (
+        {"documentation", "active_configuration", "delivery"} & data.keys()
+    ):
+        ConfigurationError.fail("manifest schema version 3 is required for repository evidence")
     raw_components = _list(data["components"], "manifest.components")
     if len(raw_components) > _MAX_COMPONENTS:
         ConfigurationError.fail(f"manifest may contain at most {_MAX_COMPONENTS} components")
@@ -242,6 +351,23 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
     component_ids = [item.component_id for item in components]
     if len(component_ids) != len(set(component_ids)):
         ConfigurationError.fail("manifest contains duplicate component IDs")
+    active_configuration = tuple(
+        parse_active_configuration(item, index)
+        for index, item in enumerate(
+            _list(data.get("active_configuration", []), "active_configuration")
+        )
+    )
+    active_paths = tuple(item.path.casefold() for item in active_configuration)
+    if len(active_paths) != len(set(active_paths)):
+        ConfigurationError.fail("active_configuration paths must be unique")
+    known_components = set(component_ids)
+    if any(item.component_id not in known_components for item in active_configuration):
+        ConfigurationError.fail("active_configuration references an unknown component")
+    delivery = parse_delivery(data["delivery"]) if "delivery" in data else None
+    if delivery is not None and any(
+        item.component_id not in known_components for item in delivery.authorities
+    ):
+        ConfigurationError.fail("delivery.authorities references an unknown component")
     return Manifest(
         repository_id=RepositoryId(
             _identifier(_string(data, "repository_id", "manifest"), "repository_id")
@@ -251,6 +377,11 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
             parse_migration(item, index) for index, item in enumerate(raw_migrations)
         ),
         exceptions=tuple(parse_exception(item, index) for index, item in enumerate(raw_exceptions)),
+        delivery=delivery,
+        documentation=parse_documentation(data["documentation"])
+        if "documentation" in data
+        else None,
+        active_configuration=active_configuration,
     )
 
 
@@ -272,8 +403,8 @@ def parse_baseline_bytes(content: bytes) -> Baseline:
         "fingerprints",
     }
     _strict_keys(data, fields, fields, "baseline")
-    if data["schema_version"] != _INPUT_SCHEMA_VERSION:
-        ConfigurationError.fail(f"baseline.schema_version must be {_INPUT_SCHEMA_VERSION}")
+    if data["schema_version"] != _BASELINE_SCHEMA_VERSION:
+        ConfigurationError.fail(f"baseline.schema_version must be {_BASELINE_SCHEMA_VERSION}")
     raw_fingerprints = _list(data["fingerprints"], "baseline.fingerprints")
     if not all(isinstance(item, str) for item in raw_fingerprints):
         ConfigurationError.fail("baseline fingerprints must be strings")

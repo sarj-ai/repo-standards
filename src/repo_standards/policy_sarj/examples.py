@@ -7,9 +7,13 @@ from typing import TYPE_CHECKING, NoReturn
 
 from repo_standards.core.engine import core_diagnostics
 from repo_standards.core.models import (
+    ActiveConfiguration,
     Component,
     ComponentId,
+    DeliveryConfig,
     Dependency,
+    DeploymentAuthority,
+    DocumentationConfig,
     FixtureId,
     GitObjectId,
     InputProvenance,
@@ -18,6 +22,7 @@ from repo_standards.core.models import (
     RepositoryInspection,
     RepositorySnapshot,
     RuleId,
+    TrackedContentEvidence,
     TrackedFileEvidence,
 )
 
@@ -64,6 +69,12 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
         "sarj-layout-markdown-placement",
     }:
         return _run_repository_path(source)
+    if identifier == "sarj-documentation-reachability":
+        return _run_documentation_example(source)
+    if identifier == "sarj-configuration-unresolved-placeholder":
+        return _run_configuration_example(source)
+    if identifier == "sarj-delivery-duplicate-authority":
+        return _run_authority_example(source)
     manifest = _manifest(fixture_id=identifier, source=source)
     diagnostics = (
         core_diagnostics(manifest)
@@ -101,6 +112,107 @@ def _run_repository_path(source: str) -> RuleExampleResult:
             manifest_object_id=GitObjectId("d" * 40),
             manifest_digest="e" * 64,
         ),
+    )
+    diagnostics = SarjPolicy.evaluate_repository(snapshot)
+    return RuleExampleResult(
+        tuple(sorted((item.rule_id for item in diagnostics), key=str)), complete=True
+    )
+
+
+def _repository_snapshot(*, manifest: Manifest, files: dict[str, bytes]) -> RepositorySnapshot:
+    tracked = tuple(
+        TrackedFileEvidence(path=path, object_id=f"{index + 1:040x}")
+        for index, path in enumerate(sorted(files))
+    )
+    return RepositorySnapshot(
+        manifest=manifest,
+        baseline=None,
+        inspection=RepositoryInspection(
+            completion="complete",
+            source_revision="b" * 40,
+            tree_digest="c" * 40,
+            tracked_file_count=len(tracked),
+            packages=(),
+            workflow_paths=(),
+            cloudbuild_paths=(),
+            dockerfile_paths=(),
+            terraform_modules=(),
+            issues=(),
+            tracked_files=tracked,
+        ),
+        provenance=InputProvenance(
+            mode="git-tree",
+            source_revision="b" * 40,
+            tree_digest="c" * 40,
+            manifest_path=".repo-standards/repository.toml",
+            manifest_object_id=GitObjectId("d" * 40),
+            manifest_digest="e" * 64,
+        ),
+        content=tuple(
+            TrackedContentEvidence(path, f"{index + 1:040x}", "f" * 64, content)
+            for index, (path, content) in enumerate(sorted(files.items()))
+        ),
+    )
+
+
+def _run_documentation_example(source: str) -> RuleExampleResult:
+    orphan = "orphan" in source
+    files = {
+        "README.md": b"[Docs](docs/index.md)\n",
+        "docs/index.md": (b"# Index\n" if orphan else b"[Guide](guide.md)\n"),
+        ("docs/orphan.md" if orphan else "docs/guide.md"): b"# Guide\n",
+    }
+    snapshot = _repository_snapshot(
+        manifest=Manifest(
+            RepositoryId("example-repository"),
+            (),
+            documentation=DocumentationConfig(("README.md",)),
+        ),
+        files=files,
+    )
+    diagnostics = SarjPolicy.evaluate_repository(snapshot)
+    return RuleExampleResult(
+        tuple(sorted((item.rule_id for item in diagnostics), key=str)), complete=True
+    )
+
+
+def _run_configuration_example(source: str) -> RuleExampleResult:
+    path = "config/production.yaml"
+    component = _application("api")
+    snapshot = _repository_snapshot(
+        manifest=Manifest(
+            RepositoryId("example-repository"),
+            (component,),
+            active_configuration=(ActiveConfiguration(component.component_id, path, "yaml"),),
+        ),
+        files={path: source.encode()},
+    )
+    diagnostics = SarjPolicy.evaluate_repository(snapshot)
+    return RuleExampleResult(
+        tuple(sorted((item.rule_id for item in diagnostics), key=str)), complete=True
+    )
+
+
+def _run_authority_example(source: str) -> RuleExampleResult:
+    component = _application("api")
+    count = 2 if "two primary" in source else 1
+    authorities = tuple(
+        DeploymentAuthority(
+            f"writer-{index}",
+            component.component_id,
+            "production",
+            "cloud-deploy",
+            f"deploy/writer-{index}.yaml",
+            "primary",
+        )
+        for index in range(count)
+    )
+    files = {item.path: b"apiVersion: serving.knative.dev/v1\n" for item in authorities}
+    snapshot = _repository_snapshot(
+        manifest=Manifest(
+            RepositoryId("example-repository"), (component,), delivery=DeliveryConfig(authorities)
+        ),
+        files=files,
     )
     diagnostics = SarjPolicy.evaluate_repository(snapshot)
     return RuleExampleResult(

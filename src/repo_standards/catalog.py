@@ -99,6 +99,9 @@ _RULE_SLUGS: dict[str, RuleSlug] = {
     "repository/migration/consistency": "migration-consistency",
     "repository/artifacts/terraform-examples": "terraform-examples",
     "repository/documentation/placement": "documentation-placement",
+    "repository/documentation/reachability": "documentation-reachability",
+    "repository/configuration/unresolved-placeholders": "unresolved-placeholders",
+    "architecture/delivery/authority": "deployment-authority",
 }
 
 

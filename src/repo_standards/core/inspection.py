@@ -22,9 +22,11 @@ from .models import (
     InputProvenance,
     InventoryKind,
     InventoryUnit,
+    Manifest,
     PackageEvidence,
     RepositoryInspection,
     RepositorySnapshot,
+    TrackedContentEvidence,
     TrackedFileEvidence,
     WorkspaceEvidence,
 )
@@ -41,6 +43,12 @@ _MAX_TOTAL_METADATA_BYTES = 67_108_864
 _MAX_SELECTED_BLOB_BYTES = 5_242_880
 _MAX_TOTAL_SELECTED_BLOB_BYTES = 20_971_520
 _MAX_SELECTED_BLOBS = 100
+_MAX_MARKDOWN_BLOBS = 10_000
+_MAX_MARKDOWN_BLOB_BYTES = 1_048_576
+_MAX_TOTAL_MARKDOWN_BYTES = 67_108_864
+_MAX_ACTIVE_CONFIG_BLOBS = 100
+_MAX_ACTIVE_CONFIG_BLOB_BYTES = 1_048_576
+_MAX_TOTAL_ACTIVE_CONFIG_BYTES = 20_971_520
 _GIT_TREE_FIELD_COUNT = 3
 _GIT_ENVIRONMENT = MappingProxyType(
     {
@@ -144,7 +152,7 @@ def inspect_repository(root: Path, *, identity: GitIdentity | None = None) -> Re
     return _inspection_from_blobs(resolved, identity, blobs)
 
 
-def load_repository_snapshot(
+def load_repository_snapshot(  # ruff: ignore[too-many-locals] - immutable inputs stay explicit
     root: Path,
     *,
     manifest_path: str = ".repo-standards/repository.toml",
@@ -178,11 +186,13 @@ def load_repository_snapshot(
     baseline_content = (
         _required_content(contents, baseline_blob) if baseline_blob is not None else None
     )
+    manifest = parse_manifest_bytes(manifest_content)
+    evidence = _repository_content_evidence(resolved, manifest, blobs)
     inspection = _inspection_from_blobs(resolved, identity, blobs)
     if inspection.completion != "complete":
         ConfigurationError.fail("repository inspection is incomplete")
     return RepositorySnapshot(
-        manifest=parse_manifest_bytes(manifest_content),
+        manifest=manifest,
         baseline=(parse_baseline_bytes(baseline_content) if baseline_content is not None else None),
         inspection=inspection,
         provenance=InputProvenance(
@@ -200,6 +210,92 @@ def load_repository_snapshot(
                 _content_digest(baseline_content) if baseline_content is not None else None
             ),
         ),
+        content=evidence,
+    )
+
+
+def load_calibration_snapshot(
+    root: Path,
+    manifest_content: bytes,
+    *,
+    identity: GitIdentity | None = None,
+) -> RepositorySnapshot:
+    """Load an immutable Git tree with an external, calibration-only manifest."""
+    resolved = root.resolve(strict=True)
+    if not resolved.is_dir():
+        ConfigurationError.fail("repository root must be a directory")
+    if identity is None:
+        identity = git_identity(resolved)
+    blobs = _tracked_files(resolved, identity.tree_digest)
+    manifest = parse_manifest_bytes(manifest_content)
+    inspection = _inspection_from_blobs(resolved, identity, blobs)
+    if inspection.completion != "complete":
+        ConfigurationError.fail("repository inspection is incomplete")
+    return RepositorySnapshot(
+        manifest=manifest,
+        baseline=None,
+        inspection=inspection,
+        provenance=InputProvenance(
+            mode="git-tree",
+            source_revision=identity.source_revision,
+            tree_digest=identity.tree_digest,
+            manifest_path="<calibration-manifest>",
+            manifest_object_id=None,
+            manifest_digest=_content_digest(manifest_content),
+        ),
+        content=_repository_content_evidence(resolved, manifest, blobs),
+    )
+
+
+def _repository_content_evidence(
+    root: Path, manifest: Manifest, blobs: tuple[TrackedBlob, ...]
+) -> tuple[TrackedContentEvidence, ...]:
+    by_path = {blob.path: blob for blob in blobs}
+    if manifest.delivery is not None:
+        authority_paths = {
+            path for item in manifest.delivery.authorities for path in (item.path, *item.delegates)
+        }
+        if authority_paths - set(by_path):
+            ConfigurationError.fail("a deployment authority path is absent from the exact Git tree")
+    selected: dict[str, tuple[TrackedBlob, bytes]] = {}
+    if manifest.documentation is not None:
+        missing = sorted(set(manifest.documentation.entrypoints) - set(by_path))
+        if missing:
+            ConfigurationError.fail("a documentation entrypoint is absent from the exact Git tree")
+        markdown = tuple(blob for blob in blobs if blob.path.casefold().endswith(".md"))
+        if len(markdown) > _MAX_MARKDOWN_BLOBS:
+            ConfigurationError.fail("repository exceeds the 10000-file Markdown safety limit")
+        contents = _read_bounded_blob_batch(
+            root,
+            markdown,
+            max_file_bytes=_MAX_MARKDOWN_BLOB_BYTES,
+            max_total_bytes=_MAX_TOTAL_MARKDOWN_BYTES,
+        )
+        selected.update((blob.path, (blob, _required_content(contents, blob))) for blob in markdown)
+    if manifest.active_configuration:
+        if len(manifest.active_configuration) > _MAX_ACTIVE_CONFIG_BLOBS:
+            ConfigurationError.fail("active configuration exceeds the 100-file safety limit")
+        try:
+            active = tuple(by_path[item.path] for item in manifest.active_configuration)
+        except KeyError:
+            ConfigurationError.fail(
+                "an active configuration path is absent from the exact Git tree"
+            )
+        contents = _read_bounded_blob_batch(
+            root,
+            active,
+            max_file_bytes=_MAX_ACTIVE_CONFIG_BLOB_BYTES,
+            max_total_bytes=_MAX_TOTAL_ACTIVE_CONFIG_BYTES,
+        )
+        selected.update((blob.path, (blob, _required_content(contents, blob))) for blob in active)
+    return tuple(
+        TrackedContentEvidence(
+            path=path,
+            object_id=blob.object_id,
+            content_digest=_content_digest(content),
+            content=content,
+        )
+        for path, (blob, content) in sorted(selected.items())
     )
 
 

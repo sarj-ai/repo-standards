@@ -1,18 +1,29 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from enum import StrEnum
+import json
 from pathlib import PurePosixPath
+import posixpath
 import re
+import tomllib
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
+from urllib.parse import unquote, urlsplit
+
+from markdown_it import MarkdownIt
+from pydantic import TypeAdapter
+import yaml
 
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import (
     Component,
     ComponentId,
+    DeploymentAuthority,
     Diagnostic,
     ExampleLanguage,
     FixtureId,
+    JSONValue,
     Manifest,
     PolicyId,
     Remediation,
@@ -20,6 +31,7 @@ from repo_standards.core.models import (
     Rule,
     RuleExamplePair,
     RuleId,
+    SourceLocation,
 )
 from repo_standards.core.taxonomy import (
     ARCHITECTURE,
@@ -103,6 +115,7 @@ _PACKAGE_DOCUMENT_NAMES = frozenset(
         "CHANGELOG.md",
         "CODE_OF_CONDUCT.md",
         "CONTRIBUTING.md",
+        "HISTORY.md",
         "LICENSE.md",
         "README.md",
         "SECURITY.md",
@@ -388,6 +401,66 @@ RULES = (
             ),
         ),
     ),
+    Rule(
+        rule_id=RuleId("repository/documentation/reachability"),
+        version=1,
+        default_severity="warning",
+        title="Keep durable documentation reachable",
+        description="Declared documentation entrypoints lead to every durable Markdown page.",
+        why="Connected documentation remains discoverable and maintainable.",
+        fix="Link the page from a reachable index, declare it as an entrypoint, or remove it.",
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-documentation-reachability",
+                title="Documentation reachability",
+                language="text",
+                before="README.md -> docs/index.md\ndocs/orphan.md",
+                after="README.md -> docs/index.md -> docs/guide.md",
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("repository/configuration/unresolved-placeholders"),
+        version=1,
+        default_severity="warning",
+        title="Resolve active configuration placeholders",
+        description="Declared active configuration contains reviewed deployable values.",
+        why="Placeholder values can make configured deployments fail at runtime.",
+        fix="Replace the sentinel with reviewed configuration or remove the unused setting.",
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-configuration-unresolved-placeholder",
+                title="Active configuration placeholder",
+                language="yaml",
+                before="endpoint: change-me",
+                after="endpoint: ${SERVICE_ENDPOINT}",
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("architecture/delivery/authority"),
+        version=1,
+        default_severity="warning",
+        title="Keep one deployment authority",
+        description="Each workload and environment has one declared primary deployment writer.",
+        why="A single writer makes release and rollback ownership deterministic.",
+        fix="Retain one primary authority and classify helpers as delegates or recovery paths.",
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-delivery-duplicate-authority",
+                title="Deployment authority",
+                language="toml",
+                before="two primary production writers",
+                after="one primary plus delegates",
+                expected_severity="warning",
+            ),
+        ),
+    ),
 )
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
@@ -397,6 +470,9 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("architecture/dependencies/policy"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
+        RuleId("repository/documentation/reachability"): RuleClassification.JUDGMENT,
+        RuleId("repository/configuration/unresolved-placeholders"): RuleClassification.JUDGMENT,
+        RuleId("architecture/delivery/authority"): RuleClassification.OPERATIONAL,
     }
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
@@ -406,6 +482,9 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("architecture/layout/component-paths"): 30,
         RuleId("repository/artifacts/terraform-examples"): 40,
         RuleId("repository/documentation/placement"): 50,
+        RuleId("repository/documentation/reachability"): 60,
+        RuleId("repository/configuration/unresolved-placeholders"): 70,
+        RuleId("architecture/delivery/authority"): 80,
     }
 )
 _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = MappingProxyType(
@@ -448,7 +527,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=6,
+    policy_version=7,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -604,7 +683,12 @@ def _repository_artifact_diagnostics(
                     ),
                 )
             )
-    return tuple(sorted(diagnostics, key=lambda item: (item.path, item.rule_id)))
+    diagnostics.extend(_documentation_reachability_diagnostics(snapshot, package_roots))
+    diagnostics.extend(_active_configuration_diagnostics(snapshot))
+    diagnostics.extend(_deployment_authority_diagnostics(snapshot))
+    return tuple(
+        sorted(diagnostics, key=lambda item: (item.path, item.rule_id, item.manifest_anchor))
+    )
 
 
 def _parent_path(path: str) -> str:
@@ -648,6 +732,286 @@ def _markdown_path_is_owned(
         and parent == component.path
         and pure_path.name in _PACKAGE_DOCUMENT_NAMES
     )
+
+
+_MARKDOWN = MarkdownIt("commonmark")
+_CONFIG_VALUE: TypeAdapter[JSONValue] = TypeAdapter(JSONValue)
+_PLACEHOLDER_SENTINELS = frozenset(
+    {
+        "<replace-me>",
+        "<required>",
+        "change-me",
+        "change_me",
+        "changeme",
+        "replace-me",
+        "replace-this",
+        "replace_me",
+        "your-value-here",
+        "your_value_here",
+    }
+)
+_MIN_QUOTED_VALUE_LENGTH = 2
+_MIN_COMPETING_AUTHORITIES = 2
+
+
+def _documentation_reachability_diagnostics(  # ruff: ignore[too-many-branches]
+    snapshot: RepositorySnapshot, package_roots: frozenset[str]
+) -> tuple[Diagnostic, ...]:
+    documentation = snapshot.manifest.documentation
+    if documentation is None:
+        return ()
+    contents = {
+        item.path: item.content for item in snapshot.content if item.path.casefold().endswith(".md")
+    }
+    tracked = frozenset(item.path for item in snapshot.inspection.tracked_files)
+    eligible: set[str] = set()
+    candidates: set[str] = set()
+    seeds: set[str] = set(documentation.entrypoints)
+    for path in sorted(contents):
+        component = _nearest_component(path, snapshot.manifest.components)
+        if not _markdown_path_is_owned(path, package_roots=package_roots, component=component):
+            continue
+        pure = PurePosixPath(path)
+        parts = pure.parts
+        if (
+            parts[0] == ".github"
+            or pure.name in _AGENT_CONTRACT_NAMES
+            or any(parts[: len(root)] == root for root in _AGENT_CONTRACT_ROOTS)
+            or (component is not None and component.kind == "generated-client")
+        ):
+            continue
+        eligible.add(path)
+        parent = _parent_path(path)
+        if pure.name in _PACKAGE_DOCUMENT_NAMES and (not parent or parent in package_roots):
+            seeds.add(path)
+        else:
+            candidates.add(path)
+    graph: dict[str, set[str]] = {path: set() for path in eligible}
+    for source in sorted(eligible):
+        try:
+            tokens = _MARKDOWN.parse(contents[source].decode("utf-8"))
+        except UnicodeDecodeError:
+            ConfigurationError.fail("declared documentation must be UTF-8")
+        for parent in tokens:
+            for token in parent.children or ():
+                if token.type == "link_open":
+                    href = token.attrGet("href")
+                    target = _markdown_link_target(
+                        source, href if isinstance(href, str) else None, tracked
+                    )
+                    if target in eligible:
+                        graph[source].add(target)
+    reachable = set(seeds & eligible)
+    pending = list(reachable)
+    while pending:
+        for target in graph.get(pending.pop(), ()):
+            if target not in reachable:
+                reachable.add(target)
+                pending.append(target)
+    return tuple(
+        replace(
+            _repository_diagnostic(
+                rule_id=RuleId("repository/documentation/reachability"),
+                component=_nearest_component(path, snapshot.manifest.components),
+                subject_kind="unreachable-documentation",
+                observed=path,
+                expected="reachable from a declared documentation entrypoint",
+                message="durable Markdown is unreachable from declared documentation entrypoints",
+                path=path,
+                remediation=Remediation(
+                    summary="Connect the page to the documentation graph or remove it.",
+                    steps=("Link it from a reachable index or declare it as an entrypoint.",),
+                    validation=("Rerun repo-standards.",),
+                ),
+            ),
+            manifest_anchor=f"documentation.reachability.{path}",
+        )
+        for path in sorted(candidates - reachable)
+    )
+
+
+def _markdown_link_target(source: str, href: str | None, tracked: frozenset[str]) -> str | None:
+    if not href:
+        return None
+    parsed = urlsplit(href)
+    if parsed.scheme or parsed.netloc or not parsed.path:
+        return None
+    decoded = unquote(parsed.path)
+    raw = (
+        decoded.removeprefix("/")
+        if decoded.startswith("/")
+        else posixpath.join(_parent_path(source), decoded)
+    )
+    normalized = posixpath.normpath(raw)
+    if normalized in {".", ".."} or normalized.startswith("../"):
+        return None
+    if normalized in tracked and normalized.casefold().endswith(".md"):
+        return normalized
+    index = f"{normalized.rstrip('/')}/README.md"
+    return index if index in tracked else None
+
+
+def _active_configuration_diagnostics(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
+    content_by_path = {item.path: item.content for item in snapshot.content}
+    components = {item.component_id: item for item in snapshot.manifest.components}
+    diagnostics: list[Diagnostic] = []
+    for declaration in snapshot.manifest.active_configuration:
+        for pointer, value in _parse_active_configuration(
+            declaration.path, declaration.format, content_by_path[declaration.path]
+        ):
+            if value.strip().casefold() not in _PLACEHOLDER_SENTINELS:
+                continue
+            diagnostics.append(
+                replace(
+                    _repository_diagnostic(
+                        rule_id=RuleId("repository/configuration/unresolved-placeholders"),
+                        component=components[declaration.component_id],
+                        subject_kind="active-configuration-placeholder",
+                        observed=f"unresolved placeholder sentinel at {pointer}",
+                        expected="reviewed active configuration or a typed runtime reference",
+                        message="active configuration contains an unresolved placeholder sentinel",
+                        path=declaration.path,
+                        remediation=Remediation(
+                            summary="Replace the sentinel or remove the setting.",
+                            steps=("Use typed configuration or a secret reference.",),
+                            validation=("Rerun repo-standards.",),
+                        ),
+                    ),
+                    manifest_anchor=f"active_configuration.{declaration.path}.{pointer}",
+                    observed_value={"category": "unresolved-placeholder", "pointer": pointer},
+                )
+            )
+    return tuple(diagnostics)
+
+
+def _parse_active_configuration(
+    path: str, format_name: str, content: bytes
+) -> tuple[tuple[str, str], ...]:
+    try:
+        text = content.decode("utf-8")
+        decoded = _decode_active_configuration(format_name, text)
+        value = _CONFIG_VALUE.validate_python(decoded, strict=True)
+    except (
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+        tomllib.TOMLDecodeError,
+        yaml.YAMLError,
+    ):
+        ConfigurationError.fail(f"cannot parse declared active configuration: {path}")
+    return tuple(_string_scalars(value))
+
+
+def _decode_active_configuration(format_name: str, text: str) -> object:
+    if format_name == "json":
+        return json.loads(  # pyright: ignore[reportAny]
+            text, object_pairs_hook=_unique_json_mapping
+        )
+    if format_name == "toml":
+        return tomllib.loads(text)
+    if format_name == "yaml":
+        return yaml.safe_load(text)  # pyright: ignore[reportAny]
+    return _parse_dotenv(text)
+
+
+def _unique_json_mapping(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            ConfigurationError.fail("active JSON configuration contains a duplicate key")
+        result[key] = value
+    return result
+
+
+def _parse_dotenv(text: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, value = line.partition("=")
+        key = key.strip()
+        if (
+            separator != "="
+            or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None
+            or key in result
+        ):
+            ConfigurationError.fail(
+                f"active dotenv configuration has an invalid assignment at line {number}"
+            )
+        value = value.strip()
+        if len(value) >= _MIN_QUOTED_VALUE_LENGTH and value[0] in {'"', "'"}:
+            closing = value.find(value[0], 1)
+            if closing < 1 or (
+                value[closing + 1 :].strip() and not value[closing + 1 :].strip().startswith("#")
+            ):
+                ConfigurationError.fail(
+                    f"active dotenv configuration has an invalid value at line {number}"
+                )
+            value = value[1:closing]
+        elif " #" in value:
+            value = value.partition(" #")[0].rstrip()
+        result[key] = value
+    return result
+
+
+def _string_scalars(value: JSONValue, pointer: str = "$") -> list[tuple[str, str]]:
+    if isinstance(value, str):
+        return [(pointer, value)]
+    if isinstance(value, dict):
+        return [
+            item
+            for key in sorted(value, key=str)
+            for item in _string_scalars(
+                value[key], f"{pointer}/{str(key).replace('~', '~0').replace('/', '~1')}"
+            )
+        ]
+    if isinstance(value, list):
+        return [
+            item
+            for index, child in enumerate(value)
+            for item in _string_scalars(child, f"{pointer}/{index}")
+        ]
+    return []
+
+
+def _deployment_authority_diagnostics(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
+    if snapshot.manifest.delivery is None:
+        return ()
+    groups: dict[tuple[ComponentId, str], list[DeploymentAuthority]] = {}
+    for authority in snapshot.manifest.delivery.authorities:
+        if authority.authority == "primary":
+            groups.setdefault((authority.component_id, authority.environment), []).append(authority)
+    diagnostics: list[Diagnostic] = []
+    for (component_id, environment), values in sorted(groups.items()):
+        if len(values) < _MIN_COMPETING_AUTHORITIES:
+            continue
+        authorities = sorted(values, key=lambda item: item.authority_id)
+        first = authorities[0]
+        diagnostics.append(
+            replace(
+                _diagnostic(
+                    rule_id=RuleId("architecture/delivery/authority"),
+                    component_id=component_id,
+                    subject_kind="deployment-authority",
+                    observed=", ".join(item.authority_id for item in authorities),
+                    expected=f"one primary authority for {component_id} in {environment}",
+                    message=(
+                        "multiple primary deployment authorities target one workload environment"
+                    ),
+                    path=first.path,
+                    anchor=f"delivery.authorities.{component_id}.{environment}",
+                    remediation=_remediation(
+                        "Retain one primary deployment authority.",
+                        "Move helpers to delegates or recovery.",
+                    ),
+                ),
+                related_locations=tuple(SourceLocation(path=item.path) for item in authorities[1:]),
+            )
+        )
+    return tuple(diagnostics)
 
 
 def _repository_diagnostic(  # ruff: ignore[too-many-arguments] - fields are explicit

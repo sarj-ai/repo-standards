@@ -338,9 +338,10 @@ wheels = [
 
 [[package]]
 name = "repo-standards"
-version = "5.0.1"
+version = "5.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "markdown-it-py" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "typer" },
@@ -357,6 +358,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "markdown-it-py", specifier = ">=4,<5" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pyyaml", specifier = ">=6.0.2,<7" },
     { name = "typer", specifier = ">=0.15.0,<1" },
