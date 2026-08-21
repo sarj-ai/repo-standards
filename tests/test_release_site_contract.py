@@ -45,13 +45,10 @@ def _write(directory: Path, name: str, value: dict[str, JSONValue]) -> None:
 def test_release_site_accepts_the_exact_catalog_v7_contract(tmp_path: Path) -> None:
     _site(tmp_path)
 
-    assert (
-        verify_site_catalog(
-            tmp_path,
-            {"api/v7/catalog.json", "api/v7/catalog.schema.json"},
-        )
-        == []
-    )
+    assert verify_site_catalog(
+        tmp_path,
+        {"api/v7/catalog.json", "api/v7/catalog.schema.json"},
+    ) == []
 
 
 def test_release_site_rejects_legacy_routes_and_tombstones(tmp_path: Path) -> None:
