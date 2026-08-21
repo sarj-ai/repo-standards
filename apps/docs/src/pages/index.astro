@@ -8,7 +8,7 @@ const quickStart = `uvx --from ${catalog.product.distribution} repo-standards pu
 ---
 
 <ReferencePage title={catalog.product.title} description={catalog.product.summary}>
-  <article class="about-page">
+  <article class="about-page sarj-about-page">
     <h1>About</h1>
     <p>Repository standards should be easy to understand before they are enforced.</p>
     <p>Repo Standards measures pull-request size today. Every lint rule stays disabled while it is under review.</p>
@@ -18,6 +18,11 @@ const quickStart = `uvx --from ${catalog.product.distribution} repo-standards pu
       <h2 id="quick-start">Quick start</h2>
       <Code code={quickStart} lang="bash" frame="terminal" wrap />
       <p><a href="/cli/">CLI reference</a></p>
+    </section>
+
+    <section class="sarj-related-standards" aria-labelledby="related-standards">
+      <h2 id="related-standards">Related standards</h2>
+      <p><a href="https://code-standards.sarj.ai/">Explore Sarj Code Standards</a> for deterministic Python, TypeScript, SQL, IaC, and text rules.</p>
     </section>
   </article>
 </ReferencePage>

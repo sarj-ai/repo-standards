@@ -157,6 +157,7 @@ class PageSemantics(HTMLParser):
         self.current_crumbs = 0
         self.rule_navigation = 0
         self.rule_id: str | None = None
+        self.code_comparisons = 0
         self.example_kinds: list[str] = []
         self._capture_h1 = False
         self._capture_title = False
@@ -183,9 +184,13 @@ class PageSemantics(HTMLParser):
         rule_id = values.get("data-rule-id")
         if "data-rule-page" in values and rule_id:
             self.rule_id = rule_id
-        example_kind = values.get("data-example-kind")
-        if example_kind:
-            self.example_kinds.append(example_kind)
+        if values.get("data-code-comparison"):
+            self.code_comparisons += 1
+        classes = set((values.get("class") or "").split())
+        if "sarj-code-comparison__side--before" in classes:
+            self.example_kinds.append("before")
+        if "sarj-code-comparison__side--after" in classes:
+            self.example_kinds.append("after")
 
     def handle_endtag(self, tag: str) -> None:
         if tag == HTMLTag.H1:
@@ -464,7 +469,8 @@ def verify_rule_page(
         violations.append(f"site:{relative}: rule navigation is missing")
     expected_examples = len(rule.examples)
     if (
-        parser.example_kinds.count("before") != expected_examples
+        parser.code_comparisons != expected_examples
+        or parser.example_kinds.count("before") != expected_examples
         or parser.example_kinds.count("after") != expected_examples
     ):
         violations.append(f"site:{relative}: example pairs differ from catalog")

@@ -25,6 +25,11 @@ const sourceUrl = `${catalog.product.repository_url}/blob/${sourceRevision}/${ru
 const ruleJsonUrl = `/api/v7/rules/${rule.rule_id.split('/').map(encodeURIComponent).join('/')}.json`;
 const { category, topic, previous, next } = rulePage(rule);
 const description = ruleDescription(rule);
+const isPending = rule.review.status === 'pending';
+const pageTitle = isPending ? `${rule.slug} — Pending review` : rule.slug;
+const pageDescription = isPending
+  ? `${description} Pending review; not yet approved for enforcement.`
+  : description;
 const examples = ruleExamples(rule);
 const [primaryExample, ...additionalExamples] = examples;
 const categoryUrl = rule.review.status === 'pending'
@@ -37,9 +42,8 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
 ---
 
 <ReferencePage
-  title={rule.slug}
-  description={description}
-  noindex={rule.review.status === 'pending'}
+  title={pageTitle}
+  description={pageDescription}
 >
   <article
     class="rule-detail"
@@ -66,6 +70,12 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
 
       <h1>{rule.slug}</h1>
       <p class="lede" data-rule-description>{description}</p>
+      {isPending && (
+        <aside class="pending-review" aria-label="Review status">
+          <strong>Pending review</strong>
+          <span>Published for evaluation and may change. Do not treat this rule as approved policy.</span>
+        </aside>
+      )}
       <div class="rule-header-links" aria-label="Rule links">
         <code>{rule.rule_id}</code>
         <a href={sourceUrl}>Rule source</a>
