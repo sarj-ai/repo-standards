@@ -1,5 +1,6 @@
 ---
-import Breadcrumbs from '../../../components/Breadcrumbs.astro';
+import Breadcrumbs from '@sarj/docs-ui/Breadcrumbs.astro';
+
 import ReferencePage from '../../../components/ReferencePage.astro';
 import { approvedRules, referenceCatalog, type CategoryView } from '../../../lib/catalog';
 import { ruleDescription } from '../../../lib/rule-view';
@@ -21,8 +22,8 @@ const approvedCount = topics.reduce((total, topic) => total + topic.rules.length
 ---
 
 <ReferencePage title={category.category.label} description={`${approvedCount} approved repository rules.`}>
-  <Breadcrumbs items={[{ label: 'Rules', href: '/rules/' }, { label: category.category.label }]} />
-  <h1 class="sr-only">{category.category.label}</h1>
+  <Breadcrumbs ancestors={[{ label: 'Rules', href: '/rules/' }]} current={category.category.label} />
+  <h1 class="sarj-visually-hidden">{category.category.label}</h1>
   <div class="rule-catalog" data-category-id={category.category.category_id}>
     {topics.length === 0 && <div class="directory-empty-state"><p>No rules in this area are approved yet.</p><a href="/review/">Review pending rules</a></div>}
     {topics.map(({ topic, rules }) => {

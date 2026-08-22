@@ -56,7 +56,6 @@ export default defineConfig({
       credits: false,
       components: {
         PageTitle: './src/components/PageTitle.astro',
-        Search: './src/components/NoSearch.astro',
       },
     }),
   ],
