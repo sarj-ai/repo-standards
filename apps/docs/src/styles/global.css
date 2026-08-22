@@ -86,15 +86,6 @@ h2 { margin-top: 1.5rem; }
 .schema-list h2 { margin: 0 0 1rem; font-size: 1.2rem; }
 .not-found { padding: 4rem 0; }
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
 .rule-directory { max-width: 68rem; padding-top: .75rem; }
 .directory-empty, .directory-empty-state { color: var(--sl-color-gray-2); }
 .rule-table { margin: 0; padding: 0; border: 1px solid var(--sarj-color-rule); border-bottom: 0; list-style: none; }
