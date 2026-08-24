@@ -109,6 +109,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 const completePolicy = appendHashes(policy, [...hashes].sort());
+const policyHeader = `  Content-Security-Policy: ${completePolicy}`;
+if (Buffer.byteLength(policyHeader, 'utf8') > 2_000) {
+  throw new Error('Cloudflare Content-Security-Policy header exceeds the 2,000-byte line limit.');
+}
 for (const [path, document] of documents) {
   await writeFile(new URL(path, outputDirectory), document.replace(policyPattern(), ''), 'utf8');
 }
@@ -121,7 +125,7 @@ if (/^\s*X-Robots-Tag:/imu.test(headers)) {
 }
 await writeFile(
   headersUrl,
-  headers.replace('/*\n', `/*\n  Content-Security-Policy: ${completePolicy}\n`),
+  headers.replace('/*\n', `/*\n${policyHeader}\n`),
   'utf8',
 );
 

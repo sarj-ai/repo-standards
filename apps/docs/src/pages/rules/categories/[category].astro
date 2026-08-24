@@ -6,10 +6,13 @@ import { approvedRules, referenceCatalog, type CategoryView } from '../../../lib
 import { ruleDescription } from '../../../lib/rule-view';
 
 export function getStaticPaths() {
-  return referenceCatalog.map((category) => ({
+  const approvedIds = new Set(approvedRules.map((rule) => rule.rule_id));
+  return referenceCatalog
+    .filter((category) => category.topics.some((topic) => topic.rules.some(({ rule }) => approvedIds.has(rule.rule_id))))
+    .map((category) => ({
     params: { category: category.category.category_id },
     props: { category },
-  }));
+    }));
 }
 
 interface Props { category: CategoryView }

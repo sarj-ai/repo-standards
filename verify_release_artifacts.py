@@ -47,6 +47,7 @@ SITE_SUFFIXES = frozenset(
         ".svg",
         ".txt",
         ".webmanifest",
+        ".webp",
         ".woff",
         ".woff2",
         ".xml",
@@ -326,7 +327,7 @@ def verify_site(directory: Path) -> list[str]:
         if artifact_path.parts[0] == "pagefind":
             violations.append(f"site:{artifact_path}: search artifacts are not publishable")
         if (
-            artifact_path.name != "_headers"
+            artifact_path.name not in {"_headers", "_redirects"}
             and artifact_path.suffix.casefold() not in SITE_SUFFIXES
         ):
             violations.append(f"site:{artifact_path}: unexpected static-site file type")

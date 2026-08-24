@@ -7,11 +7,48 @@
   Strict-Transport-Security: max-age=31536000; includeSubDomains
 
 /_astro/*
+  ! Content-Security-Policy
+  ! Cross-Origin-Opener-Policy
+  ! Permissions-Policy
+  ! Referrer-Policy
+  ! X-Frame-Options
   Cache-Control: public, max-age=31536000, immutable
 
+/favicon.svg
+  ! Content-Security-Policy
+  ! Cross-Origin-Opener-Policy
+  ! Permissions-Policy
+  ! Referrer-Policy
+  ! X-Frame-Options
+  Cache-Control: public, max-age=86400
+
 /api/v7/*
+  ! Content-Security-Policy
+  ! Cross-Origin-Opener-Policy
+  ! Permissions-Policy
+  ! Referrer-Policy
+  ! X-Frame-Options
   Access-Control-Allow-Origin: *
   Cache-Control: public, max-age=300, s-maxage=3600, stale-while-revalidate=86400
 
 /health.json
+  ! Content-Security-Policy
+  ! Cross-Origin-Opener-Policy
+  ! Permissions-Policy
+  ! Referrer-Policy
+  ! X-Frame-Options
   Cache-Control: no-store
+
+/robots.txt
+  ! Content-Security-Policy
+  ! Cross-Origin-Opener-Policy
+  ! Permissions-Policy
+  ! Referrer-Policy
+  ! X-Frame-Options
+
+/sitemap-*
+  ! Content-Security-Policy
+  ! Cross-Origin-Opener-Policy
+  ! Permissions-Policy
+  ! Referrer-Policy
+  ! X-Frame-Options
