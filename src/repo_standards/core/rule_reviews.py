@@ -55,6 +55,11 @@ APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = (
         1,
         ApprovedRuleReview(reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76"),
     ),
+    (
+        RuleId("repository/artifacts/schema-derived-config-examples"),
+        1,
+        ApprovedRuleReview(reviewed_in="2203f41c7025e8c045b1817e93d0bb1f2dfb68bb"),
+    ),
 )
 
 

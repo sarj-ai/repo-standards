@@ -61,6 +61,7 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     reviews = {rule.rule_id: rule.review for rule in catalog.rules}
     approved_ids = {
         RuleId("repository/artifacts/bespoke-iac-verifiers"),
+        RuleId("repository/artifacts/schema-derived-config-examples"),
         RuleId("repository/artifacts/terraform-test-files"),
     }
     assert {
@@ -68,7 +69,10 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     } == approved_ids
     assert {
         review.reviewed_in for rule_id, review in reviews.items() if rule_id in approved_ids
-    } == {"0e124af8dde6016278bda7db96bd6b9b1bc12a76"}
+    } == {
+        "0e124af8dde6016278bda7db96bd6b9b1bc12a76",
+        "2203f41c7025e8c045b1817e93d0bb1f2dfb68bb",
+    }
     assert {
         review.status for rule_id, review in reviews.items() if rule_id not in approved_ids
     } == {"pending"}
