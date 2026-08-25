@@ -338,7 +338,7 @@ wheels = [
 
 [[package]]
 name = "repo-standards"
-version = "5.2.1"
+version = "5.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "markdown-it-py" },

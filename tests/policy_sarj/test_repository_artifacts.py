@@ -89,7 +89,10 @@ def test_non_example_tfvars_paths_are_clean(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        pytest.param("verify.mjs", id="root-minimal-mjs"),
+        pytest.param("verify-alert-policies.mjs", id="root-mjs"),
         pytest.param("verify-environment-boundary.test.mjs", id="root-mjs"),
+        pytest.param("tools/VERIFY-PLAN.MJS", id="case-insensitive-mjs"),
         pytest.param("iac/bulbul/scripts/verify-dev-apply-plan.jq", id="nested-jq"),
         pytest.param("tools/VERIFY-DEV-APPLY-PLAN.JQ", id="case-insensitive"),
     ],
@@ -101,12 +104,42 @@ def test_bespoke_iac_verifier_files_are_rejected(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        pytest.param("preverify.mjs", id="prefix-mjs"),
+        pytest.param("plan.test.mjs", id="ordinary-mjs-test"),
+        pytest.param("verify-plan.js", id="different-mjs-extension"),
+        pytest.param("verify-plan.mjs.bak", id="mjs-suffix"),
         pytest.param("verify-dev-apply-plan.jq.bak", id="suffix"),
         pytest.param("prefix-verify-dev-apply-plan.jq", id="prefix"),
-        pytest.param("verify-environment-boundary.test.js", id="different-extension"),
+        pytest.param("verify/plan.mjs", id="different-basename"),
     ],
 )
 def test_nearby_iac_verifier_names_are_clean(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("routing.tftest.hcl", id="hcl"),
+        pytest.param("routing.tftest.json", id="json"),
+        pytest.param("iac/tests/PLAN.TFTEST.HCL", id="case-insensitive"),
+    ],
+)
+def test_terraform_test_files_are_rejected(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == [RuleId("repository/artifacts/terraform-test-files")]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("routing.tf", id="terraform"),
+        pytest.param("routing.hcl", id="hcl"),
+        pytest.param("routing.tf.json", id="terraform-json"),
+        pytest.param("routing.tftest.hcl.bak", id="suffix"),
+        pytest.param("routing.tf.test.hcl", id="separated-test"),
+    ],
+)
+def test_non_terraform_test_files_are_clean(path: str) -> None:
     assert _rule_ids(_snapshot(path)) == []
 
 

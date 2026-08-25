@@ -24,6 +24,7 @@ from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import (
     GitIdentity,
     git_identity,
+    git_index_identity,
     inspect_repository,
     load_repository_snapshot,
     read_tracked_blob_contents,
@@ -892,13 +893,19 @@ def _issue_payload(
 
 
 @app.command()
-def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - CLI boundary
+def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - Typer CLI boundary
     root: Annotated[Path, typer.Argument()] = Path(),
     manifest: Annotated[str, typer.Option()] = ".repo-standards/repository.toml",
     baseline: Annotated[str, typer.Option()] = ".repo-standards/baseline.json",
     mode: Annotated[Mode, typer.Option()] = Mode.STRICT,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
     as_of: Annotated[str | None, typer.Option(help="Deterministic YYYY-MM-DD")] = None,
+    staged: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - Typer option
+        bool,
+        typer.Option(
+            help="Analyze the exact staged Git index; ignore unstaged and untracked bytes."
+        ),
+    ] = False,
     enable_rule: Annotated[
         list[str] | None,
         typer.Option(
@@ -916,6 +923,7 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - C
             mode=mode,
             output_format=output_format,
             as_of=as_of,
+            staged=staged,
             enabled_rule_ids=tuple(enable_rule or ()),
         )
     )
@@ -944,6 +952,7 @@ def report_command(
             mode=Mode.REPORT,
             output_format=output_format,
             as_of=as_of,
+            staged=False,
             enabled_rule_ids=tuple(enable_rule or ()),
         )
     )
@@ -957,6 +966,7 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
     mode: Mode,
     output_format: OutputFormat,
     as_of: str | None,
+    staged: bool,
     enabled_rule_ids: tuple[str, ...],
 ) -> int:
     command = "report" if mode is Mode.REPORT else "check"
@@ -974,6 +984,7 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
             policy=policy,
             mode=mode,
             as_of=as_of,
+            staged=staged,
             enabled_rule_ids=enabled_rule_ids,
         )
     except ConfigurationError as error:
@@ -989,7 +1000,6 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
                 report,
                 output_format,
                 command=command,
-                root=root,
                 manifest_path=manifest_path,
                 baseline=baseline_state,
                 ratchet=ratchet_state,
@@ -1002,7 +1012,6 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
             report,
             output_format,
             command=command,
-            root=root,
             manifest_path=manifest_path,
             baseline=baseline_state,
             ratchet=ratchet_state,
@@ -1031,6 +1040,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     policy: Policy,
     mode: Mode,
     as_of: str | None,
+    staged: bool,
     enabled_rule_ids: tuple[str, ...],
 ) -> _CompletedAnalysis:
     try:
@@ -1042,6 +1052,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
             resolved_root,
             manifest_path=manifest_path,
             baseline_path=baseline_path if mode is Mode.RATCHET else None,
+            identity=git_index_identity(resolved_root) if staged else None,
         )
     except ConfigurationError as error:
         if mode is Mode.RATCHET and "baseline" in str(error):
@@ -1163,7 +1174,6 @@ def _render(  # ruff: ignore[too-many-arguments] - stable report envelope inputs
     output_format: OutputFormat,
     *,
     command: str,
-    root: Path,
     manifest_path: str,
     baseline: Mapping[str, object],
     ratchet: Mapping[str, object],
@@ -1173,7 +1183,6 @@ def _render(  # ruff: ignore[too-many-arguments] - stable report envelope inputs
     payload = _report_payload(
         report,
         command=command,
-        root=root,
         manifest_path=manifest_path,
         baseline=baseline,
         ratchet=ratchet,
@@ -1183,11 +1192,10 @@ def _render(  # ruff: ignore[too-many-arguments] - stable report envelope inputs
     return canonical_json(payload) + "\n"
 
 
-def _report_payload(  # ruff: ignore[too-many-arguments] - stable report envelope inputs
+def _report_payload(
     report: AnalysisReport,
     *,
     command: str,
-    root: Path,
     manifest_path: str,
     baseline: Mapping[str, object],
     ratchet: Mapping[str, object],
@@ -1201,13 +1209,10 @@ def _report_payload(  # ruff: ignore[too-many-arguments] - stable report envelop
         "source_revision": None,
         "tree_digest": None,
     }
-    try:
-        identity = git_identity(root.resolve(strict=True))
-    except (ConfigurationError, OSError):
-        pass
-    else:
-        provenance["source_revision"] = identity.source_revision
-        provenance["tree_digest"] = identity.tree_digest
+    if report.input_provenance is not None:
+        provenance["kind"] = report.input_provenance.mode
+        provenance["source_revision"] = report.input_provenance.source_revision
+        provenance["tree_digest"] = report.input_provenance.tree_digest
     return {
         **_envelope(
             command,

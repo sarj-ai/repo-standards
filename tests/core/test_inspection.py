@@ -9,6 +9,7 @@ import pytest
 from repo_standards.core.catalog import core_rules
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import (
+    git_index_identity,
     load_repository_snapshot,
     parse_project_metadata,
     parse_workspace_metadata,
@@ -150,6 +151,36 @@ def test_snapshot_joins_manifest_and_inventory_from_one_git_tree(tmp_path: Path)
     assert repeated.manifest.repository_id == "example-repository"
     assert repeated.provenance == snapshot.provenance
     assert repeated.inspection == snapshot.inspection
+
+
+def test_snapshot_can_select_the_exact_staged_index(tmp_path: Path) -> None:
+    repository = _committed_repository(tmp_path)
+    manifest = repository / ".repo-standards" / "repository.toml"
+    manifest.write_bytes(_MANIFEST.replace(b"example-repository", b"staged-repository"))
+    _git(repository, "add", str(manifest.relative_to(repository)))
+    identity = git_index_identity(repository)
+    manifest.write_bytes(_MANIFEST.replace(b"example-repository", b"unstaged-repository"))
+
+    snapshot = load_repository_snapshot(repository, identity=identity)
+    repeated = load_repository_snapshot(repository, identity=identity)
+
+    assert snapshot.manifest.repository_id == "staged-repository"
+    assert snapshot.provenance.mode == "git-index"
+    assert snapshot.provenance.source_revision == load_repository_snapshot(
+        repository
+    ).provenance.source_revision
+    assert len(snapshot.provenance.tree_digest) == 64
+    assert repeated.provenance == snapshot.provenance
+    assert repeated.manifest == snapshot.manifest
+
+
+def test_staged_index_rejects_symlinks(tmp_path: Path) -> None:
+    repository = _committed_repository(tmp_path)
+    (repository / "linked.py").symlink_to("apps/application/package.json")
+    _git(repository, "add", "linked.py")
+
+    with pytest.raises(ConfigurationError, match="symlink"):
+        git_index_identity(repository)
 
 
 def test_selected_blob_reader_ignores_dirty_worktree_bytes(tmp_path: Path) -> None:

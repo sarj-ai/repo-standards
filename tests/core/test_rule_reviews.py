@@ -12,16 +12,22 @@ from repo_standards.core.rule_reviews import (
     approved_rule_versions,
     review_for,
 )
+from repo_standards.policy_sarj import SarjPolicy
 
 
 def test_only_reviewed_rule_version_is_available_for_explicit_activation() -> None:
-    assert approved_rule_versions() == frozenset(
-        {RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 1)}
-    )
+    assert approved_rule_versions() == frozenset()
     assert review_for(
-        RuleId("repository/artifacts/bespoke-iac-verifiers"), 1
-    ) == ApprovedRuleReview(reviewed_in="d5ddb394ae11145d198c53922823cff334739951")
+        RuleId("repository/artifacts/bespoke-iac-verifiers"), 2
+    ) == PendingRuleReview()
+    assert review_for(RuleId("repository/artifacts/terraform-test-files"), 1) == PendingRuleReview()
     assert review_for(RuleId("core/layout/non-overlapping-root"), 1) == PendingRuleReview()
+
+
+def test_every_approved_rule_version_exists_in_the_current_registry() -> None:
+    current = frozenset(RuleVersion(rule.rule_id, rule.version) for rule in SarjPolicy.rules())
+
+    assert approved_rule_versions() <= current
 
 
 def test_approved_review_requires_immutable_review_reference() -> None:
