@@ -46,9 +46,29 @@ class RuleVersion:
 # available to consumers; it never activates that rule in an existing repository.
 APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = (
     (
+        RuleId("repository/artifacts/bespoke-iac-verifiers"),
+        3,
+        ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),
+    ),
+    (
+        RuleId("repository/artifacts/operational-script-tests"),
+        1,
+        ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),
+    ),
+    (
+        RuleId("repository/artifacts/schema-derived-config-examples"),
+        2,
+        ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),
+    ),
+    (
         RuleId("repository/artifacts/terraform-test-files"),
         1,
         ApprovedRuleReview(reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76"),
+    ),
+    (
+        RuleId("repository/documentation/placement"),
+        2,
+        ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),
     ),
 )
 
