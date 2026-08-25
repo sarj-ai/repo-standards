@@ -44,13 +44,7 @@ class RuleVersion:
 
 # Approval is deliberately version-bound. Adding an entry makes a reviewed rule
 # available to consumers; it never activates that rule in an existing repository.
-APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = (
-    (
-        RuleId("repository/artifacts/bespoke-iac-verifiers"),
-        1,
-        ApprovedRuleReview(reviewed_in="d5ddb394ae11145d198c53922823cff334739951"),
-    ),
-)
+APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = ()
 
 
 def review_for(rule_id: RuleId, version: int) -> RuleReview:

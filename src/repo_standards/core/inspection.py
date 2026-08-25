@@ -11,7 +11,7 @@ import tempfile
 import threading
 import tomllib
 from types import MappingProxyType
-from typing import ClassVar, NamedTuple
+from typing import ClassVar, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -50,6 +50,7 @@ _MAX_ACTIVE_CONFIG_BLOBS = 100
 _MAX_ACTIVE_CONFIG_BLOB_BYTES = 1_048_576
 _MAX_TOTAL_ACTIVE_CONFIG_BYTES = 20_971_520
 _GIT_TREE_FIELD_COUNT = 3
+_GIT_INDEX_FIELD_COUNT = 3
 _GIT_ENVIRONMENT = MappingProxyType(
     {
         "GIT_CONFIG_GLOBAL": os.devnull,
@@ -70,6 +71,7 @@ ProjectCoordinate = PackageEvidence
 class GitIdentity:
     source_revision: str
     tree_digest: str
+    mode: Literal["git-tree", "git-index"] = "git-tree"
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +90,11 @@ class TrackedBlobContent:
 class _TreeRecord(NamedTuple):
     blob: TrackedBlob
     encoded_path_size: int
+
+
+class _IndexedFiles(NamedTuple):
+    blobs: tuple[TrackedBlob, ...]
+    digest: str
 
 
 class _MetadataBatch(NamedTuple):
@@ -125,7 +132,7 @@ def read_tracked_blob_contents(
     canonical = tuple(canonical_path(path) for path in paths)
     if canonical != paths or len(canonical) != len(set(canonical)):
         ConfigurationError.fail("selected blob paths must be unique and canonical")
-    by_path = {blob.path: blob for blob in _tracked_files(resolved, identity.tree_digest)}
+    by_path = {blob.path: blob for blob in _blobs_for_identity(resolved, identity)}
     try:
         selected = tuple(by_path[path] for path in canonical)
     except KeyError:
@@ -148,7 +155,7 @@ def inspect_repository(root: Path, *, identity: GitIdentity | None = None) -> Re
         ConfigurationError.fail("repository root must be a directory")
     if identity is None:
         identity = git_identity(resolved)
-    blobs = _tracked_files(resolved, identity.tree_digest)
+    blobs = _blobs_for_identity(resolved, identity)
     return _inspection_from_blobs(resolved, identity, blobs)
 
 
@@ -164,7 +171,7 @@ def load_repository_snapshot(  # ruff: ignore[too-many-locals] - immutable input
         ConfigurationError.fail("repository root must be a directory")
     if identity is None:
         identity = git_identity(resolved)
-    blobs = _tracked_files(resolved, identity.tree_digest)
+    blobs = _blobs_for_identity(resolved, identity)
     by_path = {blob.path: blob for blob in blobs}
     canonical_manifest = canonical_path(manifest_path)
     manifest_blob = by_path.get(canonical_manifest)
@@ -196,7 +203,7 @@ def load_repository_snapshot(  # ruff: ignore[too-many-locals] - immutable input
         baseline=(parse_baseline_bytes(baseline_content) if baseline_content is not None else None),
         inspection=inspection,
         provenance=InputProvenance(
-            mode="git-tree",
+            mode=identity.mode,
             source_revision=identity.source_revision,
             tree_digest=identity.tree_digest,
             manifest_path=canonical_manifest,
@@ -225,7 +232,7 @@ def load_calibration_snapshot(
         ConfigurationError.fail("repository root must be a directory")
     if identity is None:
         identity = git_identity(resolved)
-    blobs = _tracked_files(resolved, identity.tree_digest)
+    blobs = _blobs_for_identity(resolved, identity)
     manifest = parse_manifest_bytes(manifest_content)
     inspection = _inspection_from_blobs(resolved, identity, blobs)
     if inspection.completion != "complete":
@@ -235,7 +242,7 @@ def load_calibration_snapshot(
         baseline=None,
         inspection=inspection,
         provenance=InputProvenance(
-            mode="git-tree",
+            mode=identity.mode,
             source_revision=identity.source_revision,
             tree_digest=identity.tree_digest,
             manifest_path="<calibration-manifest>",
@@ -432,6 +439,99 @@ def git_identity(root: Path) -> GitIdentity:
     return GitIdentity(source_revision=commit, tree_digest=tree_result.stdout.strip())
 
 
+def git_index_identity(root: Path) -> GitIdentity:
+    committed = git_identity(root)
+    _blobs, digest = _indexed_files(root)
+    return GitIdentity(
+        source_revision=committed.source_revision,
+        tree_digest=digest,
+        mode="git-index",
+    )
+
+
+def _blobs_for_identity(root: Path, identity: GitIdentity) -> tuple[TrackedBlob, ...]:
+    if identity.mode == "git-tree":
+        return _tracked_files(root, identity.tree_digest)
+    blobs, digest = _indexed_files(root)
+    if digest != identity.tree_digest:
+        ConfigurationError.fail("Git index changed during repository inspection")
+    return blobs
+
+
+def _indexed_files(  # ruff: ignore[too-many-branches] - every malformed index form fails closed
+    root: Path,
+) -> _IndexedFiles:
+    git_executable = shutil.which("git")
+    if git_executable is None:
+        ConfigurationError.fail("Git executable is unavailable")
+    payload = _bounded_git_payload(
+        [
+            git_executable,
+            "--no-replace-objects",
+            "--no-lazy-fetch",
+            "--no-optional-locks",
+            "-C",
+            str(root),
+            "ls-files",
+            "--cached",
+            "--stage",
+            "-z",
+            "--full-name",
+        ],
+        noun="Git index",
+    )
+    try:
+        records = tuple(item for item in payload.decode("utf-8").split("\0") if item)
+    except UnicodeDecodeError:
+        ConfigurationError.fail("tracked paths must be UTF-8")
+    if len(records) > _MAX_FILES:
+        ConfigurationError.fail("repository exceeds the 100000 tracked-file safety limit")
+    parsed: list[tuple[str, TrackedBlob]] = []
+    path_bytes = 0
+    for record in records:
+        metadata, separator, path = record.partition("\t")
+        fields = metadata.split()
+        if separator != "\t" or len(fields) != _GIT_INDEX_FIELD_COUNT:
+            ConfigurationError.fail("Git index output is malformed")
+        mode, object_id, stage = fields
+        if stage != "0":
+            ConfigurationError.fail("Git index contains unresolved merge entries")
+        if mode == "120000":
+            ConfigurationError.fail(f"tracked path is a symlink: {path}")
+        if mode == "160000":
+            ConfigurationError.fail(f"tracked path is a Git submodule: {path}")
+        if mode not in {"100644", "100755"}:
+            ConfigurationError.fail(f"tracked path has an unsupported Git mode: {path}")
+        if len(object_id) not in {40, 64} or any(
+            character not in "0123456789abcdef" for character in object_id
+        ):
+            ConfigurationError.fail("Git index object ID is malformed")
+        encoded_path_size = len(path.encode("utf-8"))
+        if encoded_path_size > _MAX_PATH_BYTES:
+            ConfigurationError.fail("tracked path exceeds the 4096-byte safety limit")
+        path_bytes += encoded_path_size
+        if path_bytes > _MAX_TOTAL_PATH_BYTES:
+            ConfigurationError.fail("tracked paths exceed the 16 MiB aggregate safety limit")
+        parsed.append((mode, TrackedBlob(path=path, object_id=object_id)))
+    canonical = tuple(canonical_path(blob.path) for _mode, blob in parsed)
+    if canonical != tuple(blob.path for _mode, blob in parsed):
+        ConfigurationError.fail("tracked paths must already be canonical")
+    if len(canonical) != len(set(canonical)) or len(canonical) != len(
+        {path.casefold() for path in canonical}
+    ):
+        ConfigurationError.fail("tracked paths collide after normalization")
+    ordered = tuple(sorted(parsed, key=lambda item: item[1].path))
+    digest = hashlib.sha256(b"repo-standards-git-index-v1\0")
+    for mode, blob in ordered:
+        digest.update(mode.encode("ascii"))
+        digest.update(b"\0")
+        digest.update(blob.object_id.encode("ascii"))
+        digest.update(b"\0")
+        digest.update(blob.path.encode("utf-8"))
+        digest.update(b"\0")
+    return _IndexedFiles(tuple(blob for _mode, blob in ordered), digest.hexdigest())
+
+
 def _tracked_files(root: Path, tree_digest: str) -> tuple[TrackedBlob, ...]:
     git_executable = shutil.which("git")
     if git_executable is None:
@@ -491,6 +591,10 @@ def _git_tree_payload(root: Path, git_executable: str, tree_digest: str) -> byte
         "--full-tree",
         tree_digest,
     ]
+    return _bounded_git_payload(command, noun="Git tree")
+
+
+def _bounded_git_payload(command: list[str], *, noun: str) -> bytes:
     try:
         process: subprocess.Popen[bytes] = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed trusted Git executable and arguments
             command,
@@ -499,11 +603,11 @@ def _git_tree_payload(root: Path, git_executable: str, tree_digest: str) -> byte
             env=_GIT_ENVIRONMENT,
         )
     except OSError:
-        ConfigurationError.fail("cannot enumerate tracked files with Git")
+        ConfigurationError.fail(f"cannot enumerate {noun}")
     stream = process.stdout
     if stream is None:
         process.kill()
-        ConfigurationError.fail("cannot read tracked-file enumeration output")
+        ConfigurationError.fail(f"cannot read {noun} enumeration output")
     output = bytearray()
     read_failed = threading.Event()
 
@@ -526,16 +630,16 @@ def _git_tree_payload(root: Path, git_executable: str, tree_digest: str) -> byte
     if reader.is_alive():
         process.kill()
         reader.join(timeout=1)
-        ConfigurationError.fail("Git tree enumeration timed out")
+        ConfigurationError.fail(f"{noun} enumeration timed out")
     try:
         return_code = process.wait(timeout=1)
     except subprocess.TimeoutExpired:
         process.kill()
-        ConfigurationError.fail("Git tree enumeration timed out")
+        ConfigurationError.fail(f"{noun} enumeration timed out")
     if len(output) > _MAX_TREE_OUTPUT_BYTES:
-        ConfigurationError.fail("Git tree output exceeds the 32 MiB safety limit")
+        ConfigurationError.fail(f"{noun} output exceeds the 32 MiB safety limit")
     if read_failed.is_set() or return_code != 0:
-        ConfigurationError.fail("cannot enumerate tracked files with Git")
+        ConfigurationError.fail(f"cannot enumerate {noun}")
     return bytes(output)
 
 

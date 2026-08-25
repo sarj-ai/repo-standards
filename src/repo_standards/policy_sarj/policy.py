@@ -134,9 +134,8 @@ _AGENT_CONTRACT_ROOTS = (
     (".claude", "skills"),
     (".codex", "skills"),
 )
-_FORBIDDEN_IAC_VERIFIER_NAMES = frozenset(
-    {"verify-dev-apply-plan.jq", "verify-environment-boundary.test.mjs"}
-)
+_RETIRED_IAC_VERIFIER_NAMES = frozenset({"verify-dev-apply-plan.jq"})
+_TERRAFORM_TEST_SUFFIXES = (".tftest.hcl", ".tftest.json")
 _NON_OPERATIONAL_COMPONENT_KINDS = frozenset(
     {"application", "contract", "foundation-service", "product-library", "shared-library", "tool"}
 )
@@ -393,17 +392,20 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
-        version=1,
+        version=2,
         default_severity="error",
-        title="Do not commit retired IaC verifier filenames",
-        description="Two retired plan-verifier basenames are prohibited anywhere in the Git tree.",
+        title="Do not commit bespoke verifier scripts",
+        description=(
+            "Tracked basenames beginning with verify and ending in .mjs are prohibited, "
+            "case-insensitively; retired plan-verifier basenames remain prohibited."
+        ),
         why=(
-            "Repository-specific plan filters accumulate temporary exceptions and obscure "
-            "Terraform review."
+            "Repository-specific verifier entrypoints create parallel validation paths that "
+            "drift from shared policy, owned test suites, and deployment contracts."
         ),
         fix=(
-            "Delete the verifier and its invocations; use explicit tfvars and shared "
-            "repository policy."
+            "Move durable assertions into the owning test suite, shared policy, or runtime "
+            "contract; then remove the verifier and every invocation."
         ),
         taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
         examples=(
@@ -413,6 +415,35 @@ RULES = (
                 language="text",
                 before="iac/scripts/verify-dev-apply-plan.jq",
                 after="explicit environment tfvars",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("repository/artifacts/terraform-test-files"),
+        version=1,
+        default_severity="error",
+        title="Do not commit native Terraform test files",
+        description=(
+            "Tracked paths ending in .tftest.hcl or .tftest.json are prohibited, "
+            "case-insensitively."
+        ),
+        why=(
+            "A separate Terraform-native test harness duplicates setup and review conventions; "
+            "one shared rendered-plan, provider, or runtime validation path keeps "
+            "infrastructure checks discoverable and consistent."
+        ),
+        fix=(
+            "Delete the Terraform-native test file and move the durable assertion into shared "
+            "rendered-plan, provider, or runtime validation."
+        ),
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-artifact-no-terraform-test-files",
+                title="Terraform-native test file",
+                language="text",
+                before="iac/tests/routing.tftest.hcl",
+                after="shared rendered-plan validation",
             ),
         ),
     ),
@@ -504,6 +535,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("architecture/dependencies/policy"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
+        RuleId("repository/artifacts/terraform-test-files"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/reachability"): RuleClassification.JUDGMENT,
         RuleId("repository/configuration/unresolved-placeholders"): RuleClassification.JUDGMENT,
@@ -517,6 +549,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("architecture/layout/component-paths"): 30,
         RuleId("repository/artifacts/terraform-examples"): 40,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
+        RuleId("repository/artifacts/terraform-test-files"): 46,
         RuleId("repository/documentation/placement"): 50,
         RuleId("repository/documentation/reachability"): 60,
         RuleId("repository/configuration/unresolved-placeholders"): 70,
@@ -563,7 +596,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=8,
+    policy_version=9,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -690,7 +723,11 @@ def _repository_artifact_diagnostics(
                     ),
                 )
             )
-        if PurePosixPath(path).name.casefold() in _FORBIDDEN_IAC_VERIFIER_NAMES:
+        basename = PurePosixPath(path).name.casefold()
+        if (
+            basename in _RETIRED_IAC_VERIFIER_NAMES
+            or (basename.startswith("verify") and basename.endswith(".mjs"))
+        ):
             diagnostics.append(
                 _repository_diagnostic(
                     rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
@@ -707,6 +744,29 @@ def _repository_artifact_diagnostics(
                         steps=(
                             "Delete the verifier and every workflow invocation.",
                             "Pass environment-specific access choices through tfvars.",
+                        ),
+                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    ),
+                )
+            )
+        if path.casefold().endswith(_TERRAFORM_TEST_SUFFIXES):
+            diagnostics.append(
+                _repository_diagnostic(
+                    rule_id=RuleId("repository/artifacts/terraform-test-files"),
+                    component=component,
+                    subject_kind="tracked-terraform-test-file",
+                    observed=path,
+                    expected="no tracked .tftest.hcl or .tftest.json filename",
+                    message="tracked native Terraform test file is prohibited by repository policy",
+                    path=path,
+                    remediation=Remediation(
+                        summary="Move the assertion into the shared validation path.",
+                        steps=(
+                            "Delete the tracked Terraform-native test file.",
+                            (
+                                "Validate the behavior through a rendered plan, provider, or "
+                                "runtime contract."
+                            ),
                         ),
                         validation=("Inspect the selected Git tree and rerun repo-standards.",),
                     ),

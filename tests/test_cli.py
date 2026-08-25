@@ -13,6 +13,9 @@ import pytest
 from typer.testing import CliRunner
 
 from repo_standards.cli import app
+from repo_standards.core import rule_reviews
+from repo_standards.core.models import RuleId
+from repo_standards.core.rule_reviews import ApprovedRuleReview
 
 
 runner = CliRunner()
@@ -175,6 +178,65 @@ def test_report_json_is_one_deterministic_value(tmp_path: Path) -> None:
     assert dirty.stdout == first.stdout
 
 
+def test_check_staged_reads_index_and_ignores_unstaged_bytes(tmp_path: Path) -> None:
+    _manifest(tmp_path, GOOD_MANIFEST)
+    manifest = tmp_path / ".repo-standards" / "repository.toml"
+    manifest.write_text(
+        GOOD_MANIFEST.replace("example-repository", "staged-repository"), encoding="utf-8"
+    )
+    _git(tmp_path, "add", ".repo-standards/repository.toml")
+    manifest.write_text(
+        GOOD_MANIFEST.replace("example-repository", "unstaged-repository"), encoding="utf-8"
+    )
+
+    committed = runner.invoke(app, ["check", str(tmp_path), "--format", "json"])
+    staged = runner.invoke(app, ["check", str(tmp_path), "--staged", "--format", "json"])
+
+    assert committed.exit_code == staged.exit_code == 0
+    assert _json_object(committed.stdout)["repository_id"] == "example-repository"
+    staged_payload = _json_object(staged.stdout)
+    assert staged_payload["repository_id"] == "staged-repository"
+    assert _object(staged_payload["provenance"])["kind"] == "git-index"
+
+
+def test_check_staged_blocks_a_new_forbidden_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _manifest(tmp_path, GOOD_MANIFEST)
+    rule_id = RuleId("repository/artifacts/bespoke-iac-verifiers")
+    monkeypatch.setattr(
+        rule_reviews,
+        "APPROVED_RULE_REVIEWS",
+        ((rule_id, 2, ApprovedRuleReview(reviewed_in="a" * 40)),),
+    )
+    verifier = tmp_path / "iac" / "verify-plan.mjs"
+    verifier.parent.mkdir()
+    verifier.write_text("export {};\n", encoding="utf-8")
+    _git(tmp_path, "add", "iac/verify-plan.mjs")
+
+    committed = runner.invoke(
+        app,
+        ["check", str(tmp_path), "--enable-rule", f"{rule_id}@2", "--format", "json"],
+    )
+    staged = runner.invoke(
+        app,
+        [
+            "check",
+            str(tmp_path),
+            "--staged",
+            "--enable-rule",
+            f"{rule_id}@2",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert committed.exit_code == 0
+    assert staged.exit_code == 1
+    diagnostics = _object_list(_json_object(staged.stdout)["diagnostics"])
+    assert [item["path"] for item in diagnostics] == ["iac/verify-plan.mjs"]
+
+
 def test_pending_report_findings_are_disabled(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST.replace("applications/alpha/agent", "python/agent"))
     result = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
@@ -204,7 +266,15 @@ def test_unapproved_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
     assert "not approved for activation" in str(report)
 
 
-def test_approved_retired_iac_verifier_rule_blocks_only_when_enabled(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "selector",
+    [
+        "repository/artifacts/bespoke-iac-verifiers@1",
+        "repository/artifacts/bespoke-iac-verifiers@2",
+        "repository/artifacts/terraform-test-files@1",
+    ],
+)
+def test_pending_artifact_rules_cannot_be_enabled(tmp_path: Path, selector: str) -> None:
     _manifest(tmp_path, GOOD_MANIFEST)
     script = tmp_path / "iac" / "bulbul" / "scripts" / "verify-dev-apply-plan.jq"
     script.parent.mkdir(parents=True)
@@ -218,18 +288,15 @@ def test_approved_retired_iac_verifier_rule_blocks_only_when_enabled(tmp_path: P
             "check",
             str(tmp_path),
             "--enable-rule",
-            "repository/artifacts/bespoke-iac-verifiers@1",
+            selector,
             "--format",
             "json",
         ],
     )
 
     assert disabled.exit_code == 0
-    assert enabled.exit_code == 1
-    diagnostics = _object_list(_json_object(enabled.stdout)["diagnostics"])
-    assert [diagnostic["rule_id"] for diagnostic in diagnostics] == [
-        "repository/artifacts/bespoke-iac-verifiers"
-    ]
+    assert enabled.exit_code == 2
+    assert "not approved for activation" in enabled.stdout
 
 
 def test_enable_rule_help_requires_an_exact_version() -> None:

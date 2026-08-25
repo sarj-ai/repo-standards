@@ -19,7 +19,7 @@ from repo_standards.catalog import (
 from repo_standards.cli import app
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.catalog import core_rules
-from repo_standards.core.models import JSONValue, RuleId
+from repo_standards.core.models import JSONValue
 from repo_standards.openapi import rules as openapi_rules
 from repo_standards.policy_sarj import SarjPolicy
 
@@ -59,18 +59,10 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
 
     assert catalog.schema_version == 7
     reviews = {rule.rule_id: rule.review for rule in catalog.rules}
-    approved_rule = RuleId("repository/artifacts/bespoke-iac-verifiers")
-    approved = reviews[approved_rule]
-    assert approved.status == "approved"
-    assert approved.reviewed_in == "d5ddb394ae11145d198c53922823cff334739951"
-    assert {
-        review.status
-        for rule_id, review in reviews.items()
-        if rule_id != approved_rule
-    } == {"pending"}
+    assert {review.status for review in reviews.values()} == {"pending"}
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 14
-    assert len({rule.slug for rule in catalog.rules}) == 14
+    assert len(rule_ids) == len(set(rule_ids)) == 15
+    assert len({rule.slug for rule in catalog.rules}) == 15
     assert {
         binding.default_activation for policy in catalog.policies for binding in policy.bindings
     } == {"disabled"}
@@ -121,7 +113,7 @@ def test_catalog_graph_is_complete() -> None:
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 14
+    assert len(rule_ids) == len(set(rule_ids)) == 15
     assert {policy.policy_id for policy in catalog.policies} == {
         str(policy.policy_id) for policy in registry
     }

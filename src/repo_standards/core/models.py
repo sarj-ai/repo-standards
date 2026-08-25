@@ -352,7 +352,7 @@ class InventoryUnit:
 
 @dataclass(frozen=True, slots=True)
 class InputProvenance:
-    mode: Literal["git-tree", "worktree"]
+    mode: Literal["git-tree", "git-index", "worktree"]
     source_revision: str
     tree_digest: str
     manifest_path: str
