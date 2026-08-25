@@ -134,6 +134,9 @@ _AGENT_CONTRACT_ROOTS = (
     (".claude", "skills"),
     (".codex", "skills"),
 )
+_FORBIDDEN_IAC_VERIFIER_NAMES = frozenset(
+    {"verify-dev-apply-plan.jq", "verify-environment-boundary.test.mjs"}
+)
 _NON_OPERATIONAL_COMPONENT_KINDS = frozenset(
     {"application", "contract", "foundation-service", "product-library", "shared-library", "tool"}
 )
@@ -389,6 +392,31 @@ RULES = (
         ),
     ),
     Rule(
+        rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
+        version=1,
+        default_severity="error",
+        title="Do not commit retired IaC verifier filenames",
+        description="Two retired plan-verifier basenames are prohibited anywhere in the Git tree.",
+        why=(
+            "Repository-specific plan filters accumulate temporary exceptions and obscure "
+            "Terraform review."
+        ),
+        fix=(
+            "Delete the verifier and its invocations; use explicit tfvars and shared "
+            "repository policy."
+        ),
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-artifact-no-bespoke-iac-verifiers",
+                title="Bespoke IaC verifier",
+                language="text",
+                before="iac/scripts/verify-dev-apply-plan.jq",
+                after="explicit environment tfvars",
+            ),
+        ),
+    ),
+    Rule(
         rule_id=RuleId("repository/documentation/placement"),
         version=1,
         default_severity="error",
@@ -475,6 +503,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("architecture/schema/component"): RuleClassification.SCHEMA,
         RuleId("architecture/dependencies/policy"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
+        RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/reachability"): RuleClassification.JUDGMENT,
         RuleId("repository/configuration/unresolved-placeholders"): RuleClassification.JUDGMENT,
@@ -487,6 +516,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("architecture/dependencies/policy"): 20,
         RuleId("architecture/layout/component-paths"): 30,
         RuleId("repository/artifacts/terraform-examples"): 40,
+        RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
         RuleId("repository/documentation/placement"): 50,
         RuleId("repository/documentation/reachability"): 60,
         RuleId("repository/configuration/unresolved-placeholders"): 70,
@@ -533,7 +563,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=7,
+    policy_version=8,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -655,6 +685,28 @@ def _repository_artifact_diagnostics(
                         steps=(
                             "Delete the tracked .tfvars.example file.",
                             "Describe inputs and validation in variables.tf.",
+                        ),
+                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    ),
+                )
+            )
+        if PurePosixPath(path).name.casefold() in _FORBIDDEN_IAC_VERIFIER_NAMES:
+            diagnostics.append(
+                _repository_diagnostic(
+                    rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
+                    component=component,
+                    subject_kind="tracked-bespoke-iac-verifier",
+                    observed=path,
+                    expected="no tracked bespoke IaC verifier basename",
+                    message="tracked bespoke IaC verifier script is prohibited",
+                    path=path,
+                    remediation=Remediation(
+                        summary=(
+                            "Remove the bespoke verifier and keep environment choices explicit."
+                        ),
+                        steps=(
+                            "Delete the verifier and every workflow invocation.",
+                            "Pass environment-specific access choices through tfvars.",
                         ),
                         validation=("Inspect the selected Git tree and rerun repo-standards.",),
                     ),

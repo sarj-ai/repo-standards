@@ -4,6 +4,15 @@
 repository rules are available for review but remain disabled until individually approved
 and explicitly activated by a consumer.
 
+## Where rules belong
+
+- Exact tracked-tree facts—filenames, placement, topology, migrations, pull-request size,
+  ownership, delivery/GitHub state, and repository-wide API/document sets—belong here.
+- Source and configuration semantics for Python, TypeScript, SQL, Terraform/HCL, Markdown,
+  YAML, JSON, and shell belong in `sarj-ai/code-standards`.
+- If a path alone is sufficient to produce the finding, use Repo Standards. If source content
+  is necessary, use Code Standards.
+
 After a rule is approved, opt in per run with `--enable-rule <rule-id>@<version>`. Approval alone
 never enables a rule, and the option may be repeated for multiple approved rules.
 
