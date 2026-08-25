@@ -89,6 +89,30 @@ def test_non_example_tfvars_paths_are_clean(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        pytest.param("verify-environment-boundary.test.mjs", id="root-mjs"),
+        pytest.param("iac/bulbul/scripts/verify-dev-apply-plan.jq", id="nested-jq"),
+        pytest.param("tools/VERIFY-DEV-APPLY-PLAN.JQ", id="case-insensitive"),
+    ],
+)
+def test_bespoke_iac_verifier_files_are_rejected(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == [RuleId("repository/artifacts/bespoke-iac-verifiers")]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("verify-dev-apply-plan.jq.bak", id="suffix"),
+        pytest.param("prefix-verify-dev-apply-plan.jq", id="prefix"),
+        pytest.param("verify-environment-boundary.test.js", id="different-extension"),
+    ],
+)
+def test_nearby_iac_verifier_names_are_clean(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
         pytest.param("README.md", id="root"),
         pytest.param("RELEASE_PROCESS.md", id="root-durable-doc"),
         pytest.param("docs/deployment/cloud-run.md", id="docs"),

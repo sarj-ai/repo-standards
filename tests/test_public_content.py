@@ -62,6 +62,13 @@ def test_public_distribution_has_no_legacy_compatibility_surface() -> None:
     assert "publish_compat" not in jobs
 
 
+def test_agent_routing_contract_names_both_standards_owners() -> None:
+    contract = (REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    assert "sarj-ai/repo-standards" in contract
+    assert "sarj-ai/code-standards" in contract
+    assert "If the path or basename alone is sufficient" in contract
+
+
 def test_publish_revalidates_immutable_tag_before_registry_write() -> None:
     workflow = (REPOSITORY_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
     publish_job = workflow.index("\n  publish_primary:\n")
