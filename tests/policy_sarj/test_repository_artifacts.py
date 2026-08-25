@@ -5,6 +5,7 @@ import pytest
 from repo_standards.core.models import (
     Component,
     ComponentId,
+    DocumentationConfig,
     GitObjectId,
     InputProvenance,
     Manifest,
@@ -14,6 +15,7 @@ from repo_standards.core.models import (
     RepositorySnapshot,
     RuleId,
     TrackedFileEvidence,
+    WorkspaceEvidence,
 )
 from repo_standards.policy_sarj import SarjPolicy
 
@@ -22,6 +24,9 @@ def _snapshot(
     *paths: str,
     components: tuple[Component, ...] = (),
     packages: tuple[PackageEvidence, ...] = (),
+    workspaces: tuple[WorkspaceEvidence, ...] = (),
+    terraform_modules: tuple[str, ...] = (),
+    documentation: DocumentationConfig | None = None,
 ) -> RepositorySnapshot:
     tracked = tuple(
         TrackedFileEvidence(path=path, object_id=f"{index + 1:040x}")
@@ -31,6 +36,7 @@ def _snapshot(
         manifest=Manifest(
             repository_id=RepositoryId("example-repository"),
             components=components,
+            documentation=documentation,
         ),
         baseline=None,
         inspection=RepositoryInspection(
@@ -39,10 +45,11 @@ def _snapshot(
             tree_digest="b" * 40,
             tracked_file_count=len(tracked),
             packages=packages,
+            workspaces=workspaces,
             workflow_paths=(),
             cloudbuild_paths=(),
             dockerfile_paths=(),
-            terraform_modules=(),
+            terraform_modules=terraform_modules,
             issues=(),
             tracked_files=tracked,
         ),
@@ -61,10 +68,28 @@ def _rule_ids(snapshot: RepositorySnapshot) -> list[RuleId]:
     return [item.rule_id for item in SarjPolicy.evaluate_repository(snapshot)]
 
 
+def _root_package(
+    ecosystem: str,
+    path: str,
+    name: str,
+    *,
+    workspace_root: bool,
+) -> PackageEvidence:
+    return PackageEvidence(
+        ecosystem=ecosystem,
+        path=path,
+        name=name,
+        private=True,
+        workspace_root=workspace_root,
+    )
+
+
 @pytest.mark.parametrize(
     "path",
     [
         pytest.param("terraform.tfvars.example", id="root"),
+        pytest.param("minimum.tfvars.sample", id="sample"),
+        pytest.param("production.tfvars.template", id="template"),
         pytest.param("iac/delivery/production.tfvars.example", id="nested"),
         pytest.param("deployments/app/CONFIG.TFVARS.EXAMPLE", id="case-insensitive"),
     ],
@@ -80,6 +105,8 @@ def test_tfvars_example_files_are_rejected(path: str) -> None:
         pytest.param("production.auto.tfvars", id="auto"),
         pytest.param("production.tfvars.json", id="json"),
         pytest.param("docs/tfvars.example.md", id="documentation"),
+        pytest.param("docs/tfvars.sample.md", id="sample-documentation"),
+        pytest.param("docs/tfvars.template.md", id="template-documentation"),
     ],
 )
 def test_non_example_tfvars_paths_are_clean(path: str) -> None:
@@ -90,14 +117,26 @@ def test_non_example_tfvars_paths_are_clean(path: str) -> None:
     "path",
     [
         pytest.param("backend.conf.example", id="terraform-backend"),
+        pytest.param("backend.conf.sample", id="terraform-backend-sample"),
+        pytest.param("backend.conf.template", id="terraform-backend-template"),
         pytest.param("iac/dev/BACKEND.CONF.EXAMPLE", id="backend-case-insensitive"),
         pytest.param(".env.example", id="env-root"),
         pytest.param("services/api/.env.local.example", id="env-profile"),
         pytest.param("services/api/.ENV.DEV.EXAMPLE", id="env-case-insensitive"),
+        pytest.param("services/api/.env.dev.sample", id="env-sample"),
+        pytest.param("services/api/.env.dev.template", id="env-template"),
+        pytest.param("services/api/example.env", id="example-env"),
+        pytest.param("services/api/env.example", id="env-example"),
+        pytest.param("services/api/env.sample", id="env-sample-basename"),
+        pytest.param("services/api/env.template", id="env-template-basename"),
+        pytest.param("examples/api/.env.sample", id="examples-tree"),
+        pytest.param("samples/api/backend.conf.example", id="samples-tree"),
+        pytest.param("templates/api/template.env", id="templates-tree"),
         pytest.param(".env.schema", id="env-schema"),
         pytest.param("services/api/.env.production.schema.json", id="env-schema-json"),
         pytest.param("services/api/.env.schema.yaml", id="env-schema-yaml"),
         pytest.param("services/api/.ENV.LOCAL.SCHEMA.YML", id="env-schema-yml-case-insensitive"),
+        pytest.param("services/api/.env.schema.toml", id="env-schema-toml"),
     ],
 )
 def test_schema_derived_config_examples_are_rejected(path: str) -> None:
@@ -111,12 +150,13 @@ def test_schema_derived_config_examples_are_rejected(path: str) -> None:
     [
         pytest.param("backend.conf", id="backend-config"),
         pytest.param("docs/backend.conf.example.md", id="backend-documentation"),
+        pytest.param("docs/backend.conf.sample.md", id="backend-sample-documentation"),
         pytest.param(".env", id="runtime-env"),
         pytest.param(".env.local", id="runtime-env-profile"),
-        pytest.param("env.example", id="missing-dot-prefix"),
+        pytest.param("backend.confidential.example", id="backend-near-miss"),
         pytest.param(".envrc.example", id="different-basename"),
         pytest.param("docs/.env.example.md", id="env-documentation"),
-        pytest.param(".env.schema.toml", id="unsupported-schema-suffix"),
+        pytest.param("docs/env.template.md", id="env-template-documentation"),
         pytest.param("settings.schema.json", id="application-schema"),
     ],
 )
@@ -127,10 +167,11 @@ def test_non_schema_derived_config_example_paths_are_clean(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        pytest.param("verify.mjs", id="root-minimal-mjs"),
-        pytest.param("verify-alert-policies.mjs", id="root-mjs"),
-        pytest.param("verify-environment-boundary.test.mjs", id="root-mjs"),
+        pytest.param("iac/verify-plan.js", id="javascript"),
+        pytest.param("deploy/verify-plan.sh", id="shell"),
+        pytest.param("tools/verify-plan.py", id="python"),
         pytest.param("tools/VERIFY-PLAN.MJS", id="case-insensitive-mjs"),
+        pytest.param("verify-dev-apply-plan.jq", id="globally-retired-root"),
         pytest.param("iac/bulbul/scripts/verify-dev-apply-plan.jq", id="nested-jq"),
         pytest.param("tools/VERIFY-DEV-APPLY-PLAN.JQ", id="case-insensitive"),
     ],
@@ -142,17 +183,589 @@ def test_bespoke_iac_verifier_files_are_rejected(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        pytest.param("verify.mjs", id="root-minimal-mjs"),
+        pytest.param("verify_release_artifacts.py", id="root-release-verifier"),
+        pytest.param("verify-environment-boundary.test.mjs", id="root-test-verifier"),
         pytest.param("preverify.mjs", id="prefix-mjs"),
-        pytest.param("plan.test.mjs", id="ordinary-mjs-test"),
-        pytest.param("verify-plan.js", id="different-mjs-extension"),
         pytest.param("verify-plan.mjs.bak", id="mjs-suffix"),
         pytest.param("verify-dev-apply-plan.jq.bak", id="suffix"),
         pytest.param("prefix-verify-dev-apply-plan.jq", id="prefix"),
         pytest.param("verify/plan.mjs", id="different-basename"),
     ],
 )
-def test_nearby_iac_verifier_names_are_clean(path: str) -> None:
+def test_non_operational_or_nearby_verifier_names_are_clean(path: str) -> None:
     assert _rule_ids(_snapshot(path)) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("random/src/verify-plan.mjs", id="unowned-src"),
+        pytest.param("random/tests/verify-plan.py", id="unowned-tests"),
+    ],
+)
+def test_conventional_directory_name_without_owner_is_rejected(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == [RuleId("repository/artifacts/bespoke-iac-verifiers")]
+
+
+def test_root_terraform_module_verifier_is_rejected() -> None:
+    assert _rule_ids(_snapshot("verify-plan.py", terraform_modules=("",))) == [
+        RuleId("repository/artifacts/bespoke-iac-verifiers")
+    ]
+    assert _rule_ids(_snapshot("README.md", terraform_modules=("",))) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("tools/contract.spec.ts", id="relocated"),
+        pytest.param("iac/bell/PREVIEW.TEST.MJS", id="operational"),
+        pytest.param("ci/contracts/preview.test.mjs", id="ci"),
+        pytest.param("ops/preview.test.tsx", id="tsx-relocation"),
+        pytest.param("iac/scripts/health-check.test.sh", id="shell"),
+        pytest.param("deploy/policy.spec.jq", id="jq"),
+        pytest.param(".github/actions/release/contract.test.mjs", id="github-action"),
+        pytest.param(".github/workflows/release.spec.ts", id="github-workflow"),
+        pytest.param("services/api/deploy/contract.test.mjs", id="nested-deploy"),
+        pytest.param("services/bell/deploy/preview.test.mjs", id="derived-terraform-root"),
+    ],
+)
+def test_operational_script_tests_are_rejected(path: str) -> None:
+    terraform_modules = ("services/bell/deploy",) if "services/bell/deploy" in path else ()
+    assert _rule_ids(_snapshot(path, terraform_modules=terraform_modules)) == [
+        RuleId("repository/artifacts/operational-script-tests")
+    ]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("plan.test.mjs", id="root"),
+        pytest.param("checks/test_policy.py", id="python-prefix"),
+        pytest.param("checks/contract.test.py", id="python-suffix"),
+        pytest.param("checks/policy_test.py", id="python-pytest-suffix"),
+        pytest.param("packages/api/scripts/release.test.mjs", id="package-script"),
+        pytest.param("packages/api/tests/release.test.mjs", id="package-test"),
+    ],
+)
+def test_non_operational_script_tests_are_clean(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == []
+
+
+def test_root_project_owns_only_conventional_test_locations() -> None:
+    package = _root_package("npm", "package.json", "example", workspace_root=True)
+    assert _rule_ids(_snapshot("tests/plan.test.mjs", packages=(package,))) == []
+    assert _rule_ids(_snapshot("iac/plan.test.mjs", packages=(package,))) == [
+        RuleId("repository/artifacts/operational-script-tests")
+    ]
+    assert _rule_ids(_snapshot("iac/tests/plan.test.mjs", packages=(package,))) == [
+        RuleId("repository/artifacts/operational-script-tests")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("package_path", "package_name", "artifact_path"),
+    [
+        pytest.param(
+            "packages/generator/package.json",
+            "@example/generator",
+            "packages/generator/scripts/tests/render.test.mjs",
+            id="package-test",
+        ),
+        pytest.param(
+            "packages/application/package.json",
+            "@example/application",
+            "packages/application/src/verify-config.ts",
+            id="application-verifier",
+        ),
+        pytest.param(
+            "packages/application/package.json",
+            "@example/application",
+            "packages/application/spec/contract.spec.ts",
+            id="spec-suite",
+        ),
+        pytest.param(
+            "packages/application/package.json",
+            "@example/application",
+            "packages/application/specs/contract.spec.ts",
+            id="specs-suite",
+        ),
+    ],
+)
+def test_root_workspace_owned_package_artifact_is_clean(
+    package_path: str, package_name: str, artifact_path: str
+) -> None:
+    package = PackageEvidence(
+        ecosystem="npm",
+        path=package_path,
+        name=package_name,
+        private=True,
+        workspace_root=False,
+    )
+    workspace = WorkspaceEvidence(
+        ecosystem="npm",
+        path="package.json",
+        member_patterns=("packages/*",),
+        exclude_patterns=(),
+    )
+    assert (
+        _rule_ids(
+            _snapshot(
+                artifact_path,
+                packages=(package,),
+                workspaces=(workspace,),
+            )
+        )
+        == []
+    )
+
+
+def test_nested_workspace_does_not_make_non_operational_tests_invalid() -> None:
+    package = PackageEvidence(
+        ecosystem="npm",
+        path="vendor/check/package.json",
+        name="@example/check",
+        private=True,
+        workspace_root=False,
+    )
+    workspace = WorkspaceEvidence(
+        ecosystem="npm",
+        path="vendor/package.json",
+        member_patterns=("check",),
+        exclude_patterns=(),
+    )
+    assert (
+        _rule_ids(
+            _snapshot(
+                "vendor/check/tests/contract.test.mjs",
+                packages=(package,),
+                workspaces=(workspace,),
+            )
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("package_path", "package_name", "workspace_path", "member_pattern", "artifact_path"),
+    [
+        pytest.param(
+            "vendor/check/package.json",
+            "@example/check",
+            "vendor/package.json",
+            "check",
+            "vendor/check/README.md",
+            id="nested-workspace",
+        ),
+        pytest.param(
+            "iac/bell/package.json",
+            "fake-package",
+            "package.json",
+            "iac/*",
+            "iac/bell/README.md",
+            id="operational-package",
+        ),
+    ],
+)
+def test_package_without_root_workspace_ownership_cannot_own_documentation(
+    package_path: str,
+    package_name: str,
+    workspace_path: str,
+    member_pattern: str,
+    artifact_path: str,
+) -> None:
+    package = PackageEvidence(
+        ecosystem="npm",
+        path=package_path,
+        name=package_name,
+        private=True,
+        workspace_root=False,
+    )
+    workspace = WorkspaceEvidence(
+        ecosystem="npm",
+        path=workspace_path,
+        member_patterns=(member_pattern,),
+        exclude_patterns=(),
+    )
+    assert _rule_ids(
+        _snapshot(
+            artifact_path,
+            packages=(package,),
+            workspaces=(workspace,),
+        )
+    ) == [RuleId("repository/documentation/placement")]
+
+
+@pytest.mark.parametrize(
+    ("package_path", "package_name", "member_pattern", "artifact_path", "expected_rule"),
+    [
+        pytest.param(
+            "examples/demo/package.json",
+            "@example/demo",
+            "examples/*",
+            "examples/demo/tests/contract.test.mjs",
+            RuleId("repository/artifacts/operational-script-tests"),
+            id="examples-tree-is-operational",
+        ),
+        pytest.param(
+            "packages/application/package.json",
+            "@example/application",
+            "packages/*",
+            "packages/application/src/verify-dev-apply-plan.jq",
+            RuleId("repository/artifacts/bespoke-iac-verifiers"),
+            id="retired-verifier-in-owned-package",
+        ),
+    ],
+)
+def test_root_workspace_owned_package_exclusions(
+    package_path: str,
+    package_name: str,
+    member_pattern: str,
+    artifact_path: str,
+    expected_rule: RuleId,
+) -> None:
+    package = PackageEvidence(
+        ecosystem="npm",
+        path=package_path,
+        name=package_name,
+        private=True,
+        workspace_root=False,
+    )
+    workspace = WorkspaceEvidence(
+        ecosystem="npm",
+        path="package.json",
+        member_patterns=(member_pattern,),
+        exclude_patterns=(),
+    )
+    assert _rule_ids(
+        _snapshot(
+            artifact_path,
+            packages=(package,),
+            workspaces=(workspace,),
+        )
+    ) == [expected_rule]
+
+
+@pytest.mark.parametrize(
+    ("component_id", "root", "identity", "artifact_path", "expected_rules"),
+    [
+        pytest.param(
+            "shared.release-tool",
+            "tools/release",
+            "@example/release-tool",
+            "tools/release/tests/render.test.mjs",
+            [],
+            id="tools-root",
+        ),
+        pytest.param(
+            "shared.release-tool",
+            "tools/release",
+            "@example/release-tool",
+            "tools/release/src/render.test.mjs",
+            [RuleId("repository/artifacts/operational-script-tests")],
+            id="tools-source-is-not-test-ownership",
+        ),
+        pytest.param(
+            "shared.iac-tool",
+            "iac/bell",
+            "@example/iac-tool",
+            "iac/bell/tests/plan.test.mjs",
+            [RuleId("repository/artifacts/operational-script-tests")],
+            id="iac-root",
+        ),
+    ],
+)
+def test_operational_root_precedes_declared_tool_ownership(
+    component_id: str,
+    root: str,
+    identity: str,
+    artifact_path: str,
+    expected_rules: list[RuleId],
+) -> None:
+    component = Component(
+        ComponentId(component_id),
+        "tool",
+        root,
+        identity,
+        capability=component_id,
+    )
+    package = PackageEvidence(
+        ecosystem="npm",
+        path=f"{root}/package.json",
+        name=identity,
+        private=True,
+        workspace_root=False,
+    )
+    assert (
+        _rule_ids(
+            _snapshot(
+                artifact_path,
+                components=(component,),
+                packages=(package,),
+            )
+        )
+        == expected_rules
+    )
+
+
+def test_terraform_module_cannot_use_declared_tool_test_escape() -> None:
+    component = Component(
+        ComponentId("shared.release-tool"),
+        "tool",
+        "tools/release",
+        "@example/release-tool",
+        capability="release-tool",
+    )
+    package = PackageEvidence(
+        ecosystem="npm",
+        path="tools/release/package.json",
+        name="@example/release-tool",
+        private=True,
+        workspace_root=False,
+    )
+    assert _rule_ids(
+        _snapshot(
+            "tools/release/tests/render.test.mjs",
+            components=(component,),
+            packages=(package,),
+            terraform_modules=("tools/release",),
+        )
+    ) == [RuleId("repository/artifacts/operational-script-tests")]
+
+
+def test_terraform_module_precedes_declared_application_ownership() -> None:
+    component = Component(
+        ComponentId("service.release"),
+        "application",
+        "services/release",
+        "@example/release",
+        capability="release",
+    )
+    assert _rule_ids(
+        _snapshot(
+            "services/release/deploy/plan.test.mjs",
+            components=(component,),
+            terraform_modules=("services/release/deploy",),
+        )
+    ) == [RuleId("repository/artifacts/operational-script-tests")]
+
+
+def test_nested_deploy_precedes_declared_application_ownership() -> None:
+    component = Component(
+        ComponentId("service.api"),
+        "application",
+        "services/api",
+        "@example/api",
+        capability="api",
+    )
+    assert _rule_ids(
+        _snapshot(
+            "services/api/deploy/contract.test.mjs",
+            components=(component,),
+        )
+    ) == [RuleId("repository/artifacts/operational-script-tests")]
+
+
+def test_tools_package_without_declared_component_cannot_own_operational_test() -> None:
+    package = PackageEvidence(
+        ecosystem="npm",
+        path="tools/release/package.json",
+        name="@example/release-tool",
+        private=True,
+        workspace_root=False,
+    )
+    workspace = WorkspaceEvidence(
+        ecosystem="npm",
+        path="package.json",
+        member_patterns=("tools/*",),
+        exclude_patterns=(),
+    )
+    assert _rule_ids(
+        _snapshot(
+            "tools/release/tests/render.test.mjs",
+            packages=(package,),
+            workspaces=(workspace,),
+        )
+    ) == [RuleId("repository/artifacts/operational-script-tests")]
+
+
+def test_declared_application_package_may_own_verifier_code() -> None:
+    component = Component(
+        ComponentId("alpha.api"),
+        "application",
+        "services/alpha",
+        "@example/alpha",
+        product="alpha",
+    )
+    package = PackageEvidence(
+        ecosystem="python",
+        path="services/alpha/pyproject.toml",
+        name="alpha-api",
+        private=True,
+        workspace_root=False,
+    )
+    assert (
+        _rule_ids(
+            _snapshot(
+                "services/alpha/src/verify_config.py",
+                components=(component,),
+                packages=(package,),
+            )
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("artifact_path", "expected_rules"),
+    [
+        pytest.param("src/verify_signature.py", [], id="owned-source-module"),
+        pytest.param(
+            "verify_signature.py",
+            [],
+            id="root-entrypoint",
+        ),
+        pytest.param(
+            "src/verify-dev-apply-plan.jq",
+            [RuleId("repository/artifacts/bespoke-iac-verifiers")],
+            id="globally-retired-basename",
+        ),
+    ],
+)
+def test_named_root_python_package_verifier_ownership(
+    artifact_path: str,
+    expected_rules: list[RuleId],
+) -> None:
+    package = _root_package("python", "pyproject.toml", "example-api", workspace_root=False)
+    assert _rule_ids(_snapshot(artifact_path, packages=(package,))) == expected_rules
+
+
+def test_relocated_unowned_verifier_is_rejected() -> None:
+    assert _rule_ids(_snapshot("ci/contracts/verify-config.py")) == [
+        RuleId("repository/artifacts/bespoke-iac-verifiers")
+    ]
+
+
+@pytest.mark.parametrize(
+    "artifact_path",
+    [
+        pytest.param("packages/fake/verify-plan.mjs", id="package-root"),
+        pytest.param("packages/fake/deploy/verify-plan.mjs", id="package-deploy"),
+    ],
+)
+def test_package_manifest_alone_does_not_own_verifier(artifact_path: str) -> None:
+    package = PackageEvidence(
+        ecosystem="npm",
+        path="packages/fake/package.json",
+        name="fake-package",
+        private=True,
+        workspace_root=False,
+    )
+    assert _rule_ids(_snapshot(artifact_path, packages=(package,))) == [
+        RuleId("repository/artifacts/bespoke-iac-verifiers")
+    ]
+
+
+@pytest.mark.parametrize("directory", ["bin", "scripts", "spec", "specs", "src", "tests"])
+def test_root_workspace_package_owns_conventional_verifier_code(directory: str) -> None:
+    package = PackageEvidence(
+        ecosystem="python",
+        path="packages/release/pyproject.toml",
+        name="release-tool",
+        private=True,
+        workspace_root=False,
+    )
+    workspace = WorkspaceEvidence(
+        ecosystem="python",
+        path="pyproject.toml",
+        member_patterns=("packages/*",),
+        exclude_patterns=(),
+    )
+    assert (
+        _rule_ids(
+            _snapshot(
+                f"packages/release/{directory}/verify_release.py",
+                packages=(package,),
+                workspaces=(workspace,),
+            )
+        )
+        == []
+    )
+
+
+def test_declared_nested_component_owns_conventional_verifier_source() -> None:
+    component = Component(
+        ComponentId("application.web"),
+        "application",
+        "typescript/packages/app",
+        "@example/application",
+        capability="web",
+    )
+    assert (
+        _rule_ids(
+            _snapshot(
+                "typescript/packages/app/src/features/verify-connection-dialog.tsx",
+                components=(component,),
+            )
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "artifact_path",
+    [
+        pytest.param("services/alpha/verify_release.py", id="component-root"),
+        pytest.param("services/alpha/deploy/verify_release.py", id="component-deploy"),
+    ],
+)
+def test_declared_non_iac_component_owns_verifier(artifact_path: str) -> None:
+    component = Component(
+        ComponentId("alpha.api"),
+        "application",
+        "services/alpha",
+        "@example/alpha",
+        product="alpha",
+    )
+    assert _rule_ids(_snapshot(artifact_path, components=(component,))) == []
+
+
+@pytest.mark.parametrize(
+    "artifact_path",
+    [
+        pytest.param(".github/actions/release/verify-plan.py", id="github-action"),
+        pytest.param(".github/workflows/verify-plan.mjs", id="github-workflow"),
+        pytest.param("services/api/deploy/verify-plan.py", id="nested-deploy"),
+    ],
+)
+def test_operational_verifier_without_objective_owner_is_rejected(artifact_path: str) -> None:
+    assert _rule_ids(_snapshot(artifact_path)) == [
+        RuleId("repository/artifacts/bespoke-iac-verifiers")
+    ]
+
+
+@pytest.mark.parametrize("name", [None, ""])
+def test_empty_package_identity_does_not_create_test_ownership(name: str | None) -> None:
+    package = PackageEvidence(
+        ecosystem="npm",
+        path="tools/check/package.json",
+        name=name,
+        private=True,
+        workspace_root=False,
+    )
+    workspace = WorkspaceEvidence(
+        ecosystem="npm",
+        path="package.json",
+        member_patterns=("tools/*",),
+        exclude_patterns=(),
+    )
+    assert _rule_ids(
+        _snapshot(
+            "tools/check/tests/contract.test.mjs",
+            packages=(package,),
+            workspaces=(workspace,),
+        )
+    ) == [RuleId("repository/artifacts/operational-script-tests")]
 
 
 @pytest.mark.parametrize(
@@ -185,11 +798,11 @@ def test_non_terraform_test_files_are_clean(path: str) -> None:
     "path",
     [
         pytest.param("README.md", id="root"),
-        pytest.param("RELEASE_PROCESS.md", id="root-durable-doc"),
         pytest.param("docs/deployment/cloud-run.md", id="docs"),
         pytest.param("architecture/runtime.md", id="architecture"),
         pytest.param("adr/0001-runtime.md", id="adr"),
         pytest.param(".github/pull_request_template.md", id="github"),
+        pytest.param(".github/actions/release/README.md", id="github-action"),
         pytest.param(".agents/skills/review/SKILL.md", id="agent-skill"),
         pytest.param(".claude/commands/release.md", id="agent-command"),
         pytest.param("nested/AGENTS.md", id="agent-contract"),
@@ -197,6 +810,18 @@ def test_non_terraform_test_files_are_clean(path: str) -> None:
 )
 def test_durable_and_tool_contract_markdown_is_clean(path: str) -> None:
     assert _rule_ids(_snapshot(path)) == []
+
+
+def test_declared_root_documentation_entrypoint_is_clean() -> None:
+    assert (
+        _rule_ids(
+            _snapshot(
+                "OPERATIONS.md",
+                documentation=DocumentationConfig(("OPERATIONS.md",)),
+            )
+        )
+        == []
+    )
 
 
 def test_package_root_readme_is_clean() -> None:
@@ -212,8 +837,46 @@ def test_package_root_readme_is_clean() -> None:
                 workspace_root=False,
             ),
         ),
+        workspaces=(
+            WorkspaceEvidence(
+                ecosystem="python",
+                path="pyproject.toml",
+                member_patterns=("applications/*/*",),
+                exclude_patterns=(),
+            ),
+        ),
     )
     assert _rule_ids(snapshot) == []
+
+
+def test_workflow_markdown_is_rejected() -> None:
+    assert _rule_ids(_snapshot(".github/workflows/SANDBOX.md")) == [
+        RuleId("repository/documentation/placement")
+    ]
+
+
+def test_declared_tool_cannot_own_workflow_markdown() -> None:
+    component = Component(
+        ComponentId("workflow.tool"),
+        "tool",
+        ".github/workflows/tool",
+        "@example/workflow-tool",
+        capability="workflow-tool",
+    )
+    package = PackageEvidence(
+        ecosystem="npm",
+        path=".github/workflows/tool/package.json",
+        name="@example/workflow-tool",
+        private=True,
+        workspace_root=False,
+    )
+    assert _rule_ids(
+        _snapshot(
+            ".github/workflows/tool/README.md",
+            components=(component,),
+            packages=(package,),
+        )
+    ) == [RuleId("repository/documentation/placement")]
 
 
 def test_generated_client_markdown_is_clean() -> None:
@@ -265,6 +928,10 @@ def test_declared_operational_root_readme_is_rejected() -> None:
         pytest.param("applications/alpha/api/internal/README.md", id="nested-readme"),
         pytest.param("notes/implementation-plan.md", id="floating-document"),
         pytest.param(".claude/docs/handoff.md", id="agent-document-dump"),
+        pytest.param("IMPLEMENTATION_SUMMARY.md", id="root-implementation-summary"),
+        pytest.param("QA_HANDOFF.md", id="root-qa-handoff"),
+        pytest.param("PLAN.md", id="root-plan"),
+        pytest.param("RELEASE_PROCESS.md", id="root-release-process"),
     ],
 )
 def test_ad_hoc_markdown_is_rejected(path: str) -> None:

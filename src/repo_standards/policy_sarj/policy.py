@@ -33,6 +33,7 @@ from repo_standards.core.models import (
     RuleExamplePair,
     RuleId,
     SourceLocation,
+    WorkspaceEvidence,
 )
 from repo_standards.core.taxonomy import (
     ARCHITECTURE,
@@ -136,9 +137,57 @@ _AGENT_CONTRACT_ROOTS = (
 )
 _RETIRED_IAC_VERIFIER_NAMES = frozenset({"verify-dev-apply-plan.jq"})
 _TERRAFORM_TEST_SUFFIXES = (".tftest.hcl", ".tftest.json")
-_ENV_SCHEMA_SUFFIXES = (".schema", ".schema.json", ".schema.yaml", ".schema.yml")
+_ENV_SCHEMA_SUFFIXES = (
+    ".schema",
+    ".schema.json",
+    ".schema.toml",
+    ".schema.yaml",
+    ".schema.yml",
+)
+_ENV_EXAMPLE_SUFFIXES = (".example", ".sample", ".template")
+_TFVARS_EXAMPLE_SUFFIXES = tuple(f".tfvars{suffix}" for suffix in _ENV_EXAMPLE_SUFFIXES)
+_DERIVED_ENV_BASENAMES = frozenset(
+    {
+        *(f"{kind}.env" for kind in ("example", "sample", "template")),
+        *(f"env.{kind}" for kind in ("example", "sample", "template")),
+    }
+)
+_DERIVED_BACKEND_BASENAMES = frozenset(f"backend.conf{suffix}" for suffix in _ENV_EXAMPLE_SUFFIXES)
+_EXECUTABLE_SCRIPT_EXTENSIONS = frozenset(
+    {"bash", "cjs", "cts", "jq", "js", "jsx", "mjs", "mts", "py", "sh", "ts", "tsx", "zsh"}
+)
+_PACKAGE_TEST_DIRECTORY_NAMES = frozenset({"spec", "specs", "test", "tests", "__tests__"})
+_CONVENTIONAL_OPERATIONAL_ROOTS = frozenset(
+    {
+        "cloudbuild",
+        "ci",
+        "deploy",
+        "deployments",
+        "examples",
+        "iac",
+        "infra",
+        "k8s",
+        "ops",
+        "samples",
+        "scripts",
+        "templates",
+        "terraform",
+        "tools",
+    }
+)
+_NESTED_OPERATIONAL_DIRECTORY_NAMES = frozenset(
+    {"cloudbuild", "ci", "deploy", "deployments", "iac", "infra", "k8s", "ops", "terraform"}
+)
 _NON_OPERATIONAL_COMPONENT_KINDS = frozenset(
-    {"application", "contract", "foundation-service", "product-library", "shared-library", "tool"}
+    {
+        "application",
+        "contract",
+        "foundation-service",
+        "generated-client",
+        "product-library",
+        "shared-library",
+        "tool",
+    }
 )
 _COMPONENT_FIELDS: Mapping[ComponentKind, tuple[frozenset[str], frozenset[str]]] = MappingProxyType(
     {
@@ -377,7 +426,10 @@ RULES = (
         version=1,
         default_severity="error",
         title="Do not commit example tfvars files",
-        description="Tracked filenames ending in .tfvars.example are prohibited.",
+        description=(
+            "Tracked filenames ending in .tfvars.example, .tfvars.sample, or "
+            ".tfvars.template are prohibited."
+        ),
         why="One typed variable interface prevents copied configuration from drifting.",
         fix="Delete the example file and document validated inputs in variables.tf.",
         taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
@@ -393,11 +445,11 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/schema-derived-config-examples"),
-        version=1,
+        version=2,
         default_severity="warning",
         title="Generate configuration examples from schemas",
         description=(
-            "Tracked backend.conf.example files and .env example or schema basenames are "
+            "Tracked backend.conf and env example, sample, template, or schema basenames are "
             "prohibited, case-insensitively."
         ),
         why=(
@@ -422,20 +474,22 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
-        version=2,
+        version=3,
         default_severity="error",
         title="Do not commit bespoke verifier scripts",
         description=(
-            "Tracked basenames beginning with verify and ending in .mjs are prohibited, "
-            "case-insensitively; retired plan-verifier basenames remain prohibited."
+            "Retired verifier basenames are prohibited everywhere. Other executable-script "
+            "basenames beginning with verify are prohibited when operational placement or a "
+            "non-root path lacks objective source, test, script, bin, or component ownership."
         ),
         why=(
             "Repository-specific verifier entrypoints create parallel validation paths that "
             "drift from shared policy, owned test suites, and deployment contracts."
         ),
         fix=(
-            "Move durable assertions into the owning test suite, shared policy, or runtime "
-            "contract; then remove the verifier and every invocation."
+            "Delete the operational verifier and every invocation. Moving or renaming it is "
+            "not remediation; express the invariant in Terraform, shared policy, or a provider "
+            "or runtime contract."
         ),
         taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
         examples=(
@@ -445,6 +499,38 @@ RULES = (
                 language="text",
                 before="iac/scripts/verify-dev-apply-plan.jq",
                 after="explicit environment tfvars",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("repository/artifacts/operational-script-tests"),
+        version=1,
+        default_severity="warning",
+        title="Keep operational safety in owned contracts",
+        description=(
+            "Executable script test/spec artifacts are prohibited in operational trees. "
+            "Repository Standards owns this path boundary; semantic workflow analysis belongs "
+            "in Code Standards."
+        ),
+        why=(
+            "Bespoke deployment tests create parallel contracts that drift from "
+            "Terraform, providers, shared policy, and runtime behavior. Workflow contents are "
+            "outside this exact-tree rule's evidence boundary."
+        ),
+        fix=(
+            "Delete the operational test and every invocation. Moving or renaming it is not "
+            "remediation; express the invariant in Terraform, shared policy, provider state, "
+            "or runtime behavior."
+        ),
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-artifact-no-operational-script-tests",
+                title="Operational source-coupled test",
+                language="text",
+                before="iac/bell/preview-contract.test.mjs",
+                after="Terraform validation, precondition, or shared policy",
+                expected_severity="warning",
             ),
         ),
     ),
@@ -479,7 +565,7 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/documentation/placement"),
-        version=1,
+        version=2,
         default_severity="error",
         title="Keep Markdown in durable owned locations",
         description="Tracked Markdown must have a durable documentation or tool-contract role.",
@@ -564,10 +650,9 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("architecture/schema/component"): RuleClassification.SCHEMA,
         RuleId("architecture/dependencies/policy"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
-        RuleId(
-            "repository/artifacts/schema-derived-config-examples"
-        ): RuleClassification.JUDGMENT,
+        RuleId("repository/artifacts/schema-derived-config-examples"): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
+        RuleId("repository/artifacts/operational-script-tests"): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/terraform-test-files"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/reachability"): RuleClassification.JUDGMENT,
@@ -583,7 +668,8 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("repository/artifacts/terraform-examples"): 40,
         RuleId("repository/artifacts/schema-derived-config-examples"): 44,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
-        RuleId("repository/artifacts/terraform-test-files"): 46,
+        RuleId("repository/artifacts/operational-script-tests"): 46,
+        RuleId("repository/artifacts/terraform-test-files"): 47,
         RuleId("repository/documentation/placement"): 50,
         RuleId("repository/documentation/reachability"): 60,
         RuleId("repository/configuration/unresolved-placeholders"): 70,
@@ -630,7 +716,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=10,
+    policy_version=11,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -728,21 +814,20 @@ def _expected_path(template: PathTemplate, component: Component) -> str:
 def _repository_artifact_diagnostics(
     snapshot: RepositorySnapshot,
 ) -> tuple[Diagnostic, ...]:
-    package_roots = frozenset(
-        _parent_path(project.path) for project in snapshot.inspection.packages
-    )
+    package_test_roots = _owned_package_roots(snapshot)
+    document_package_roots = package_test_roots
     diagnostics: list[Diagnostic] = []
     for tracked in snapshot.inspection.tracked_files:
         path = tracked.path
         component = _nearest_component(path, snapshot.manifest.components)
-        if path.casefold().endswith(".tfvars.example"):
+        if path.casefold().endswith(_TFVARS_EXAMPLE_SUFFIXES):
             diagnostics.append(
                 _repository_diagnostic(
                     rule_id=RuleId("repository/artifacts/terraform-examples"),
                     component=component,
                     subject_kind="tracked-terraform-example",
                     observed=path,
-                    expected="no tracked filename ending in .tfvars.example",
+                    expected="no tracked .tfvars example, sample, or template filename",
                     message="tracked Terraform example variable file is prohibited",
                     path=path,
                     remediation=Remediation(
@@ -750,7 +835,7 @@ def _repository_artifact_diagnostics(
                             "Remove the example file and keep one authoritative input contract."
                         ),
                         steps=(
-                            "Delete the tracked .tfvars.example file.",
+                            "Delete the tracked .tfvars example, sample, or template file.",
                             "Describe inputs and validation in variables.tf.",
                         ),
                         validation=("Inspect the selected Git tree and rerun repo-standards.",),
@@ -758,10 +843,12 @@ def _repository_artifact_diagnostics(
                 )
             )
         basename = PurePosixPath(path).name.casefold()
-        is_derived_env_artifact = basename.startswith(".env.") and basename.endswith(
-            (".example", *_ENV_SCHEMA_SUFFIXES)
+        is_derived_env_artifact = basename in _DERIVED_ENV_BASENAMES or (
+            (basename == ".env" or basename.startswith(".env."))
+            and basename.endswith((*_ENV_EXAMPLE_SUFFIXES, *_ENV_SCHEMA_SUFFIXES))
         )
-        if basename == "backend.conf.example" or is_derived_env_artifact:
+        is_derived_backend_artifact = basename in _DERIVED_BACKEND_BASENAMES
+        if is_derived_backend_artifact or is_derived_env_artifact:
             diagnostics.append(
                 _repository_diagnostic(
                     rule_id=RuleId("repository/artifacts/schema-derived-config-examples"),
@@ -785,26 +872,72 @@ def _repository_artifact_diagnostics(
                     ),
                 )
             )
-        if (
-            basename in _RETIRED_IAC_VERIFIER_NAMES
-            or (basename.startswith("verify") and basename.endswith(".mjs"))
-        ):
+        is_terraform_path = _is_terraform_artifact_path(path, snapshot.inspection.terraform_modules)
+        is_github_automation_path = _is_github_automation_path(path)
+        is_operational_path = is_terraform_path or _is_operational_path(
+            path,
+            component=component,
+            terraform_modules=snapshot.inspection.terraform_modules,
+        )
+        is_operational_script_test = (
+            _is_script_test(basename)
+            and is_operational_path
+            and (
+                is_terraform_path
+                or is_github_automation_path
+                or not _is_owned_tool_test(path, component, package_test_roots)
+            )
+        )
+        is_bespoke_verifier = basename in _RETIRED_IAC_VERIFIER_NAMES or (
+            _is_verifier_script(basename)
+            and (is_operational_path or bool(_parent_path(path)))
+            and (
+                is_terraform_path
+                or is_github_automation_path
+                or not _is_owned_verifier_path(path, component, package_test_roots)
+            )
+        )
+        if is_bespoke_verifier:
             diagnostics.append(
                 _repository_diagnostic(
                     rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
                     component=component,
                     subject_kind="tracked-bespoke-iac-verifier",
                     observed=path,
-                    expected="no tracked bespoke IaC verifier basename",
-                    message="tracked bespoke IaC verifier script is prohibited",
+                    expected="no retired, operational, or unowned verifier artifact",
+                    message="tracked retired, operational, or unowned verifier is prohibited",
                     path=path,
                     remediation=Remediation(
-                        summary=(
-                            "Remove the bespoke verifier and keep environment choices explicit."
-                        ),
+                        summary=("Remove the operational verifier instead of relocating it."),
                         steps=(
                             "Delete the verifier and every workflow invocation.",
-                            "Pass environment-specific access choices through tfvars.",
+                            (
+                                "Express durable safety in Terraform, shared policy, provider "
+                                "state, or runtime behavior."
+                            ),
+                        ),
+                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    ),
+                )
+            )
+        elif is_operational_script_test:
+            diagnostics.append(
+                _repository_diagnostic(
+                    rule_id=RuleId("repository/artifacts/operational-script-tests"),
+                    component=component,
+                    subject_kind="tracked-operational-script-test",
+                    observed=path,
+                    expected="no tracked operational script test artifact",
+                    message="tracked operational script test creates a parallel contract",
+                    path=path,
+                    remediation=Remediation(
+                        summary="Remove the operational test instead of relocating it.",
+                        steps=(
+                            "Delete the test and every workflow invocation.",
+                            (
+                                "Express durable safety in Terraform, shared policy, provider "
+                                "state, or runtime behavior."
+                            ),
                         ),
                         validation=("Inspect the selected Git tree and rerun repo-standards.",),
                     ),
@@ -835,8 +968,14 @@ def _repository_artifact_diagnostics(
             )
         if path.casefold().endswith(".md") and not _markdown_path_is_owned(
             path,
-            package_roots=package_roots,
+            package_roots=document_package_roots,
             component=component,
+            terraform_modules=snapshot.inspection.terraform_modules,
+            documentation_entrypoints=(
+                snapshot.manifest.documentation.entrypoints
+                if snapshot.manifest.documentation is not None
+                else ()
+            ),
         ):
             diagnostics.append(
                 _repository_diagnostic(
@@ -862,7 +1001,12 @@ def _repository_artifact_diagnostics(
                     ),
                 )
             )
-    diagnostics.extend(_documentation_reachability_diagnostics(snapshot, package_roots))
+    diagnostics.extend(
+        _documentation_reachability_diagnostics(
+            snapshot,
+            document_package_roots,
+        )
+    )
     diagnostics.extend(_active_configuration_diagnostics(snapshot))
     diagnostics.extend(_deployment_authority_diagnostics(snapshot))
     return tuple(
@@ -889,14 +1033,27 @@ def _markdown_path_is_owned(
     *,
     package_roots: frozenset[str],
     component: Component | None,
+    terraform_modules: tuple[str, ...],
+    documentation_entrypoints: tuple[str, ...],
 ) -> bool:
     pure_path = PurePosixPath(path)
     parts = pure_path.parts
-    is_root_document = len(parts) == 1
-    is_durable_tree = parts[0] in _DOCUMENTATION_ROOTS or parts[0] == ".github"
+    is_root_document = len(parts) == 1 and (
+        pure_path.name in _PACKAGE_DOCUMENT_NAMES or path in documentation_entrypoints
+    )
+    is_workflow_document = parts[:2] == (".github", "workflows")
+    is_github_action_document = parts[:2] == (".github", "actions")
+    is_durable_tree = parts[0] in _DOCUMENTATION_ROOTS or (
+        parts[0] == ".github" and not is_workflow_document
+    )
     is_agent_contract = pure_path.name in _AGENT_CONTRACT_NAMES or any(
         parts[: len(root)] == root for root in _AGENT_CONTRACT_ROOTS
     )
+    if is_workflow_document or (
+        not is_github_action_document
+        and _is_operational_path(path, component=component, terraform_modules=terraform_modules)
+    ):
+        return False
     if is_root_document or is_durable_tree or is_agent_contract:
         return True
     parent = _parent_path(path)
@@ -911,6 +1068,153 @@ def _markdown_path_is_owned(
         and parent == component.path
         and pure_path.name in _PACKAGE_DOCUMENT_NAMES
     )
+
+
+def _owned_package_roots(snapshot: RepositorySnapshot) -> frozenset[str]:
+    roots: set[str] = set()
+    for project in snapshot.inspection.packages:
+        root = _parent_path(project.path)
+        if not project.name:
+            continue
+        component = _nearest_component(root, snapshot.manifest.components)
+        explicitly_owned = (
+            component is not None
+            and component.path == root
+            and component.kind in _NON_OPERATIONAL_COMPONENT_KINDS
+        )
+        root_workspace_owned = any(
+            workspace.ecosystem == project.ecosystem
+            and not _parent_path(workspace.path)
+            and _workspace_includes(workspace, project.path)
+            for workspace in snapshot.inspection.workspaces
+        )
+        root_project = not root
+        conventionally_owned = (root_workspace_owned or root_project) and not _is_operational_path(
+            root, component=component, terraform_modules=snapshot.inspection.terraform_modules
+        )
+        if explicitly_owned or conventionally_owned:
+            roots.add(root)
+    return frozenset(roots)
+
+
+def _workspace_includes(workspace: WorkspaceEvidence, project_path: str) -> bool:
+    workspace_root = PurePosixPath(workspace.path).parent
+    project_directory = PurePosixPath(project_path).parent
+    try:
+        relative = project_directory.relative_to(workspace_root)
+    except ValueError:
+        return False
+    return any(relative.match(pattern) for pattern in workspace.member_patterns) and not any(
+        relative.match(pattern) for pattern in workspace.exclude_patterns
+    )
+
+
+def _is_owned_verifier_path(
+    path: str,
+    component: Component | None,
+    package_roots: frozenset[str],
+) -> bool:
+    component_owned = (
+        component is not None
+        and component.kind in _NON_OPERATIONAL_COMPONENT_KINDS
+        and (path == component.path or path.startswith(f"{component.path}/"))
+    )
+    return component_owned or _is_owned_package_code_path(path, package_roots)
+
+
+def _is_owned_package_code_path(path: str, package_roots: frozenset[str]) -> bool:
+    owned_directories = _PACKAGE_TEST_DIRECTORY_NAMES | {"bin", "scripts", "src"}
+    parts = _owned_package_relative_parts(path, package_roots)
+    return bool(parts) and parts[0].casefold() in owned_directories
+
+
+def _is_owned_tool_test(
+    path: str,
+    component: Component | None,
+    package_roots: frozenset[str],
+) -> bool:
+    return (
+        component is not None
+        and component.kind == "tool"
+        and PurePosixPath(component.path).parts[:1] == ("tools",)
+        and component.path in package_roots
+        and _is_owned_package_test(path, package_roots)
+    )
+
+
+def _is_owned_package_test(path: str, package_roots: frozenset[str]) -> bool:
+    parts = _owned_package_relative_parts(path, package_roots)
+    return any(part.casefold() in _PACKAGE_TEST_DIRECTORY_NAMES for part in parts[:-1])
+
+
+def _owned_package_relative_parts(path: str, package_roots: frozenset[str]) -> tuple[str, ...]:
+    pure = PurePosixPath(path)
+    for root in sorted(package_roots, key=len, reverse=True):
+        root_path = PurePosixPath(root) if root else PurePosixPath()
+        try:
+            return pure.relative_to(root_path).parts
+        except ValueError:
+            continue
+    return ()
+
+
+def _is_script_test(basename: str) -> bool:
+    stem, separator, extension = basename.rpartition(".")
+    if not separator or extension not in _EXECUTABLE_SCRIPT_EXTENSIONS:
+        return False
+    return (
+        stem in {"test", "spec"}
+        or stem.startswith(("test-", "test_", "spec-", "spec_"))
+        or stem.endswith((".test", ".spec"))
+        or (extension == "py" and stem.endswith("_test"))
+    )
+
+
+def _is_verifier_script(basename: str) -> bool:
+    _stem, separator, extension = basename.rpartition(".")
+    return (
+        bool(separator)
+        and extension in _EXECUTABLE_SCRIPT_EXTENSIONS
+        and basename.startswith("verify")
+    )
+
+
+def _is_operational_path(
+    path: str,
+    *,
+    component: Component | None,
+    terraform_modules: tuple[str, ...],
+) -> bool:
+    pure = PurePosixPath(path)
+    if _is_terraform_path(path, terraform_modules):
+        return True
+    parts = tuple(part.casefold() for part in pure.parts)
+    if _is_github_automation_path(path):
+        return True
+    if bool(parts) and parts[0] in _CONVENTIONAL_OPERATIONAL_ROOTS:
+        return True
+    if any(part in _NESTED_OPERATIONAL_DIRECTORY_NAMES for part in parts[1:-1]):
+        return True
+    if component is not None:
+        return component.kind not in _NON_OPERATIONAL_COMPONENT_KINDS
+    return False
+
+
+def _is_terraform_artifact_path(path: str, terraform_modules: tuple[str, ...]) -> bool:
+    return "" in terraform_modules or _is_terraform_path(path, terraform_modules)
+
+
+def _is_terraform_path(path: str, terraform_modules: tuple[str, ...]) -> bool:
+    return any(
+        bool(root) and (path == root or path.startswith(f"{root}/")) for root in terraform_modules
+    )
+
+
+def _is_github_automation_path(path: str) -> bool:
+    return tuple(part.casefold() for part in PurePosixPath(path).parts[:2]) in {
+        (".github", "actions"),
+        (".github", "workflows"),
+    }
 
 
 _MARKDOWN = MarkdownIt("commonmark")
@@ -934,7 +1238,8 @@ _MIN_COMPETING_AUTHORITIES = 2
 
 
 def _documentation_reachability_diagnostics(  # ruff: ignore[too-many-branches]
-    snapshot: RepositorySnapshot, package_roots: frozenset[str]
+    snapshot: RepositorySnapshot,
+    package_roots: frozenset[str],
 ) -> tuple[Diagnostic, ...]:
     documentation = snapshot.manifest.documentation
     if documentation is None:
@@ -948,7 +1253,13 @@ def _documentation_reachability_diagnostics(  # ruff: ignore[too-many-branches]
     seeds: set[str] = set(documentation.entrypoints)
     for path in sorted(contents):
         component = _nearest_component(path, snapshot.manifest.components)
-        if not _markdown_path_is_owned(path, package_roots=package_roots, component=component):
+        if not _markdown_path_is_owned(
+            path,
+            package_roots=package_roots,
+            component=component,
+            terraform_modules=snapshot.inspection.terraform_modules,
+            documentation_entrypoints=documentation.entrypoints,
+        ):
             continue
         pure = PurePosixPath(path)
         parts = pure.parts

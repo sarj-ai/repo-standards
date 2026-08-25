@@ -19,18 +19,21 @@ def test_only_reviewed_rule_version_is_available_for_explicit_activation() -> No
     review = ApprovedRuleReview(reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76")
     assert approved_rule_versions() == frozenset(
         {
-            RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 2),
-            RuleVersion(RuleId("repository/artifacts/schema-derived-config-examples"), 1),
             RuleVersion(RuleId("repository/artifacts/terraform-test-files"), 1),
         }
     )
-    assert review_for(
-        RuleId("repository/artifacts/bespoke-iac-verifiers"), 2
-    ) == review
     assert review_for(RuleId("repository/artifacts/terraform-test-files"), 1) == review
-    assert review_for(
-        RuleId("repository/artifacts/schema-derived-config-examples"), 1
-    ) == ApprovedRuleReview(reviewed_in="2203f41c7025e8c045b1817e93d0bb1f2dfb68bb")
+    assert (
+        review_for(RuleId("repository/artifacts/bespoke-iac-verifiers"), 3) == PendingRuleReview()
+    )
+    assert (
+        review_for(RuleId("repository/artifacts/operational-script-tests"), 1)
+        == PendingRuleReview()
+    )
+    assert (
+        review_for(RuleId("repository/artifacts/schema-derived-config-examples"), 2)
+        == PendingRuleReview()
+    )
     assert review_for(RuleId("core/layout/non-overlapping-root"), 1) == PendingRuleReview()
 
 

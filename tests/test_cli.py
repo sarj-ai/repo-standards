@@ -207,7 +207,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(
     monkeypatch.setattr(
         rule_reviews,
         "APPROVED_RULE_REVIEWS",
-        ((rule_id, 2, ApprovedRuleReview(reviewed_in="a" * 40)),),
+        ((rule_id, 3, ApprovedRuleReview(reviewed_in="a" * 40)),),
     )
     verifier = tmp_path / "iac" / "verify-plan.mjs"
     verifier.parent.mkdir()
@@ -216,7 +216,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(
 
     committed = runner.invoke(
         app,
-        ["check", str(tmp_path), "--enable-rule", f"{rule_id}@2", "--format", "json"],
+        ["check", str(tmp_path), "--enable-rule", f"{rule_id}@3", "--format", "json"],
     )
     staged = runner.invoke(
         app,
@@ -225,7 +225,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(
             str(tmp_path),
             "--staged",
             "--enable-rule",
-            f"{rule_id}@2",
+            f"{rule_id}@3",
             "--format",
             "json",
         ],
@@ -270,10 +270,6 @@ def test_unapproved_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
     ("selector", "path"),
     [
         (
-            "repository/artifacts/bespoke-iac-verifiers@2",
-            "iac/scripts/verify-plan.mjs",
-        ),
-        (
             "repository/artifacts/terraform-test-files@1",
             "iac/tests/routing.tftest.hcl",
         ),
@@ -316,7 +312,7 @@ def test_superseded_artifact_rule_version_cannot_be_enabled(tmp_path: Path) -> N
             "check",
             str(tmp_path),
             "--enable-rule",
-            "repository/artifacts/bespoke-iac-verifiers@1",
+            "repository/artifacts/bespoke-iac-verifiers@2",
             "--format",
             "json",
         ],
@@ -559,9 +555,7 @@ def test_ratchet_report_has_explicit_verified_baseline_status(tmp_path: Path) ->
     assert _object(payload["baseline"])["status"] == "verified"
     assert _object(payload["ratchet"])["status"] == "clean"
 
-    (tmp_path / ".repo-standards" / "baseline.json").write_text(
-        "not-json", encoding="utf-8"
-    )
+    (tmp_path / ".repo-standards" / "baseline.json").write_text("not-json", encoding="utf-8")
     dirty = runner.invoke(
         app,
         ["check", str(tmp_path), "--mode", "ratchet", "--format", "json"],
