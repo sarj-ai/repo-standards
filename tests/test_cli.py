@@ -204,6 +204,34 @@ def test_unapproved_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
     assert "not approved for activation" in str(report)
 
 
+def test_approved_retired_iac_verifier_rule_blocks_only_when_enabled(tmp_path: Path) -> None:
+    _manifest(tmp_path, GOOD_MANIFEST)
+    script = tmp_path / "iac" / "bulbul" / "scripts" / "verify-dev-apply-plan.jq"
+    script.parent.mkdir(parents=True)
+    script.write_text(".\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+
+    disabled = runner.invoke(app, ["check", str(tmp_path), "--format", "json"])
+    enabled = runner.invoke(
+        app,
+        [
+            "check",
+            str(tmp_path),
+            "--enable-rule",
+            "repository/artifacts/bespoke-iac-verifiers@1",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert disabled.exit_code == 0
+    assert enabled.exit_code == 1
+    diagnostics = _object_list(_json_object(enabled.stdout)["diagnostics"])
+    assert [diagnostic["rule_id"] for diagnostic in diagnostics] == [
+        "repository/artifacts/bespoke-iac-verifiers"
+    ]
+
+
 def test_enable_rule_help_requires_an_exact_version() -> None:
     result = runner.invoke(app, ["check", "--help"], terminal_width=160)
     help_text = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", result.stdout).split())

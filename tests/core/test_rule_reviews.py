@@ -14,8 +14,13 @@ from repo_standards.core.rule_reviews import (
 )
 
 
-def test_every_unapproved_rule_is_pending_and_disabled() -> None:
-    assert approved_rule_versions() == frozenset()
+def test_only_reviewed_rule_version_is_available_for_explicit_activation() -> None:
+    assert approved_rule_versions() == frozenset(
+        {RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 1)}
+    )
+    assert review_for(
+        RuleId("repository/artifacts/bespoke-iac-verifiers"), 1
+    ) == ApprovedRuleReview(reviewed_in="d5ddb394ae11145d198c53922823cff334739951")
     assert review_for(RuleId("core/layout/non-overlapping-root"), 1) == PendingRuleReview()
 
 
