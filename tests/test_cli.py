@@ -267,16 +267,23 @@ def test_unapproved_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "selector",
+    ("selector", "path"),
     [
-        "repository/artifacts/bespoke-iac-verifiers@1",
-        "repository/artifacts/bespoke-iac-verifiers@2",
-        "repository/artifacts/terraform-test-files@1",
+        (
+            "repository/artifacts/bespoke-iac-verifiers@2",
+            "iac/scripts/verify-plan.mjs",
+        ),
+        (
+            "repository/artifacts/terraform-test-files@1",
+            "iac/tests/routing.tftest.hcl",
+        ),
     ],
 )
-def test_pending_artifact_rules_cannot_be_enabled(tmp_path: Path, selector: str) -> None:
+def test_approved_artifact_rules_block_only_when_enabled(
+    tmp_path: Path, selector: str, path: str
+) -> None:
     _manifest(tmp_path, GOOD_MANIFEST)
-    script = tmp_path / "iac" / "bulbul" / "scripts" / "verify-dev-apply-plan.jq"
+    script = tmp_path / path
     script.parent.mkdir(parents=True)
     script.write_text(".\n", encoding="utf-8")
     _commit_changes(tmp_path)
@@ -295,8 +302,28 @@ def test_pending_artifact_rules_cannot_be_enabled(tmp_path: Path, selector: str)
     )
 
     assert disabled.exit_code == 0
-    assert enabled.exit_code == 2
-    assert "not approved for activation" in enabled.stdout
+    assert enabled.exit_code == 1
+    diagnostics = _object_list(_json_object(enabled.stdout)["diagnostics"])
+    assert [item["path"] for item in diagnostics] == [path]
+
+
+def test_superseded_artifact_rule_version_cannot_be_enabled(tmp_path: Path) -> None:
+    _manifest(tmp_path, GOOD_MANIFEST)
+
+    result = runner.invoke(
+        app,
+        [
+            "check",
+            str(tmp_path),
+            "--enable-rule",
+            "repository/artifacts/bespoke-iac-verifiers@1",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "not approved for activation" in result.stdout
 
 
 def test_enable_rule_help_requires_an_exact_version() -> None:
