@@ -46,19 +46,9 @@ class RuleVersion:
 # available to consumers; it never activates that rule in an existing repository.
 APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = (
     (
-        RuleId("repository/artifacts/bespoke-iac-verifiers"),
-        2,
-        ApprovedRuleReview(reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76"),
-    ),
-    (
         RuleId("repository/artifacts/terraform-test-files"),
         1,
         ApprovedRuleReview(reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76"),
-    ),
-    (
-        RuleId("repository/artifacts/schema-derived-config-examples"),
-        1,
-        ApprovedRuleReview(reviewed_in="2203f41c7025e8c045b1817e93d0bb1f2dfb68bb"),
     ),
 )
 
@@ -85,9 +75,7 @@ def activated_rule_versions(requested_rules: tuple[str, ...]) -> frozenset[RuleV
     if len(requested) != len(set(requested)):
         ConfigurationError.fail("enabled rule ID and version selectors must be unique")
     approved = approved_rule_versions()
-    unavailable = sorted(
-        f"{item.rule_id}@{item.version}" for item in set(requested) - approved
-    )
+    unavailable = sorted(f"{item.rule_id}@{item.version}" for item in set(requested) - approved)
     if unavailable:
         ConfigurationError.fail(f"rules are not approved for activation: {', '.join(unavailable)}")
     return frozenset(requested)
