@@ -89,6 +89,44 @@ def test_non_example_tfvars_paths_are_clean(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        pytest.param("backend.conf.example", id="terraform-backend"),
+        pytest.param("iac/dev/BACKEND.CONF.EXAMPLE", id="backend-case-insensitive"),
+        pytest.param(".env.example", id="env-root"),
+        pytest.param("services/api/.env.local.example", id="env-profile"),
+        pytest.param("services/api/.ENV.DEV.EXAMPLE", id="env-case-insensitive"),
+        pytest.param(".env.schema", id="env-schema"),
+        pytest.param("services/api/.env.production.schema.json", id="env-schema-json"),
+        pytest.param("services/api/.env.schema.yaml", id="env-schema-yaml"),
+        pytest.param("services/api/.ENV.LOCAL.SCHEMA.YML", id="env-schema-yml-case-insensitive"),
+    ],
+)
+def test_schema_derived_config_examples_are_rejected(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == [
+        RuleId("repository/artifacts/schema-derived-config-examples")
+    ]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("backend.conf", id="backend-config"),
+        pytest.param("docs/backend.conf.example.md", id="backend-documentation"),
+        pytest.param(".env", id="runtime-env"),
+        pytest.param(".env.local", id="runtime-env-profile"),
+        pytest.param("env.example", id="missing-dot-prefix"),
+        pytest.param(".envrc.example", id="different-basename"),
+        pytest.param("docs/.env.example.md", id="env-documentation"),
+        pytest.param(".env.schema.toml", id="unsupported-schema-suffix"),
+        pytest.param("settings.schema.json", id="application-schema"),
+    ],
+)
+def test_non_schema_derived_config_example_paths_are_clean(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
         pytest.param("verify.mjs", id="root-minimal-mjs"),
         pytest.param("verify-alert-policies.mjs", id="root-mjs"),
         pytest.param("verify-environment-boundary.test.mjs", id="root-mjs"),

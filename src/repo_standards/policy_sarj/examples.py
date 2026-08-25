@@ -68,6 +68,7 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
     identifier = str(fixture_id)
     if identifier in {
         "sarj-artifact-no-example-tfvars",
+        "sarj-artifact-no-schema-derived-config-examples",
         "sarj-artifact-no-bespoke-iac-verifiers",
         "sarj-artifact-no-terraform-test-files",
         "sarj-layout-markdown-placement",
