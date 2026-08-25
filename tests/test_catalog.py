@@ -19,7 +19,7 @@ from repo_standards.catalog import (
 from repo_standards.cli import app
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.catalog import core_rules
-from repo_standards.core.models import JSONValue
+from repo_standards.core.models import JSONValue, RuleId
 from repo_standards.openapi import rules as openapi_rules
 from repo_standards.policy_sarj import SarjPolicy
 
@@ -59,7 +59,19 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
 
     assert catalog.schema_version == 7
     reviews = {rule.rule_id: rule.review for rule in catalog.rules}
-    assert {review.status for review in reviews.values()} == {"pending"}
+    approved_ids = {
+        RuleId("repository/artifacts/bespoke-iac-verifiers"),
+        RuleId("repository/artifacts/terraform-test-files"),
+    }
+    assert {
+        rule_id for rule_id, review in reviews.items() if review.status == "approved"
+    } == approved_ids
+    assert {
+        review.reviewed_in for rule_id, review in reviews.items() if rule_id in approved_ids
+    } == {"0e124af8dde6016278bda7db96bd6b9b1bc12a76"}
+    assert {
+        review.status for rule_id, review in reviews.items() if rule_id not in approved_ids
+    } == {"pending"}
     assert rule_ids == sorted(expected_rule_ids)
     assert len(rule_ids) == len(set(rule_ids)) == 15
     assert len({rule.slug for rule in catalog.rules}) == 15

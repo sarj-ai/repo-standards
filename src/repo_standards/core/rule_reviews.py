@@ -44,7 +44,18 @@ class RuleVersion:
 
 # Approval is deliberately version-bound. Adding an entry makes a reviewed rule
 # available to consumers; it never activates that rule in an existing repository.
-APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = ()
+APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = (
+    (
+        RuleId("repository/artifacts/bespoke-iac-verifiers"),
+        2,
+        ApprovedRuleReview(reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76"),
+    ),
+    (
+        RuleId("repository/artifacts/terraform-test-files"),
+        1,
+        ApprovedRuleReview(reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76"),
+    ),
+)
 
 
 def review_for(rule_id: RuleId, version: int) -> RuleReview:

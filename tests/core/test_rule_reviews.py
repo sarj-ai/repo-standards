@@ -16,11 +16,17 @@ from repo_standards.policy_sarj import SarjPolicy
 
 
 def test_only_reviewed_rule_version_is_available_for_explicit_activation() -> None:
-    assert approved_rule_versions() == frozenset()
+    review = ApprovedRuleReview(reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76")
+    assert approved_rule_versions() == frozenset(
+        {
+            RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 2),
+            RuleVersion(RuleId("repository/artifacts/terraform-test-files"), 1),
+        }
+    )
     assert review_for(
         RuleId("repository/artifacts/bespoke-iac-verifiers"), 2
-    ) == PendingRuleReview()
-    assert review_for(RuleId("repository/artifacts/terraform-test-files"), 1) == PendingRuleReview()
+    ) == review
+    assert review_for(RuleId("repository/artifacts/terraform-test-files"), 1) == review
     assert review_for(RuleId("core/layout/non-overlapping-root"), 1) == PendingRuleReview()
 
 
