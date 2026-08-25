@@ -15,25 +15,33 @@ from repo_standards.core.rule_reviews import (
 from repo_standards.policy_sarj import SarjPolicy
 
 
-def test_only_reviewed_rule_version_is_available_for_explicit_activation() -> None:
-    review = ApprovedRuleReview(reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76")
+def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> None:
+    implementation_review = ApprovedRuleReview(
+        reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"
+    )
+    terraform_test_review = ApprovedRuleReview(
+        reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76"
+    )
     assert approved_rule_versions() == frozenset(
         {
+            RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 3),
+            RuleVersion(RuleId("repository/artifacts/operational-script-tests"), 1),
+            RuleVersion(RuleId("repository/artifacts/schema-derived-config-examples"), 2),
             RuleVersion(RuleId("repository/artifacts/terraform-test-files"), 1),
+            RuleVersion(RuleId("repository/documentation/placement"), 2),
         }
     )
-    assert review_for(RuleId("repository/artifacts/terraform-test-files"), 1) == review
     assert (
-        review_for(RuleId("repository/artifacts/bespoke-iac-verifiers"), 3) == PendingRuleReview()
+        review_for(RuleId("repository/artifacts/terraform-test-files"), 1)
+        == terraform_test_review
     )
-    assert (
-        review_for(RuleId("repository/artifacts/operational-script-tests"), 1)
-        == PendingRuleReview()
-    )
-    assert (
-        review_for(RuleId("repository/artifacts/schema-derived-config-examples"), 2)
-        == PendingRuleReview()
-    )
+    for rule_id, version in (
+        ("repository/artifacts/bespoke-iac-verifiers", 3),
+        ("repository/artifacts/operational-script-tests", 1),
+        ("repository/artifacts/schema-derived-config-examples", 2),
+        ("repository/documentation/placement", 2),
+    ):
+        assert review_for(RuleId(rule_id), version) == implementation_review
     assert review_for(RuleId("core/layout/non-overlapping-root"), 1) == PendingRuleReview()
 
 
