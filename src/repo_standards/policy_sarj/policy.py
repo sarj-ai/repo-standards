@@ -136,6 +136,7 @@ _AGENT_CONTRACT_ROOTS = (
 )
 _RETIRED_IAC_VERIFIER_NAMES = frozenset({"verify-dev-apply-plan.jq"})
 _TERRAFORM_TEST_SUFFIXES = (".tftest.hcl", ".tftest.json")
+_ENV_SCHEMA_SUFFIXES = (".schema", ".schema.json", ".schema.yaml", ".schema.yml")
 _NON_OPERATIONAL_COMPONENT_KINDS = frozenset(
     {"application", "contract", "foundation-service", "product-library", "shared-library", "tool"}
 )
@@ -391,6 +392,35 @@ RULES = (
         ),
     ),
     Rule(
+        rule_id=RuleId("repository/artifacts/schema-derived-config-examples"),
+        version=1,
+        default_severity="warning",
+        title="Generate configuration examples from schemas",
+        description=(
+            "Tracked backend.conf.example files and .env example or schema basenames are "
+            "prohibited, case-insensitively."
+        ),
+        why=(
+            "Hand-maintained configuration examples duplicate Terraform, Zod, or Pydantic "
+            "contracts and drift from the settings the application actually accepts."
+        ),
+        fix=(
+            "Delete the duplicate artifact and generate developer-facing configuration from "
+            "the authoritative Terraform, Zod, Pydantic, or deployment schema."
+        ),
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-artifact-no-schema-derived-config-examples",
+                title="Schema-derived configuration example",
+                language="text",
+                before="services/api/.env.local.example",
+                after="services/api/settings.py",
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
         rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
         version=2,
         default_severity="error",
@@ -534,6 +564,9 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("architecture/schema/component"): RuleClassification.SCHEMA,
         RuleId("architecture/dependencies/policy"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
+        RuleId(
+            "repository/artifacts/schema-derived-config-examples"
+        ): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/terraform-test-files"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
@@ -548,6 +581,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("architecture/dependencies/policy"): 20,
         RuleId("architecture/layout/component-paths"): 30,
         RuleId("repository/artifacts/terraform-examples"): 40,
+        RuleId("repository/artifacts/schema-derived-config-examples"): 44,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
         RuleId("repository/artifacts/terraform-test-files"): 46,
         RuleId("repository/documentation/placement"): 50,
@@ -596,7 +630,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=9,
+    policy_version=10,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -724,6 +758,33 @@ def _repository_artifact_diagnostics(
                 )
             )
         basename = PurePosixPath(path).name.casefold()
+        is_derived_env_artifact = basename.startswith(".env.") and basename.endswith(
+            (".example", *_ENV_SCHEMA_SUFFIXES)
+        )
+        if basename == "backend.conf.example" or is_derived_env_artifact:
+            diagnostics.append(
+                _repository_diagnostic(
+                    rule_id=RuleId("repository/artifacts/schema-derived-config-examples"),
+                    component=component,
+                    subject_kind="tracked-schema-derived-config-example",
+                    observed=path,
+                    expected="no tracked schema-derived configuration example basename",
+                    message="tracked configuration artifact duplicates source settings",
+                    path=path,
+                    remediation=Remediation(
+                        summary="Generate configuration guidance from source settings.",
+                        steps=(
+                            "Delete the derived example or schema artifact.",
+                            (
+                                "Generate developer-facing configuration directly from Terraform "
+                                "declarations, Zod settings, Pydantic settings, or the "
+                                "deployment schema."
+                            ),
+                        ),
+                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    ),
+                )
+            )
         if (
             basename in _RETIRED_IAC_VERIFIER_NAMES
             or (basename.startswith("verify") and basename.endswith(".mjs"))

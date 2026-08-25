@@ -98,6 +98,7 @@ _RULE_SLUGS: dict[str, RuleSlug] = {
     "architecture/schema/component": "component-identity",
     "repository/migration/consistency": "migration-consistency",
     "repository/artifacts/terraform-examples": "terraform-examples",
+    "repository/artifacts/schema-derived-config-examples": "schema-derived-config-examples",
     "repository/artifacts/bespoke-iac-verifiers": "bespoke-iac-verifiers",
     "repository/artifacts/terraform-test-files": "terraform-test-files",
     "repository/documentation/placement": "documentation-placement",
