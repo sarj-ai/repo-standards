@@ -22,13 +22,18 @@ def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> 
     terraform_test_review = ApprovedRuleReview(
         reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76"
     )
+    package_ownership_review = ApprovedRuleReview(
+        reviewed_in="6a52b0723886f591c733edc6ca2836cbedffc7ee"
+    )
     assert approved_rule_versions() == frozenset(
         {
             RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 3),
+            RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 4),
             RuleVersion(RuleId("repository/artifacts/operational-script-tests"), 1),
             RuleVersion(RuleId("repository/artifacts/schema-derived-config-examples"), 2),
             RuleVersion(RuleId("repository/artifacts/terraform-test-files"), 1),
             RuleVersion(RuleId("repository/documentation/placement"), 2),
+            RuleVersion(RuleId("repository/documentation/placement"), 3),
         }
     )
     assert (
@@ -42,9 +47,13 @@ def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> 
     ):
         assert review_for(RuleId(rule_id), version) == implementation_review
     assert (
-        review_for(RuleId("repository/artifacts/bespoke-iac-verifiers"), 4) == PendingRuleReview()
+        review_for(RuleId("repository/artifacts/bespoke-iac-verifiers"), 4)
+        == package_ownership_review
     )
-    assert review_for(RuleId("repository/documentation/placement"), 3) == PendingRuleReview()
+    assert (
+        review_for(RuleId("repository/documentation/placement"), 3)
+        == package_ownership_review
+    )
     assert review_for(RuleId("core/layout/non-overlapping-root"), 1) == PendingRuleReview()
 
 
@@ -69,16 +78,18 @@ def test_historical_reviews_remain_auditable_but_obsolete_selectors_are_rejected
     )
     with pytest.raises(ValueError, match="selectors are obsolete"):
         activated_rule_versions(old_selectors, current_rules=_current_rule_versions())
-    with pytest.raises(ValueError, match="rules are not approved for activation"):
-        activated_rule_versions(
-            ("repository/artifacts/bespoke-iac-verifiers@4",),
-            current_rules=_current_rule_versions(),
-        )
-    with pytest.raises(ValueError, match="rules are not approved for activation"):
-        activated_rule_versions(
-            ("repository/documentation/placement@3",),
-            current_rules=_current_rule_versions(),
-        )
+    current_selectors = (
+        "repository/artifacts/bespoke-iac-verifiers@4",
+        "repository/documentation/placement@3",
+    )
+    assert activated_rule_versions(
+        current_selectors, current_rules=_current_rule_versions()
+    ) == frozenset(
+        {
+            RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 4),
+            RuleVersion(RuleId("repository/documentation/placement"), 3),
+        }
+    )
 
 
 def test_approved_review_requires_immutable_review_reference() -> None:
