@@ -29,6 +29,7 @@ from repo_standards.core.models import (
     Rule,
     RuleId,
 )
+from repo_standards.core.rule_reviews import RuleVersion
 
 
 class EmptyPolicy:
@@ -43,6 +44,18 @@ class EmptyPolicy:
     def evaluate(manifest: Manifest) -> tuple[Diagnostic, ...]:
         del manifest
         return ()
+
+
+def test_analysis_rejects_an_enabled_rule_version_absent_from_the_policy_registry() -> None:
+    obsolete = RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 3)
+
+    with pytest.raises(ConfigurationError, match="not current for this policy"):
+        analyze(
+            _manifest(),
+            EmptyPolicy(),
+            mode=Mode.STRICT,
+            enabled_rules=frozenset({obsolete}),
+        )
 
 
 def _execution_issue() -> ExecutionIssue:
@@ -78,7 +91,8 @@ def test_analysis_report_variants_reject_empty_required_payloads() -> None:
 
     findings = FindingsReport(diagnostics=(finding,), **common)  # type: ignore[arg-type]
     incomplete = IncompleteReport(
-        execution_issues=(_execution_issue(),), **common  # type: ignore[arg-type]
+        execution_issues=(_execution_issue(),),
+        **common,  # type: ignore[arg-type]
     )
     passed = PassedReport(**common)  # type: ignore[arg-type]
     assert findings.conclusion == "findings"

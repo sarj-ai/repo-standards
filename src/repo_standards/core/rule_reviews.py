@@ -90,7 +90,9 @@ def approved_rule_versions() -> frozenset[RuleVersion]:
     return approved
 
 
-def activated_rule_versions(requested_rules: tuple[str, ...]) -> frozenset[RuleVersion]:
+def activated_rule_versions(
+    requested_rules: tuple[str, ...], *, current_rules: frozenset[RuleVersion]
+) -> frozenset[RuleVersion]:
     requested = tuple(_parse_rule_version(value) for value in requested_rules)
     if len(requested) != len(set(requested)):
         ConfigurationError.fail("enabled rule ID and version selectors must be unique")
@@ -98,6 +100,12 @@ def activated_rule_versions(requested_rules: tuple[str, ...]) -> frozenset[RuleV
     unavailable = sorted(f"{item.rule_id}@{item.version}" for item in set(requested) - approved)
     if unavailable:
         ConfigurationError.fail(f"rules are not approved for activation: {', '.join(unavailable)}")
+    obsolete = sorted(f"{item.rule_id}@{item.version}" for item in set(requested) - current_rules)
+    if obsolete:
+        ConfigurationError.fail(
+            "enabled rule selectors are obsolete; use the current registry version: "
+            + ", ".join(obsolete)
+        )
     return frozenset(requested)
 
 

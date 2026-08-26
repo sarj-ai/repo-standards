@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local Git fixture only
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
@@ -16,7 +16,8 @@ from repo_standards.core.inspection import (
     read_tracked_blob_contents,
 )
 from repo_standards.core.migration import migration_diagnostics
-from repo_standards.core.models import InventoryKind
+from repo_standards.core.models import InventoryKind, RuleId
+from repo_standards.policy_sarj import SarjPolicy
 
 
 if TYPE_CHECKING:
@@ -115,16 +116,37 @@ def test_workspace_metadata_is_typed_without_expanding_globs() -> None:
         "pyproject.toml",
         b'[tool.uv.workspace]\nmembers = ["packages/*"]\nexclude = ["packages/old"]\n',
     )
+    pnpm = parse_workspace_metadata(
+        "pnpm-workspace.yaml",
+        b"packages:\n  - packages/*\n  - '!packages/retired'\n",
+    )
     assert npm is not None
     assert npm.member_patterns == ("apps/*", "packages/*")
     assert python is not None
     assert python.member_patterns == ("packages/*",)
     assert python.exclude_patterns == ("packages/old",)
+    assert pnpm is not None
+    assert pnpm.member_patterns == ("packages/*",)
+    assert pnpm.exclude_patterns == ("packages/retired",)
+    assert parse_workspace_metadata("pnpm-workspace.yaml", b"catalog:\n  react: 19.0.0\n") is None
 
 
 def test_workspace_metadata_rejects_unsafe_patterns() -> None:
     with pytest.raises(ConfigurationError, match="metadata is malformed"):
         parse_workspace_metadata("package.json", b'{"workspaces":["../outside"]}')
+    with pytest.raises(ConfigurationError, match="metadata is malformed"):
+        parse_workspace_metadata("pnpm-workspace.yaml", b"packages:\n  - ../outside\n")
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    ["{apps,packages}/*", "@(apps|packages)/*", "!(packages/retired)"],
+)
+def test_workspace_metadata_rejects_unsupported_globs(pattern: str) -> None:
+    with pytest.raises(ConfigurationError, match="metadata is malformed"):
+        parse_workspace_metadata(
+            "pnpm-workspace.yaml", f"packages:\n  - '{pattern}'\n".encode()
+        )
 
 
 def test_snapshot_joins_manifest_and_inventory_from_one_git_tree(tmp_path: Path) -> None:
@@ -166,9 +188,10 @@ def test_snapshot_can_select_the_exact_staged_index(tmp_path: Path) -> None:
 
     assert snapshot.manifest.repository_id == "staged-repository"
     assert snapshot.provenance.mode == "git-index"
-    assert snapshot.provenance.source_revision == load_repository_snapshot(
-        repository
-    ).provenance.source_revision
+    assert (
+        snapshot.provenance.source_revision
+        == load_repository_snapshot(repository).provenance.source_revision
+    )
     assert len(snapshot.provenance.tree_digest) == 64
     assert repeated.provenance == snapshot.provenance
     assert repeated.manifest == snapshot.manifest
@@ -181,6 +204,208 @@ def test_staged_index_rejects_symlinks(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="symlink"):
         git_index_identity(repository)
+
+
+def test_committed_tree_rejects_symlinks(tmp_path: Path) -> None:
+    repository = _committed_repository(tmp_path)
+    (repository / "linked.py").symlink_to("apps/application/package.json")
+    _git(repository, "add", "linked.py")
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "symlink",
+    )
+
+    with pytest.raises(ConfigurationError, match="symlink"):
+        load_repository_snapshot(repository)
+
+
+@pytest.mark.parametrize(
+    ("evidence", "content"),
+    [
+        pytest.param("package-lock.json", "\n", id="newline-lock"),
+        pytest.param("index.js", "// ownership decoy\n", id="line-comment-entrypoint"),
+        pytest.param("index.mjs", "/* ownership decoy */\n", id="block-comment-entrypoint"),
+        pytest.param("uv.lock", "# ownership decoy\n", id="hash-comment-lock"),
+        pytest.param("main.py", "# ownership decoy\n", id="python-comment-entrypoint"),
+    ],
+)
+def test_exact_tree_marks_comment_only_ownership_evidence_insubstantial(
+    tmp_path: Path, evidence: str, content: str
+) -> None:
+    repository = _committed_repository(tmp_path)
+    (repository / "package.json").write_text('{"private":true}', encoding="utf-8")
+    package = repository / "packages" / "fake"
+    package.mkdir()
+    manifest = "package.json" if evidence.endswith((".js", ".mjs", ".json")) else "pyproject.toml"
+    manifest_content = (
+        '{"name":"fake"}' if manifest == "package.json" else '[project]\nname="fake"\n'
+    )
+    (package / manifest).write_text(manifest_content, encoding="utf-8")
+    (package / evidence).write_text(content, encoding="utf-8")
+    verifier = "src/verify-plan.mjs" if manifest == "package.json" else "src/verify_plan.py"
+    (package / "src").mkdir()
+    (package / verifier).write_text("export {}\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "evidence",
+    )
+
+    snapshot = load_repository_snapshot(repository)
+    tracked = next(
+        item for item in snapshot.inspection.tracked_files if item.path.endswith(evidence)
+    )
+
+    assert not tracked.substantive
+    assert [
+        item.rule_id
+        for item in SarjPolicy.evaluate_repository(snapshot)
+        if item.path == f"packages/fake/{verifier}"
+    ] == [RuleId("repository/artifacts/bespoke-iac-verifiers")]
+
+
+@pytest.mark.parametrize(
+    ("tree_mode", "evidence", "content"),
+    [
+        pytest.param("committed", "package-lock.json", " " * 1_048_577, id="committed-lock"),
+        pytest.param(
+            "staged",
+            "index.mjs",
+            f"/*{' ' * 1_048_573}*/",
+            id="staged-entrypoint",
+        ),
+    ],
+)
+def test_oversized_ownership_decoys_fail_closed_in_the_exact_tree(
+    tmp_path: Path,
+    tree_mode: Literal["committed", "staged"],
+    evidence: str,
+    content: str,
+) -> None:
+    repository = _committed_repository(tmp_path)
+    (repository / "package.json").write_text('{"private":true}', encoding="utf-8")
+    package = repository / "packages" / "fake"
+    package.mkdir()
+    (package / "package.json").write_text('{"name":"fake"}', encoding="utf-8")
+    (package / evidence).write_text(content, encoding="utf-8")
+    (package / "src").mkdir()
+    verifier = package / "src" / "verify-plan.mjs"
+    verifier.write_text("export {}\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    identity = git_index_identity(repository) if tree_mode == "staged" else None
+    if tree_mode == "committed":
+        _git(
+            repository,
+            "-c",
+            "user.name=Repository Lint",
+            "-c",
+            "user.email=repository-lint@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "oversized ownership decoy",
+        )
+    (package / evidence).write_text("substantive dirty bytes\n", encoding="utf-8")
+
+    snapshot = load_repository_snapshot(repository, identity=identity)
+    tracked = next(
+        item for item in snapshot.inspection.tracked_files if item.path.endswith(evidence)
+    )
+
+    assert snapshot.inspection.completion == "complete"
+    assert snapshot.inspection.issues == ()
+    assert not tracked.substantive
+    assert [
+        item.rule_id
+        for item in SarjPolicy.evaluate_repository(snapshot)
+        if item.path == "packages/fake/src/verify-plan.mjs"
+    ] == [RuleId("repository/artifacts/bespoke-iac-verifiers")]
+
+
+@pytest.mark.parametrize("ownership", ["workspace", "entrypoint"])
+def test_oversized_lock_does_not_brick_independently_owned_package(
+    tmp_path: Path, ownership: Literal["workspace", "entrypoint"]
+) -> None:
+    repository = _committed_repository(tmp_path)
+    if ownership == "entrypoint":
+        (repository / "package.json").write_text('{"private":true}', encoding="utf-8")
+    relative_package = "packages/owned" if ownership == "workspace" else "vendor/owned"
+    package_root = repository / relative_package
+    package_root.mkdir(parents=True)
+    (package_root / "package.json").write_text('{"name":"owned"}', encoding="utf-8")
+    oversized_lock = package_root / "package-lock.json"
+    oversized_lock.write_text(" " * 1_048_577, encoding="utf-8")
+    if ownership == "entrypoint":
+        (package_root / "index.mjs").write_text("export {}\n", encoding="utf-8")
+    (package_root / "src").mkdir()
+    verifier = package_root / "src" / "verify-plan.mjs"
+    verifier.write_text("export {}\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "large legitimate lockfile",
+    )
+
+    snapshot = load_repository_snapshot(repository)
+    lock_evidence = next(
+        item
+        for item in snapshot.inspection.tracked_files
+        if item.path == oversized_lock.relative_to(repository).as_posix()
+    )
+
+    assert snapshot.inspection.completion == "complete"
+    assert snapshot.inspection.issues == ()
+    assert not lock_evidence.substantive
+    assert [
+        item.rule_id
+        for item in SarjPolicy.evaluate_repository(snapshot)
+        if item.path == verifier.relative_to(repository).as_posix()
+    ] == []
+
+
+def test_unrelated_oversized_blob_does_not_affect_inspection(tmp_path: Path) -> None:
+    repository = _committed_repository(tmp_path)
+    unrelated = repository / "assets" / "payload.txt"
+    unrelated.parent.mkdir()
+    unrelated.write_text("x" * 1_048_577, encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "unrelated large blob",
+    )
+
+    snapshot = load_repository_snapshot(repository)
+
+    assert snapshot.inspection.completion == "complete"
+    assert snapshot.inspection.issues == ()
 
 
 def test_selected_blob_reader_ignores_dirty_worktree_bytes(tmp_path: Path) -> None:

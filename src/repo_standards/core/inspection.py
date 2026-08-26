@@ -5,6 +5,7 @@ import hashlib
 from io import BytesIO
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed Git metadata query only
 import tempfile
@@ -13,7 +14,8 @@ import tomllib
 from types import MappingProxyType
 from typing import ClassVar, Literal, NamedTuple
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+import yaml
 
 from .canonical import canonical_path
 from .errors import ConfigurationError
@@ -62,6 +64,33 @@ _GIT_ENVIRONMENT = MappingProxyType(
         "LC_ALL": "C",
     }
 )
+_OWNERSHIP_LOCK_NAMES = frozenset(
+    {
+        "Pipfile.lock",
+        "bun.lock",
+        "bun.lockb",
+        "npm-shrinkwrap.json",
+        "package-lock.json",
+        "pdm.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "uv.lock",
+        "yarn.lock",
+    }
+)
+_NPM_ENTRYPOINTS = frozenset(
+    {
+        "index.cjs",
+        "index.js",
+        "index.mjs",
+        "index.ts",
+        "src/index.cjs",
+        "src/index.js",
+        "src/index.mjs",
+        "src/index.ts",
+    }
+)
+_PYTHON_ENTRYPOINTS = frozenset({"__main__.py", "app.py", "cli.py", "main.py", "server.py"})
 
 
 ProjectCoordinate = PackageEvidence
@@ -114,6 +143,12 @@ class _NpmPackage(BaseModel):
     name: str | None = None
     private: bool | None = None
     workspaces: list[object] | _NpmWorkspaces | None = None
+
+
+class _PnpmWorkspace(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow", strict=True)
+
+    packages: list[str] = Field(default_factory=list)
 
 
 def read_tracked_blob_contents(
@@ -308,10 +343,11 @@ def _repository_content_evidence(
 def _inspection_from_blobs(
     root: Path, identity: GitIdentity, blobs: tuple[TrackedBlob, ...]
 ) -> RepositoryInspection:
-    tracked = tuple(blob.path for blob in blobs)
     issues: list[str] = []
     metadata_blobs = tuple(
-        blob for blob in blobs if Path(blob.path).name in {"package.json", "pyproject.toml"}
+        blob
+        for blob in blobs
+        if Path(blob.path).name in {"package.json", "pnpm-workspace.yaml", "pyproject.toml"}
     )
     if len(metadata_blobs) > _MAX_METADATA_FILES:
         ConfigurationError.fail(
@@ -323,9 +359,10 @@ def _inspection_from_blobs(
     workspaces: list[WorkspaceEvidence] = []
     for blob in metadata_blobs:
         content = contents.get(blob.object_id)
-        project = _inspect_project(blob, content, issues)
-        if project is not None:
-            packages.append(project)
+        if Path(blob.path).name != "pnpm-workspace.yaml":
+            project = _inspect_project(blob, content, issues)
+            if project is not None:
+                packages.append(project)
         workspace = _inspect_workspace(blob, content, issues)
         if workspace is not None:
             workspaces.append(workspace)
@@ -372,20 +409,69 @@ def _inspection_from_blobs(
         for blob in selected
     )
     inventory_units.extend(terraform_modules)
+    tracked_files = _tracked_file_evidence(root, blobs, packages)
     return RepositoryInspection(
         completion="incomplete" if issues else "complete",
         source_revision=identity.source_revision,
         tree_digest=identity.tree_digest,
-        tracked_file_count=len(tracked),
+        tracked_file_count=len(blobs),
         packages=tuple(sorted(packages, key=lambda item: (item.path, item.ecosystem))),
         workflow_paths=tuple(blob.path for blob in workflow_blobs),
         cloudbuild_paths=tuple(blob.path for blob in cloudbuild_blobs),
         dockerfile_paths=tuple(blob.path for blob in dockerfile_blobs),
         terraform_modules=tuple(item.path for item in terraform_modules),
         issues=tuple(sorted(issues)),
-        tracked_files=tuple(TrackedFileEvidence(blob.path, blob.object_id) for blob in blobs),
+        tracked_files=tracked_files,
         workspaces=tuple(sorted(workspaces, key=lambda item: (item.path, item.ecosystem))),
         inventory_units=tuple(sorted(inventory_units, key=lambda item: (item.path, item.kind))),
+    )
+
+
+def _tracked_file_evidence(
+    root: Path,
+    blobs: tuple[TrackedBlob, ...],
+    packages: list[PackageEvidence],
+) -> tuple[TrackedFileEvidence, ...]:
+    evidence_paths = _ownership_evidence_paths(packages)
+    evidence_blobs = tuple(blob for blob in blobs if blob.path in evidence_paths)
+    evidence_contents, _ = _read_metadata_batch(root, evidence_blobs)
+    return tuple(
+        TrackedFileEvidence(
+            blob.path,
+            blob.object_id,
+            substantive=(
+                _ownership_evidence_is_substantive(evidence_contents.get(blob.object_id))
+                if blob.path in evidence_paths
+                else True
+            ),
+        )
+        for blob in blobs
+    )
+
+
+def _ownership_evidence_paths(packages: list[PackageEvidence]) -> frozenset[str]:
+    paths: set[str] = set()
+    for project in packages:
+        root = Path(project.path).parent.as_posix()
+        prefix = "" if root == "." else f"{root}/"
+        paths.update(f"{prefix}{name}" for name in _OWNERSHIP_LOCK_NAMES)
+        entrypoints = _NPM_ENTRYPOINTS if project.ecosystem == "npm" else _PYTHON_ENTRYPOINTS
+        paths.update(f"{prefix}{name}" for name in entrypoints)
+    return frozenset(paths)
+
+
+def _ownership_evidence_is_substantive(content: bytes | None) -> bool:
+    if content is None:
+        return False
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return bool(content)
+    without_blocks = re.sub(r"/\*.*?\*/", "", text.removeprefix("\ufeff"), flags=re.DOTALL)
+    return any(
+        stripped and not stripped.startswith(("#", "//"))
+        for line in without_blocks.splitlines()
+        if (stripped := line.strip())
     )
 
 
@@ -701,6 +787,8 @@ def parse_workspace_metadata(relative: str, content: bytes) -> WorkspaceEvidence
     try:
         if relative.endswith("package.json"):
             return _npm_workspace(relative, content)
+        if relative.endswith("pnpm-workspace.yaml"):
+            return _pnpm_workspace(relative, content)
         if relative.endswith("pyproject.toml"):
             return _python_workspace(relative, content)
     except (
@@ -709,9 +797,29 @@ def parse_workspace_metadata(relative: str, content: bytes) -> WorkspaceEvidence
         UnicodeError,
         ValueError,
         tomllib.TOMLDecodeError,
+        yaml.YAMLError,
     ):
         ConfigurationError.fail(f"metadata is malformed: {relative}")
     return ConfigurationError.fail(f"unsupported project metadata: {relative}")
+
+
+def _pnpm_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None:
+    document: object = yaml.safe_load(content.decode("utf-8"))  # pyright: ignore[reportAny]
+    packages = _PnpmWorkspace.model_validate(document).packages
+    members = [item for item in packages if not item.startswith("!") or item.startswith("!(")]
+    excludes = [
+        item.removeprefix("!")
+        for item in packages
+        if item.startswith("!") and not item.startswith("!(")
+    ]
+    if not members:
+        return None
+    return WorkspaceEvidence(
+        ecosystem="npm",
+        path=relative,
+        member_patterns=_workspace_patterns(members, f"pnpm packages: {relative}"),
+        exclude_patterns=_workspace_patterns(excludes, f"pnpm exclusions: {relative}"),
+    )
 
 
 def _required_content(contents: dict[str, bytes], blob: TrackedBlob) -> bytes:
@@ -1007,6 +1115,8 @@ def _workspace_patterns(value: object, context: str) -> tuple[str, ...]:
             ConfigurationError.fail(f"{context} entries must be non-empty strings")
         if "\\" in item or item.startswith("/") or "\x00" in item or ".." in Path(item).parts:
             ConfigurationError.fail(f"{context} contains an unsafe pattern")
+        if any(token in item for token in ("{", "}", "@(", "+(", "?(", "*(", "!(")):
+            ConfigurationError.fail(f"{context} contains unsupported glob syntax")
         patterns.append(item)
     return tuple(patterns)
 

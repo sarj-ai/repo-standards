@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from enum import StrEnum
+from fnmatch import fnmatchcase
 import json
 from pathlib import PurePosixPath
 import posixpath
@@ -26,6 +27,7 @@ from repo_standards.core.models import (
     FixtureId,
     JSONValue,
     Manifest,
+    PackageEvidence,
     PolicyId,
     Remediation,
     RepositorySnapshot,
@@ -79,6 +81,11 @@ class _CodeBoundary(NamedTuple):
 class _ScalarLocation(NamedTuple):
     pointer: str
     value: str
+
+
+class _DocumentPackageRoots(NamedTuple):
+    packages: frozenset[str]
+    python_imports: frozenset[str]
 
 
 class ComponentKind(StrEnum):
@@ -474,22 +481,26 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
-        version=3,
+        version=4,
         default_severity="error",
         title="Do not commit bespoke verifier scripts",
         description=(
             "Retired verifier basenames are prohibited everywhere. Other executable-script "
-            "basenames beginning with verify are prohibited when operational placement or a "
-            "non-root path lacks objective source, test, script, bin, or component ownership."
+            "basenames beginning with verify require objective source, test, script, bin, or "
+            "component ownership. Operational placement remains prohibited except for "
+            "conventional source inside an objectively owned tool or harness."
         ),
         why=(
             "Repository-specific verifier entrypoints create parallel validation paths that "
-            "drift from shared policy, owned test suites, and deployment contracts."
+            "drift from shared policy, owned test suites, and deployment contracts. Durable "
+            "executable verification belongs in an objectively owned tool or harness."
         ),
         fix=(
-            "Delete the operational verifier and every invocation. Moving or renaming it is "
-            "not remediation; express the invariant in Terraform, shared policy, or a provider "
-            "or runtime contract."
+            "Delete the one-off verifier and every invocation. Express the invariant in "
+            "Terraform, shared policy, or a provider or runtime contract; if executable "
+            "verification is durable product code, place it in conventional source inside a "
+            "declared or workspace-backed tool or harness. Moving or renaming alone is not "
+            "remediation."
         ),
         taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
         examples=(
@@ -565,7 +576,7 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/documentation/placement"),
-        version=2,
+        version=3,
         default_severity="error",
         title="Keep Markdown in durable owned locations",
         description="Tracked Markdown must have a durable documentation or tool-contract role.",
@@ -716,7 +727,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=11,
+    policy_version=12,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -815,7 +826,10 @@ def _repository_artifact_diagnostics(
     snapshot: RepositorySnapshot,
 ) -> tuple[Diagnostic, ...]:
     package_test_roots = _owned_package_roots(snapshot)
-    document_package_roots = package_test_roots
+    document_package_roots = _DocumentPackageRoots(
+        package_test_roots,
+        _owned_python_import_roots(snapshot, package_test_roots),
+    )
     diagnostics: list[Diagnostic] = []
     for tracked in snapshot.inspection.tracked_files:
         path = tracked.path
@@ -879,6 +893,8 @@ def _repository_artifact_diagnostics(
             component=component,
             terraform_modules=snapshot.inspection.terraform_modules,
         )
+        is_owned_verifier = _is_owned_verifier_path(path, component, package_test_roots)
+        is_owned_tool_source = path.startswith("tools/") and is_owned_verifier
         is_operational_script_test = (
             _is_script_test(basename)
             and is_operational_path
@@ -894,7 +910,8 @@ def _repository_artifact_diagnostics(
             and (
                 is_terraform_path
                 or is_github_automation_path
-                or not _is_owned_verifier_path(path, component, package_test_roots)
+                or (is_operational_path and not is_owned_tool_source)
+                or not is_owned_verifier
             )
         )
         if is_bespoke_verifier:
@@ -1031,7 +1048,7 @@ def _nearest_component(path: str, components: tuple[Component, ...]) -> Componen
 def _markdown_path_is_owned(
     path: str,
     *,
-    package_roots: frozenset[str],
+    package_roots: _DocumentPackageRoots,
     component: Component | None,
     terraform_modules: tuple[str, ...],
     documentation_entrypoints: tuple[str, ...],
@@ -1054,10 +1071,15 @@ def _markdown_path_is_owned(
         and _is_operational_path(path, component=component, terraform_modules=terraform_modules)
     ):
         return False
-    if is_root_document or is_durable_tree or is_agent_contract:
+    if (
+        is_root_document
+        or is_durable_tree
+        or is_agent_contract
+        or _owned_package_relative_parts(path, package_roots.python_imports)
+    ):
         return True
     parent = _parent_path(path)
-    if pure_path.name in _PACKAGE_DOCUMENT_NAMES and parent in package_roots:
+    if _is_owned_package_document(path, package_roots.packages):
         return True
     if component is None:
         return False
@@ -1072,6 +1094,7 @@ def _markdown_path_is_owned(
 
 def _owned_package_roots(snapshot: RepositorySnapshot) -> frozenset[str]:
     roots: set[str] = set()
+    tracked_files = {item.path: item.substantive for item in snapshot.inspection.tracked_files}
     for project in snapshot.inspection.packages:
         root = _parent_path(project.path)
         if not project.name:
@@ -1082,19 +1105,123 @@ def _owned_package_roots(snapshot: RepositorySnapshot) -> frozenset[str]:
             and component.path == root
             and component.kind in _NON_OPERATIONAL_COMPONENT_KINDS
         )
-        root_workspace_owned = any(
+        containing_workspaces = tuple(
+            workspace
+            for workspace in snapshot.inspection.workspaces
+            if workspace.ecosystem == project.ecosystem
+            and workspace.path != project.path
+            and _workspace_contains(workspace, project.path)
+        )
+        workspace_owned = any(
+            _workspace_includes(workspace, project.path) for workspace in containing_workspaces
+        )
+        colocated_workspace_owned = any(
             workspace.ecosystem == project.ecosystem
-            and not _parent_path(workspace.path)
-            and _workspace_includes(workspace, project.path)
+            and _parent_path(workspace.path) == root
+            and bool(workspace.member_patterns)
             for workspace in snapshot.inspection.workspaces
         )
         root_project = not root
-        conventionally_owned = (root_workspace_owned or root_project) and not _is_operational_path(
-            root, component=component, terraform_modules=snapshot.inspection.terraform_modules
+        conventional_evidence = (
+            root_project
+            or workspace_owned
+            or colocated_workspace_owned
+            or (
+                not containing_workspaces
+                and _has_standalone_package_evidence(project, root, tracked_files)
+            )
+        )
+        conventionally_owned = conventional_evidence and (
+            colocated_workspace_owned
+            or not _is_operational_path(
+                root, component=component, terraform_modules=snapshot.inspection.terraform_modules
+            )
         )
         if explicitly_owned or conventionally_owned:
             roots.add(root)
     return frozenset(roots)
+
+
+def _has_standalone_package_evidence(
+    project: PackageEvidence, root: str, tracked_files: dict[str, bool]
+) -> bool:
+    if not project.name:
+        return False
+    names = (
+        {
+            "bun.lock",
+            "bun.lockb",
+            "npm-shrinkwrap.json",
+            "package-lock.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+        }
+        if project.ecosystem == "npm"
+        else {"Pipfile.lock", "pdm.lock", "poetry.lock", "uv.lock"}
+    )
+    prefix = f"{root}/" if root else ""
+    if any(_is_substantive_tracked_path(f"{prefix}{name}", tracked_files) for name in names):
+        return True
+    if project.ecosystem == "npm":
+        entrypoints = {
+            "index.cjs",
+            "index.js",
+            "index.mjs",
+            "index.ts",
+            "src/index.cjs",
+            "src/index.js",
+            "src/index.mjs",
+            "src/index.ts",
+        }
+    else:
+        entrypoints = {
+            "__main__.py",
+            "app.py",
+            "cli.py",
+            "main.py",
+            "server.py",
+        }
+    return any(
+        _is_substantive_tracked_path(f"{prefix}{entrypoint}", tracked_files)
+        for entrypoint in entrypoints
+    )
+
+
+def _owned_python_import_roots(
+    snapshot: RepositorySnapshot, package_roots: frozenset[str]
+) -> frozenset[str]:
+    tracked_paths = frozenset(item.path for item in snapshot.inspection.tracked_files)
+    roots: set[str] = set()
+    for project in snapshot.inspection.packages:
+        root = _parent_path(project.path)
+        if project.ecosystem != "python" or root not in package_roots or not project.name:
+            continue
+        import_name = _python_import_name(project.name)
+        if import_name is None:
+            continue
+        import_root = f"{root}/{import_name}" if root else import_name
+        if f"{import_root}/__init__.py" in tracked_paths:
+            roots.add(import_root)
+    return frozenset(roots)
+
+
+def _python_import_name(project_name: str) -> str | None:
+    normalized = re.sub(r"[-.]+", "_", project_name).casefold()
+    return normalized if re.fullmatch(r"[a-z0-9_]+", normalized) else None
+
+
+def _is_substantive_tracked_path(path: str, tracked_files: dict[str, bool]) -> bool:
+    return tracked_files.get(path, False)
+
+
+def _workspace_contains(workspace: WorkspaceEvidence, project_path: str) -> bool:
+    workspace_root = PurePosixPath(workspace.path).parent
+    project_directory = PurePosixPath(project_path).parent
+    try:
+        relative = project_directory.relative_to(workspace_root)
+    except ValueError:
+        return False
+    return bool(relative.parts)
 
 
 def _workspace_includes(workspace: WorkspaceEvidence, project_path: str) -> bool:
@@ -1104,9 +1231,52 @@ def _workspace_includes(workspace: WorkspaceEvidence, project_path: str) -> bool
         relative = project_directory.relative_to(workspace_root)
     except ValueError:
         return False
-    return any(relative.match(pattern) for pattern in workspace.member_patterns) and not any(
-        relative.match(pattern) for pattern in workspace.exclude_patterns
+    return any(
+        _workspace_pattern_matches(relative, pattern) for pattern in workspace.member_patterns
+    ) and not any(
+        _workspace_pattern_matches(relative, pattern) for pattern in workspace.exclude_patterns
     )
+
+
+def _workspace_pattern_matches(relative: PurePosixPath, pattern: str) -> bool:
+    if pattern == ".":
+        return not relative.parts
+    return _workspace_parts_match(relative.parts, PurePosixPath(pattern).parts)
+
+
+def _workspace_parts_match(path: tuple[str, ...], pattern: tuple[str, ...]) -> bool:
+    pending = [(0, 0)]
+    visited: set[tuple[int, int]] = set()
+    while pending:
+        path_index, pattern_index = pending.pop()
+        state = (path_index, pattern_index)
+        if state in visited:
+            continue
+        visited.add(state)
+        if pattern_index == len(pattern):
+            if path_index == len(path):
+                return True
+            continue
+        if pattern[pattern_index] == "**":
+            pending.append((path_index, pattern_index + 1))
+            if path_index < len(path):
+                pending.append((path_index + 1, pattern_index))
+        elif path_index < len(path) and fnmatchcase(path[path_index], pattern[pattern_index]):
+            pending.append((path_index + 1, pattern_index + 1))
+    return False
+
+
+def _is_owned_package_document(path: str, package_roots: frozenset[str]) -> bool:
+    parts = _owned_package_relative_parts(path, frozenset(root for root in package_roots if root))
+    if not parts:
+        return False
+    basename = parts[-1]
+    stem = basename.removesuffix(".md")
+    is_document_name = basename in _PACKAGE_DOCUMENT_NAMES or stem in {"RELEASES", "USAGE"}
+    is_readme_variant = stem == "README" or stem.startswith(("README-", "README_", "README."))
+    is_source_tree = parts[0].casefold() == "src"
+    is_docs_tree = any(part.casefold() in {"doc", "docs"} for part in parts[:-1])
+    return is_document_name or is_readme_variant or is_source_tree or is_docs_tree
 
 
 def _is_owned_verifier_path(
@@ -1239,7 +1409,7 @@ _MIN_COMPETING_AUTHORITIES = 2
 
 def _documentation_reachability_diagnostics(  # ruff: ignore[too-many-branches]
     snapshot: RepositorySnapshot,
-    package_roots: frozenset[str],
+    package_roots: _DocumentPackageRoots,
 ) -> tuple[Diagnostic, ...]:
     documentation = snapshot.manifest.documentation
     if documentation is None:
@@ -1263,16 +1433,23 @@ def _documentation_reachability_diagnostics(  # ruff: ignore[too-many-branches]
             continue
         pure = PurePosixPath(path)
         parts = pure.parts
+        is_owned_leaf_document = (
+            component is not None and component.kind == "generated-client"
+        ) or _is_owned_package_document(
+            path, package_roots.packages
+        ) or bool(_owned_package_relative_parts(path, package_roots.python_imports))
         if (
             parts[0] == ".github"
             or pure.name in _AGENT_CONTRACT_NAMES
             or any(parts[: len(root)] == root for root in _AGENT_CONTRACT_ROOTS)
-            or (component is not None and component.kind == "generated-client")
+            or is_owned_leaf_document
         ):
             continue
         eligible.add(path)
         parent = _parent_path(path)
-        if pure.name in _PACKAGE_DOCUMENT_NAMES and (not parent or parent in package_roots):
+        if pure.name in _PACKAGE_DOCUMENT_NAMES and (
+            not parent or parent in package_roots.packages
+        ):
             seeds.add(path)
         else:
             candidates.add(path)

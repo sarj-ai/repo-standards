@@ -311,6 +311,7 @@ class Baseline:
 class TrackedFileEvidence:
     path: str
     object_id: str
+    substantive: bool = True
 
 
 @dataclass(frozen=True, slots=True)

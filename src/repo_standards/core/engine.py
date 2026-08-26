@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import date
 
 from .canonical import scope_digest, with_fingerprint
+from .catalog import core_rules
 from .errors import ConfigurationError
 from .models import (
     AnalysisReport,
@@ -197,6 +198,16 @@ def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a
 ) -> AnalysisReport:
     emitted = core_diagnostics(manifest) + policy.evaluate(manifest) + additional_diagnostics
     if enabled_rules is not None:
+        current_rules = frozenset(
+            RuleVersion(rule.rule_id, rule.version) for rule in core_rules() + policy.rules()
+        )
+        obsolete = sorted(
+            f"{item.rule_id}@{item.version}" for item in enabled_rules - current_rules
+        )
+        if obsolete:
+            ConfigurationError.fail(
+                "enabled rule selectors are not current for this policy: " + ", ".join(obsolete)
+            )
         emitted = tuple(
             item
             for item in emitted
