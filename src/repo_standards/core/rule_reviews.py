@@ -51,6 +51,11 @@ APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = (
         ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),
     ),
     (
+        RuleId("repository/artifacts/bespoke-iac-verifiers"),
+        4,
+        ApprovedRuleReview(reviewed_in="6a52b0723886f591c733edc6ca2836cbedffc7ee"),
+    ),
+    (
         RuleId("repository/artifacts/operational-script-tests"),
         1,
         ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),
@@ -69,6 +74,11 @@ APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = (
         RuleId("repository/documentation/placement"),
         2,
         ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),
+    ),
+    (
+        RuleId("repository/documentation/placement"),
+        3,
+        ApprovedRuleReview(reviewed_in="6a52b0723886f591c733edc6ca2836cbedffc7ee"),
     ),
 )
 
