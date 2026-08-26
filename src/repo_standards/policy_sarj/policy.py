@@ -481,14 +481,15 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
-        version=4,
+        version=5,
         default_severity="error",
         title="Do not commit bespoke verifier scripts",
         description=(
             "Retired verifier basenames are prohibited everywhere. Other executable-script "
             "basenames beginning with verify require objective source, test, script, bin, or "
-            "component ownership. Operational placement remains prohibited except for "
-            "conventional source inside an objectively owned tool or harness."
+            "component ownership, including at the repository root. Operational placement "
+            "remains prohibited except for conventional source inside an objectively owned "
+            "tool or harness."
         ),
         why=(
             "Repository-specific verifier entrypoints create parallel validation paths that "
@@ -499,8 +500,8 @@ RULES = (
             "Delete the one-off verifier and every invocation. Express the invariant in "
             "Terraform, shared policy, or a provider or runtime contract; if executable "
             "verification is durable product code, place it in conventional source inside a "
-            "declared or workspace-backed tool or harness. Moving or renaming alone is not "
-            "remediation."
+            "declared or workspace-backed tool or harness. Relocating, renaming, or translating "
+            "the same check, including to TypeScript, is not remediation."
         ),
         taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
         examples=(
@@ -727,7 +728,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=12,
+    policy_version=13,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -906,7 +907,6 @@ def _repository_artifact_diagnostics(
         )
         is_bespoke_verifier = basename in _RETIRED_IAC_VERIFIER_NAMES or (
             _is_verifier_script(basename)
-            and (is_operational_path or bool(_parent_path(path)))
             and (
                 is_terraform_path
                 or is_github_automation_path

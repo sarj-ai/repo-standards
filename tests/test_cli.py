@@ -207,7 +207,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(
     monkeypatch.setattr(
         rule_reviews,
         "APPROVED_RULE_REVIEWS",
-        ((rule_id, 4, ApprovedRuleReview(reviewed_in="a" * 40)),),
+        ((rule_id, 5, ApprovedRuleReview(reviewed_in="a" * 40)),),
     )
     verifier = tmp_path / "iac" / "verify-plan.mjs"
     verifier.parent.mkdir()
@@ -216,7 +216,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(
 
     committed = runner.invoke(
         app,
-        ["check", str(tmp_path), "--enable-rule", f"{rule_id}@4", "--format", "json"],
+        ["check", str(tmp_path), "--enable-rule", f"{rule_id}@5", "--format", "json"],
     )
     staged = runner.invoke(
         app,
@@ -225,7 +225,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(
             str(tmp_path),
             "--staged",
             "--enable-rule",
-            f"{rule_id}@4",
+            f"{rule_id}@5",
             "--format",
             "json",
         ],

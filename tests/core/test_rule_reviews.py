@@ -78,17 +78,20 @@ def test_historical_reviews_remain_auditable_but_obsolete_selectors_are_rejected
     )
     with pytest.raises(ValueError, match="selectors are obsolete"):
         activated_rule_versions(old_selectors, current_rules=_current_rule_versions())
-    current_selectors = (
+    obsolete_selectors = (
         "repository/artifacts/bespoke-iac-verifiers@4",
         "repository/documentation/placement@3",
     )
-    assert activated_rule_versions(
-        current_selectors, current_rules=_current_rule_versions()
-    ) == frozenset(
-        {
-            RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 4),
-            RuleVersion(RuleId("repository/documentation/placement"), 3),
-        }
+    with pytest.raises(ValueError, match="selectors are obsolete"):
+        activated_rule_versions(obsolete_selectors, current_rules=_current_rule_versions())
+    with pytest.raises(ValueError, match="not approved for activation"):
+        activated_rule_versions(
+            ("repository/artifacts/bespoke-iac-verifiers@5",),
+            current_rules=_current_rule_versions(),
+        )
+    assert (
+        review_for(RuleId("repository/artifacts/bespoke-iac-verifiers"), 5)
+        == PendingRuleReview()
     )
 
 
