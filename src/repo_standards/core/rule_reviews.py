@@ -56,6 +56,11 @@ APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = (
         ApprovedRuleReview(reviewed_in="6a52b0723886f591c733edc6ca2836cbedffc7ee"),
     ),
     (
+        RuleId("repository/artifacts/bespoke-iac-verifiers"),
+        5,
+        ApprovedRuleReview(reviewed_in="319d3ee27278f2b915ee7fb063592298a8b49485"),
+    ),
+    (
         RuleId("repository/artifacts/operational-script-tests"),
         1,
         ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),
