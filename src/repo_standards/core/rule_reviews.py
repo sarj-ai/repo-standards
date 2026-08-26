@@ -124,6 +124,30 @@ def activated_rule_versions(
     return frozenset(requested)
 
 
+def activated_rule_ids(
+    requested_rule_ids: tuple[str, ...], *, current_rules: frozenset[RuleVersion]
+) -> frozenset[RuleVersion]:
+    if any("@" in value for value in requested_rule_ids):
+        ConfigurationError.fail("manifest enabled_rules must use versionless rule IDs")
+    requested = tuple(RuleId(value) for value in requested_rule_ids)
+    if len(requested) != len(set(requested)):
+        ConfigurationError.fail("manifest enabled_rules must be unique")
+    current_by_id = {item.rule_id: item for item in current_rules}
+    unavailable = sorted(str(item) for item in set(requested) - current_by_id.keys())
+    if unavailable:
+        ConfigurationError.fail(f"rules are not available: {', '.join(unavailable)}")
+    activated = frozenset(current_by_id[item] for item in requested)
+    unapproved = sorted(
+        f"{item.rule_id}@{item.version}"
+        for item in activated - approved_rule_versions()
+    )
+    if unapproved:
+        ConfigurationError.fail(
+            f"current rules are not approved for activation: {', '.join(unapproved)}"
+        )
+    return activated
+
+
 def _parse_rule_version(value: str) -> RuleVersion:
     rule_id, separator, version_text = value.rpartition("@")
     if not separator or not rule_id or not version_text.isascii() or not version_text.isdecimal():
