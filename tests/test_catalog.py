@@ -60,7 +60,6 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     assert catalog.schema_version == 7
     reviews = {rule.rule_id: rule.review for rule in catalog.rules}
     approved_ids = {
-        RuleId("repository/artifacts/bespoke-iac-verifiers"),
         RuleId("repository/artifacts/operational-script-tests"),
         RuleId("repository/artifacts/schema-derived-config-examples"),
         RuleId("repository/artifacts/terraform-test-files"),

@@ -61,7 +61,7 @@ jobs:
           npm --prefix apps/docs run lint
           npm --prefix apps/docs run build
       - name: Verify public site artifacts
-        run: uv run python verify_release_artifacts.py --site apps/docs/dist
+        run: uv run python -m repo_standards.verify_release_artifacts --site apps/docs/dist
       - name: Upload immutable site
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

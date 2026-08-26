@@ -126,7 +126,7 @@ jobs:
           --directory dist/packages/repo-standards
       - name: Verify public distribution boundary
         run: >-
-          uv run --frozen python verify_release_artifacts.py
+          uv run --frozen python -m repo_standards.verify_release_artifacts
           --distributions dist/packages/repo-standards
       - name: Verify exact release identity in package documentation
         run: >-

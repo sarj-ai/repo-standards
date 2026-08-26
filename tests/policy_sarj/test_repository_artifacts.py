@@ -198,9 +198,6 @@ def test_bespoke_iac_verifier_files_are_rejected(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        pytest.param("verify.mjs", id="root-minimal-mjs"),
-        pytest.param("verify_release_artifacts.py", id="root-release-verifier"),
-        pytest.param("verify-environment-boundary.test.mjs", id="root-test-verifier"),
         pytest.param("preverify.mjs", id="prefix-mjs"),
         pytest.param("verify-plan.mjs.bak", id="mjs-suffix"),
         pytest.param("verify-dev-apply-plan.jq.bak", id="suffix"),
@@ -210,6 +207,18 @@ def test_bespoke_iac_verifier_files_are_rejected(path: str) -> None:
 )
 def test_non_operational_or_nearby_verifier_names_are_clean(path: str) -> None:
     assert _rule_ids(_snapshot(path)) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("verify.mjs", id="root-minimal-mjs"),
+        pytest.param("verify_release_artifacts.py", id="root-release-verifier"),
+        pytest.param("verify-environment-boundary.test.mjs", id="root-test-verifier"),
+    ],
+)
+def test_unowned_root_verifier_names_are_rejected(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == [RuleId("repository/artifacts/bespoke-iac-verifiers")]
 
 
 @pytest.mark.parametrize(
@@ -710,8 +719,13 @@ def test_declared_application_package_may_own_verifier_code() -> None:
         pytest.param("src/verify_signature.py", [], id="owned-source-module"),
         pytest.param(
             "verify_signature.py",
-            [],
+            [RuleId("repository/artifacts/bespoke-iac-verifiers")],
             id="root-entrypoint",
+        ),
+        pytest.param(
+            "src/repo_standards/verify_release_artifacts.py",
+            [],
+            id="owned-nested-source-module",
         ),
         pytest.param(
             "src/verify-dev-apply-plan.jq",

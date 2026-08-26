@@ -621,7 +621,7 @@ def test_library_importing_application_is_rejected() -> None:
 def test_policy_spec_governance_covers_every_rule() -> None:
     assert POLICY_SPEC.profile_id == "sarj/public"
     assert POLICY_SPEC.title == "Sarj repository standard"
-    assert POLICY_SPEC.policy_version == SarjPolicy.policy_version == 12
+    assert POLICY_SPEC.policy_version == SarjPolicy.policy_version == 13
     assert {item.rule_id for item in RULE_GOVERNANCE} == {
         item.rule_id for item in SarjPolicy.rules()
     }

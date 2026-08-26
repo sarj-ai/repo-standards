@@ -67,7 +67,7 @@ jobs:
         run: uv build --no-sources --out-dir dist/repo-standards
       - name: Verify public distribution boundary
         run: >-
-          uv run --frozen python verify_release_artifacts.py
+          uv run --frozen python -m repo_standards.verify_release_artifacts
           --distributions dist/repo-standards
       - name: Install wheels into a clean environment
         env:
@@ -165,7 +165,7 @@ jobs:
         run: |
           npm --prefix apps/docs run lint
           npm --prefix apps/docs run build
-          uv run python verify_release_artifacts.py --site apps/docs/dist
+          uv run python -m repo_standards.verify_release_artifacts --site apps/docs/dist
 
   gate:
     name: CI / gate
