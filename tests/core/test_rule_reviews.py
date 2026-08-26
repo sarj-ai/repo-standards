@@ -8,6 +8,7 @@ from repo_standards.core.rule_reviews import (
     ApprovedRuleReview,
     PendingRuleReview,
     RuleVersion,
+    activated_rule_ids,
     activated_rule_versions,
     approved_rule_versions,
     review_for,
@@ -125,6 +126,19 @@ def test_activation_is_explicit_and_version_bound(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(ValueError, match="not approved for activation"):
         activated_rule_versions((f"{rule_id}@2",), current_rules=current_rules)
     assert review_for(rule_id, 2) == PendingRuleReview()
+
+
+def test_manifest_activation_selects_only_the_current_approved_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rule_id = RuleId("architecture/dependencies/policy")
+    approval = ApprovedRuleReview(reviewed_in="a" * 40)
+    monkeypatch.setattr(rule_reviews, "APPROVED_RULE_REVIEWS", ((rule_id, 2, approval),))
+    current = frozenset({RuleVersion(rule_id, 2)})
+
+    assert activated_rule_ids((str(rule_id),), current_rules=current) == current
+    with pytest.raises(ValueError, match="versionless rule IDs"):
+        activated_rule_ids((f"{rule_id}@2",), current_rules=current)
 
 
 @pytest.mark.parametrize(

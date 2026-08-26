@@ -13,8 +13,15 @@ and explicitly activated by a consumer.
 - If a path alone is sufficient to produce the finding, use Repo Standards. If source content
   is necessary, use Code Standards.
 
-After a rule is approved, opt in per run with `--enable-rule <rule-id>@<version>`. Approval alone
-never enables a rule, and the option may be repeated for multiple approved rules.
+After a rule is approved, activate its stable ID in `.repo-standards/repository.toml`:
+
+```toml
+enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]
+```
+
+The locked Repo Standards release supplies the current reviewed implementation. Manifests never
+select historical rule versions; `--enable-rule <rule-id>@<version>` remains available only for
+legacy manifests and calibration runs.
 
 ## Run it
 

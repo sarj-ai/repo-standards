@@ -307,7 +307,7 @@ def test_manifest_enabled_rules_are_the_single_activation_source(tmp_path: Path)
     manifest = GOOD_MANIFEST.replace("schema_version = 2", "schema_version = 4").replace(
         'repository_id = "example-repository"',
         'repository_id = "example-repository"\n'
-        'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers@5"]',
+        'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]',
     )
     _manifest(tmp_path, manifest)
     verifier = tmp_path / "verify.mjs"
@@ -335,6 +335,20 @@ def test_manifest_enabled_rules_are_the_single_activation_source(tmp_path: Path)
     assert paths == ["verify.mjs"]
     assert conflicting.exit_code == 2
     assert "cannot be combined" in conflicting.stdout
+
+
+def test_manifest_rejects_versioned_rule_selectors(tmp_path: Path) -> None:
+    manifest = GOOD_MANIFEST.replace("schema_version = 2", "schema_version = 4").replace(
+        'repository_id = "example-repository"',
+        'repository_id = "example-repository"\n'
+        'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers@5"]',
+    )
+    _manifest(tmp_path, manifest)
+
+    result = runner.invoke(app, ["check", str(tmp_path), "--format", "json"])
+
+    assert result.exit_code == 2
+    assert "versionless rule IDs" in result.stdout
 
 
 @pytest.mark.parametrize(

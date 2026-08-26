@@ -56,24 +56,24 @@ delegates = ["deploy/render.sh"]
     assert manifest.delivery.authorities[0].authority == "primary"
 
 
-def test_manifest_v4_owns_exact_enabled_rule_selectors() -> None:
+def test_manifest_v4_owns_stable_enabled_rule_ids() -> None:
     manifest = parse_manifest_bytes(
         _BASE.replace(b"schema_version = 3", b"schema_version = 4").replace(
             b'repository_id = "example-repository"',
             b'repository_id = "example-repository"\n'
-            b'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers@5"]',
+            b'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]',
         )
     )
 
-    assert manifest.enabled_rules == ("repository/artifacts/bespoke-iac-verifiers@5",)
+    assert manifest.enabled_rules == ("repository/artifacts/bespoke-iac-verifiers",)
 
 
 def test_manifest_v4_rejects_duplicate_enabled_rules() -> None:
     content = _BASE.replace(b"schema_version = 3", b"schema_version = 4").replace(
         b'repository_id = "example-repository"',
         b'repository_id = "example-repository"\n'
-        b'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers@5", '
-        b'"repository/artifacts/bespoke-iac-verifiers@5"]',
+        b'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers", '
+        b'"repository/artifacts/bespoke-iac-verifiers"]',
     )
 
     with pytest.raises(ConfigurationError, match="enabled_rules must be unique"):
@@ -130,7 +130,7 @@ def test_manifest_v3_rejects_v4_rule_activation() -> None:
     content = _BASE.replace(
         b'repository_id = "example-repository"',
         b'repository_id = "example-repository"\n'
-        b'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers@5"]',
+        b'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]',
     )
 
     with pytest.raises(ConfigurationError, match="schema version 4"):
