@@ -99,6 +99,7 @@ export function referenceSidebar() {
           .map((value) => ({
             label: value.category.label,
             link: categoryHref(value.category.category_id),
+            attrs: { 'data-sidebar-category': value.category.category_id },
           })),
       ],
     },

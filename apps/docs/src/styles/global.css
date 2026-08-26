@@ -1,5 +1,30 @@
 @import '@sarj/docs-ui/starlight.css';
 
+.sidebar-content a[data-sidebar-category] { gap: .55rem; }
+.sidebar-content a[data-sidebar-category]::before {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 1.25rem;
+  background: currentcolor;
+  content: '';
+  -webkit-mask: center / contain no-repeat var(--sidebar-category-mark);
+  mask: center / contain no-repeat var(--sidebar-category-mark);
+}
+.sidebar-content a[data-sidebar-category='architecture'] {
+  --sidebar-category-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.75'%3E%3Ccircle cx='6' cy='7' r='2'/%3E%3Ccircle cx='18' cy='7' r='2'/%3E%3Ccircle cx='12' cy='18' r='2'/%3E%3Cpath d='m8 8 3 8m5-8-3 8M8 7h8'/%3E%3C/g%3E%3C/svg%3E");
+}
+.sidebar-content a[data-sidebar-category='repository'] {
+  --sidebar-category-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.75'%3E%3Ccircle cx='6' cy='5' r='2'/%3E%3Ccircle cx='18' cy='19' r='2'/%3E%3Cpath d='M6 7v5c0 4 3 7 8 7h2M10 8l4-3-4-3'/%3E%3C/g%3E%3C/svg%3E");
+}
+.sidebar-content a[data-sidebar-category='api-contracts'] {
+  --sidebar-category-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m9 5-5 7 5 7m6-14 5 7-5 7' fill='none' stroke='black' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.75'/%3E%3C/svg%3E");
+}
+
+@media (forced-colors: active) {
+  .sidebar-content a[data-sidebar-category]::before { background: CanvasText; }
+  .sidebar-content a[data-sidebar-category][aria-current='page']::before { background: Highlight; }
+}
+
 h2 { margin-top: 1.5rem; }
 .eyebrow { margin: 0 0 .8rem; color: var(--sl-color-gray-2); font: 700 .7rem/1.4 var(--sl-font-mono); letter-spacing: .12em; text-transform: uppercase; }
 .lede { max-width: 48rem; color: var(--sl-color-gray-2); font-size: clamp(1.05rem, 2vw, 1.3rem); line-height: 1.55; }

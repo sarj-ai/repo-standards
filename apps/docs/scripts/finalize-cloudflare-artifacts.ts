@@ -48,6 +48,7 @@ async function verifySearchDiscovery(
   }
 
   const pagesByPath = new Map(pages);
+  await verifySidebarCategories(catalog, pagesByPath);
   for (const location of locations) {
     const url = new URL(location);
     if (url.origin !== 'https://repo-standards.sarj.ai') {
@@ -78,31 +79,74 @@ async function verifySearchDiscovery(
   }
 }
 
+async function verifySidebarCategories(
+  catalog: DiscoveryCatalog,
+  pagesByPath: ReadonlyMap<string, string>,
+): Promise<void> {
+  const approvedCategoryIds = new Set(
+    catalog.rules
+      .filter((rule) => rule.review.status === 'approved')
+      .map((rule) => rule.categoryId),
+  );
+  const rulesIndex = pagesByPath.get('rules/index.html') ?? '';
+  const stylesheet = await readFile(new URL('../src/styles/global.css', import.meta.url), 'utf8');
+  if (
+    !stylesheet.includes('a[data-sidebar-category]::before')
+    || !stylesheet.includes("content: ''")
+    || !stylesheet.includes('mask: center / contain no-repeat var(--sidebar-category-mark)')
+  ) {
+    throw new Error('Sidebar categories are missing their shared decorative mark contract.');
+  }
+  for (const category of catalog.categories.filter(({ id }) => approvedCategoryIds.has(id))) {
+    const hook = `data-sidebar-category="${category.id}"`;
+    if (!rulesIndex.includes(hook)) {
+      throw new Error(`Rendered sidebar is missing the ${category.label} category hook.`);
+    }
+    if (!stylesheet.includes(`data-sidebar-category='${category.id}'] {\n  --sidebar-category-mark: url(`)) {
+      throw new Error(`Sidebar category ${category.label} has no visual mark.`);
+    }
+  }
+}
+
 interface DiscoveryCatalog {
+  readonly categories: readonly DiscoveryCategory[];
   readonly rules: readonly DiscoveryRule[];
 }
 
+interface DiscoveryCategory {
+  readonly id: string;
+  readonly label: string;
+}
+
 interface DiscoveryRule {
+  readonly categoryId: string;
   readonly review: { readonly status: string };
   readonly slug: string;
 }
 
 function parseDiscoveryCatalog(value: unknown): DiscoveryCatalog {
-  if (!isRecord(value) || !Array.isArray(value.rules)) {
-    throw new Error('Generated catalog is missing its rule collection.');
+  if (!isRecord(value) || !Array.isArray(value.categories) || !Array.isArray(value.rules)) {
+    throw new Error('Generated catalog is missing its category or rule collection.');
   }
+  const categories = value.categories.map((candidate) => {
+    if (!isRecord(candidate) || typeof candidate.category_id !== 'string' || typeof candidate.label !== 'string') {
+      throw new Error('Generated catalog contains an invalid category descriptor.');
+    }
+    return { id: candidate.category_id, label: candidate.label };
+  });
   const rules = value.rules.map((candidate) => {
     if (
       !isRecord(candidate)
       || typeof candidate.slug !== 'string'
+      || typeof candidate.category_id !== 'string'
       || !isRecord(candidate.review)
       || typeof candidate.review.status !== 'string'
     ) {
       throw new Error('Generated catalog contains an invalid rule descriptor.');
     }
-    return { slug: candidate.slug, review: { status: candidate.review.status } };
+    return { categoryId: candidate.category_id, slug: candidate.slug, review: { status: candidate.review.status } };
   });
-  return { rules };
+  return { categories, rules };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
