@@ -303,6 +303,40 @@ def test_approved_artifact_rules_block_only_when_enabled(
     assert [item["path"] for item in diagnostics] == [path]
 
 
+def test_manifest_enabled_rules_are_the_single_activation_source(tmp_path: Path) -> None:
+    manifest = GOOD_MANIFEST.replace("schema_version = 2", "schema_version = 4").replace(
+        'repository_id = "example-repository"',
+        'repository_id = "example-repository"\n'
+        'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers@5"]',
+    )
+    _manifest(tmp_path, manifest)
+    verifier = tmp_path / "verify.mjs"
+    verifier.write_text("export {};\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+
+    configured = runner.invoke(app, ["check", str(tmp_path), "--format", "json"])
+    conflicting = runner.invoke(
+        app,
+        [
+            "check",
+            str(tmp_path),
+            "--enable-rule",
+            "repository/artifacts/bespoke-iac-verifiers@5",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert configured.exit_code == 1
+    paths = [
+        item["path"]
+        for item in _object_list(_json_object(configured.stdout)["diagnostics"])
+    ]
+    assert paths == ["verify.mjs"]
+    assert conflicting.exit_code == 2
+    assert "cannot be combined" in conflicting.stdout
+
+
 @pytest.mark.parametrize(
     ("selector", "expected_message"),
     [

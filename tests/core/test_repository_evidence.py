@@ -56,6 +56,30 @@ delegates = ["deploy/render.sh"]
     assert manifest.delivery.authorities[0].authority == "primary"
 
 
+def test_manifest_v4_owns_exact_enabled_rule_selectors() -> None:
+    manifest = parse_manifest_bytes(
+        _BASE.replace(b"schema_version = 3", b"schema_version = 4").replace(
+            b'repository_id = "example-repository"',
+            b'repository_id = "example-repository"\n'
+            b'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers@5"]',
+        )
+    )
+
+    assert manifest.enabled_rules == ("repository/artifacts/bespoke-iac-verifiers@5",)
+
+
+def test_manifest_v4_rejects_duplicate_enabled_rules() -> None:
+    content = _BASE.replace(b"schema_version = 3", b"schema_version = 4").replace(
+        b'repository_id = "example-repository"',
+        b'repository_id = "example-repository"\n'
+        b'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers@5", '
+        b'"repository/artifacts/bespoke-iac-verifiers@5"]',
+    )
+
+    with pytest.raises(ConfigurationError, match="enabled_rules must be unique"):
+        parse_manifest_bytes(content)
+
+
 @pytest.mark.parametrize(
     ("addition", "message"),
     [
@@ -100,3 +124,14 @@ def test_manifest_v2_rejects_v3_evidence_fields() -> None:
     content = _BASE.replace(b"schema_version = 3", b"schema_version = 2")
     with pytest.raises(ConfigurationError, match="schema version 3"):
         parse_manifest_bytes(content + b'\n[documentation]\nentrypoints = ["README.md"]\n')
+
+
+def test_manifest_v3_rejects_v4_rule_activation() -> None:
+    content = _BASE.replace(
+        b'repository_id = "example-repository"',
+        b'repository_id = "example-repository"\n'
+        b'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers@5"]',
+    )
+
+    with pytest.raises(ConfigurationError, match="schema version 4"):
+        parse_manifest_bytes(content)
