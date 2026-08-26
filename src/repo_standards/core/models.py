@@ -130,6 +130,7 @@ class DeploymentAuthority:
 class Manifest:
     repository_id: RepositoryId
     components: tuple[Component, ...]
+    enabled_rules: tuple[str, ...] = ()
     migration_paths: tuple[MigrationPath, ...] = ()
     exceptions: tuple[ExceptionRecord, ...] = ()
     delivery: DeliveryConfig | None = None

@@ -676,7 +676,10 @@ def rest_check_command(
         list[str] | None,
         typer.Option(
             "--enable-rule",
-            help="Activate one approved rule-id@version selector for this run.",
+            help=(
+                "Activate one approved rule-id@version selector for a legacy manifest "
+                "or calibration run."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -915,7 +918,10 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
         list[str] | None,
         typer.Option(
             "--enable-rule",
-            help="Activate one approved rule-id@version selector for this run.",
+            help=(
+                "Activate one approved rule-id@version selector for a legacy manifest "
+                "or calibration run."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -1066,6 +1072,10 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     repository_diagnostics = (
         policy.evaluate_repository(snapshot) if isinstance(policy, RepositoryPolicy) else ()
     )
+    if snapshot.manifest.enabled_rules and enabled_rule_ids:
+        ConfigurationError.fail(
+            "manifest enabled_rules cannot be combined with --enable-rule"
+        )
     report = analyze(
         snapshot.manifest,
         policy,
@@ -1073,7 +1083,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         as_of=_parse_date(as_of),
         additional_diagnostics=migration_diagnostics(snapshot) + repository_diagnostics,
         enabled_rules=activated_rule_versions(
-            enabled_rule_ids,
+            snapshot.manifest.enabled_rules or enabled_rule_ids,
             current_rules=frozenset(
                 RuleVersion(rule.rule_id, rule.version) for rule in core_rules() + policy.rules()
             ),

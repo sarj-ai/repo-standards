@@ -42,7 +42,8 @@ _MAX_INPUT_BYTES = 1_048_576
 _MAX_COMPONENTS = 10_000
 _MAX_MIGRATIONS = 10_000
 _MAX_EXCEPTIONS = 1_000
-_MANIFEST_SCHEMA_VERSION = 3
+_MANIFEST_SCHEMA_VERSION = 4
+_REPOSITORY_EVIDENCE_SCHEMA_VERSION = 3
 _LEGACY_MANIFEST_SCHEMA_VERSION = 2
 _BASELINE_SCHEMA_VERSION = 2
 _OBJECT_MAPPING = TypeAdapter(dict[str, object])
@@ -330,6 +331,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         "schema_version",
         "repository_id",
         "components",
+        "enabled_rules",
         "migration_paths",
         "exceptions",
         "delivery",
@@ -339,12 +341,18 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
     required = {"schema_version", "repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
     schema_version = data["schema_version"]
-    if schema_version not in {_LEGACY_MANIFEST_SCHEMA_VERSION, _MANIFEST_SCHEMA_VERSION}:
-        ConfigurationError.fail("manifest.schema_version must be 2 or 3")
+    if schema_version not in {
+        _LEGACY_MANIFEST_SCHEMA_VERSION,
+        _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
+        _MANIFEST_SCHEMA_VERSION,
+    }:
+        ConfigurationError.fail("manifest.schema_version must be 2, 3, or 4")
     if schema_version == _LEGACY_MANIFEST_SCHEMA_VERSION and (
         {"documentation", "active_configuration", "delivery"} & data.keys()
     ):
         ConfigurationError.fail("manifest schema version 3 is required for repository evidence")
+    if schema_version != _MANIFEST_SCHEMA_VERSION and "enabled_rules" in data:
+        ConfigurationError.fail("manifest schema version 4 is required for enabled_rules")
     raw_components = _list(data["components"], "manifest.components")
     if len(raw_components) > _MAX_COMPONENTS:
         ConfigurationError.fail(f"manifest may contain at most {_MAX_COMPONENTS} components")
@@ -375,11 +383,15 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         item.component_id not in known_components for item in delivery.authorities
     ):
         ConfigurationError.fail("delivery.authorities references an unknown component")
+    enabled_rules = tuple(_string_list(data.get("enabled_rules", []), "enabled_rules"))
+    if len(enabled_rules) != len(set(enabled_rules)):
+        ConfigurationError.fail("enabled_rules must be unique")
     return Manifest(
         repository_id=RepositoryId(
             _identifier(_string(data, "repository_id", "manifest"), "repository_id")
         ),
         components=components,
+        enabled_rules=enabled_rules,
         migration_paths=tuple(
             parse_migration(item, index) for index, item in enumerate(raw_migrations)
         ),
