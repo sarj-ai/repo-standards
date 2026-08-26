@@ -47,7 +47,7 @@ from repo_standards.core.models import (
 )
 from repo_standards.core.pull_request_size import PullRequestSize, analyze_pull_request_size
 from repo_standards.core.render import render_text, report_dict
-from repo_standards.core.rule_reviews import activated_rule_versions
+from repo_standards.core.rule_reviews import RuleVersion, activated_rule_versions
 from repo_standards.openapi import AnalysisReport as OpenApiAnalysisReport
 from repo_standards.openapi import AnalysisRequest as OpenApiAnalysisRequest
 from repo_standards.openapi import DocumentInput as OpenApiDocumentInput
@@ -683,7 +683,12 @@ def rest_check_command(
     """Check one committed OpenAPI contract from the exact selected Git tree."""
     identity: GitIdentity | None = None
     try:
-        enabled = activated_rule_versions(tuple(enable_rule or ()))
+        enabled = activated_rule_versions(
+            tuple(enable_rule or ()),
+            current_rules=frozenset(
+                RuleVersion(rule.rule_id, rule.version) for rule in openapi_rules()
+            ),
+        )
         resolved = root.resolve(strict=True)
         identity = git_identity(resolved)
     except (ConfigurationError, OSError, RequestError) as error:
@@ -1067,7 +1072,12 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         mode=mode,
         as_of=_parse_date(as_of),
         additional_diagnostics=migration_diagnostics(snapshot) + repository_diagnostics,
-        enabled_rules=activated_rule_versions(enabled_rule_ids),
+        enabled_rules=activated_rule_versions(
+            enabled_rule_ids,
+            current_rules=frozenset(
+                RuleVersion(rule.rule_id, rule.version) for rule in core_rules() + policy.rules()
+            ),
+        ),
     )
     report = replace(report, input_provenance=snapshot.provenance)
     if mode is not Mode.RATCHET:

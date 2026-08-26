@@ -12,12 +12,14 @@ from repo_standards.core.models import (
     GitObjectId,
     InputProvenance,
     Manifest,
+    PackageEvidence,
     RepositoryId,
     RepositoryInspection,
     RepositorySnapshot,
     RuleId,
     TrackedContentEvidence,
     TrackedFileEvidence,
+    WorkspaceEvidence,
 )
 from repo_standards.policy_sarj.policy import SarjPolicy
 
@@ -42,6 +44,7 @@ def _snapshot(
     documentation: DocumentationConfig | None = None,
     active: tuple[ActiveConfiguration, ...] = (),
     delivery: DeliveryConfig | None = None,
+    package_owned: bool = False,
 ) -> RepositorySnapshot:
     component = _component()
     tracked = tuple(
@@ -61,7 +64,27 @@ def _snapshot(
             source_revision=_REVISION,
             tree_digest=_TREE,
             tracked_file_count=len(tracked),
-            packages=(),
+            packages=(
+                PackageEvidence(
+                    ecosystem="npm",
+                    path="packages/app/package.json",
+                    name="@example/app",
+                    private=True,
+                    workspace_root=False,
+                ),
+            )
+            if package_owned
+            else (),
+            workspaces=(
+                WorkspaceEvidence(
+                    ecosystem="npm",
+                    path="package.json",
+                    member_patterns=("packages/*",),
+                    exclude_patterns=(),
+                ),
+            )
+            if package_owned
+            else (),
             workflow_paths=(),
             cloudbuild_paths=(),
             dockerfile_paths=(),
@@ -113,6 +136,18 @@ def test_conventional_root_documents_are_independent_entrypoints() -> None:
             "HISTORY.md": b"# History\n",
         },
         documentation=DocumentationConfig(("README.md",)),
+    )
+    assert RuleId("repository/documentation/reachability") not in _rule_ids(snapshot)
+
+
+def test_owned_package_documents_are_outside_the_repository_documentation_graph() -> None:
+    snapshot = _snapshot(
+        {
+            "README.md": b"# Root\n",
+            "packages/app/docs/guide.md": b"# Package guide\n",
+        },
+        documentation=DocumentationConfig(("README.md",)),
+        package_owned=True,
     )
     assert RuleId("repository/documentation/reachability") not in _rule_ids(snapshot)
 

@@ -207,7 +207,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(
     monkeypatch.setattr(
         rule_reviews,
         "APPROVED_RULE_REVIEWS",
-        ((rule_id, 3, ApprovedRuleReview(reviewed_in="a" * 40)),),
+        ((rule_id, 4, ApprovedRuleReview(reviewed_in="a" * 40)),),
     )
     verifier = tmp_path / "iac" / "verify-plan.mjs"
     verifier.parent.mkdir()
@@ -216,7 +216,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(
 
     committed = runner.invoke(
         app,
-        ["check", str(tmp_path), "--enable-rule", f"{rule_id}@3", "--format", "json"],
+        ["check", str(tmp_path), "--enable-rule", f"{rule_id}@4", "--format", "json"],
     )
     staged = runner.invoke(
         app,
@@ -225,7 +225,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(
             str(tmp_path),
             "--staged",
             "--enable-rule",
-            f"{rule_id}@3",
+            f"{rule_id}@4",
             "--format",
             "json",
         ],
@@ -303,7 +303,24 @@ def test_approved_artifact_rules_block_only_when_enabled(
     assert [item["path"] for item in diagnostics] == [path]
 
 
-def test_superseded_artifact_rule_version_cannot_be_enabled(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("selector", "expected_message"),
+    [
+        pytest.param(
+            "repository/artifacts/bespoke-iac-verifiers@2",
+            "not approved for activation",
+            id="unapproved-superseded-version",
+        ),
+        pytest.param(
+            "repository/artifacts/bespoke-iac-verifiers@3",
+            "selectors are obsolete",
+            id="approved-obsolete-version",
+        ),
+    ],
+)
+def test_non_current_artifact_rule_version_cannot_be_enabled(
+    tmp_path: Path, selector: str, expected_message: str
+) -> None:
     _manifest(tmp_path, GOOD_MANIFEST)
 
     result = runner.invoke(
@@ -312,14 +329,14 @@ def test_superseded_artifact_rule_version_cannot_be_enabled(tmp_path: Path) -> N
             "check",
             str(tmp_path),
             "--enable-rule",
-            "repository/artifacts/bespoke-iac-verifiers@2",
+            selector,
             "--format",
             "json",
         ],
     )
 
     assert result.exit_code == 2
-    assert "not approved for activation" in result.stdout
+    assert expected_message in result.stdout
 
 
 def test_enable_rule_help_requires_an_exact_version() -> None:

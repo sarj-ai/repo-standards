@@ -32,8 +32,7 @@ def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> 
         }
     )
     assert (
-        review_for(RuleId("repository/artifacts/terraform-test-files"), 1)
-        == terraform_test_review
+        review_for(RuleId("repository/artifacts/terraform-test-files"), 1) == terraform_test_review
     )
     for rule_id, version in (
         ("repository/artifacts/bespoke-iac-verifiers", 3),
@@ -42,13 +41,44 @@ def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> 
         ("repository/documentation/placement", 2),
     ):
         assert review_for(RuleId(rule_id), version) == implementation_review
+    assert (
+        review_for(RuleId("repository/artifacts/bespoke-iac-verifiers"), 4) == PendingRuleReview()
+    )
+    assert review_for(RuleId("repository/documentation/placement"), 3) == PendingRuleReview()
     assert review_for(RuleId("core/layout/non-overlapping-root"), 1) == PendingRuleReview()
 
 
-def test_every_approved_rule_version_exists_in_the_current_registry() -> None:
-    current = frozenset(RuleVersion(rule.rule_id, rule.version) for rule in SarjPolicy.rules())
+def test_every_approved_rule_id_exists_in_the_current_registry() -> None:
+    current_rule_ids = frozenset(rule.rule_id for rule in SarjPolicy.rules())
 
-    assert approved_rule_versions() <= current
+    assert {item.rule_id for item in approved_rule_versions()} <= current_rule_ids
+
+
+def _current_rule_versions() -> frozenset[RuleVersion]:
+    return frozenset(RuleVersion(rule.rule_id, rule.version) for rule in SarjPolicy.rules())
+
+
+def test_historical_reviews_remain_auditable_but_obsolete_selectors_are_rejected() -> None:
+    old_selectors = (
+        "repository/artifacts/bespoke-iac-verifiers@3",
+        "repository/documentation/placement@2",
+    )
+    assert all(
+        review_for(item.rule_id, item.version).status == "approved"
+        for item in approved_rule_versions()
+    )
+    with pytest.raises(ValueError, match="selectors are obsolete"):
+        activated_rule_versions(old_selectors, current_rules=_current_rule_versions())
+    with pytest.raises(ValueError, match="rules are not approved for activation"):
+        activated_rule_versions(
+            ("repository/artifacts/bespoke-iac-verifiers@4",),
+            current_rules=_current_rule_versions(),
+        )
+    with pytest.raises(ValueError, match="rules are not approved for activation"):
+        activated_rule_versions(
+            ("repository/documentation/placement@3",),
+            current_rules=_current_rule_versions(),
+        )
 
 
 def test_approved_review_requires_immutable_review_reference() -> None:
@@ -63,11 +93,12 @@ def test_activation_is_explicit_and_version_bound(monkeypatch: pytest.MonkeyPatc
     approval = ApprovedRuleReview(reviewed_in="a" * 40)
     monkeypatch.setattr(rule_reviews, "APPROVED_RULE_REVIEWS", ((rule_id, 1, approval),))
 
-    assert activated_rule_versions(()) == frozenset()
+    current_rules = frozenset({RuleVersion(rule_id, 1)})
+    assert activated_rule_versions((), current_rules=current_rules) == frozenset()
     selector = f"{rule_id}@1"
-    assert activated_rule_versions((selector,)) == frozenset({RuleVersion(rule_id, 1)})
+    assert activated_rule_versions((selector,), current_rules=current_rules) == current_rules
     with pytest.raises(ValueError, match="not approved for activation"):
-        activated_rule_versions((f"{rule_id}@2",))
+        activated_rule_versions((f"{rule_id}@2",), current_rules=current_rules)
     assert review_for(rule_id, 2) == PendingRuleReview()
 
 
@@ -77,7 +108,7 @@ def test_activation_is_explicit_and_version_bound(monkeypatch: pytest.MonkeyPatc
 )
 def test_activation_rejects_selectors_without_an_exact_positive_version(selector: str) -> None:
     with pytest.raises(ValueError, match=r"exact rule-id@version|versions must be positive"):
-        activated_rule_versions((selector,))
+        activated_rule_versions((selector,), current_rules=frozenset())
 
 
 def test_duplicate_approval_versions_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
