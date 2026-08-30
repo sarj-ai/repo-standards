@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 
 const outputDirectory = new URL('../dist/', import.meta.url);
@@ -19,7 +19,7 @@ verifyCompactReference(outputPaths, documents);
 const hashes = new Set<string>();
 for (const [, document] of documents) {
   for (const match of document.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gu)) {
-    hashes.add(`'sha256-${createHash('sha256').update(match[1]).digest('base64')}'`);
+    hashes.add(`'sha256-${hash('sha256', match[1], 'base64')}'`);
   }
 }
 
