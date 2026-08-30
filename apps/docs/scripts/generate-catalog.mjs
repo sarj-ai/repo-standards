@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -24,10 +24,12 @@ if (result.status !== 0) {
   exit(result.status ?? 1);
 }
 const parsed = JSON.parse(result.stdout);
-mkdirSync(generatedDirectory, { recursive: true });
-writeFileSync(resolve(generatedDirectory, 'catalog.json'), result.stdout, 'utf8');
-writeFileSync(
-  resolve(generatedDirectory, 'catalog.generated.ts'),
-  `export const generatedCatalog = ${JSON.stringify(parsed)} as const;\n`,
-  'utf8',
-);
+await mkdir(generatedDirectory, { recursive: true });
+await Promise.all([
+  writeFile(resolve(generatedDirectory, 'catalog.json'), result.stdout, 'utf8'),
+  writeFile(
+    resolve(generatedDirectory, 'catalog.generated.ts'),
+    `export const generatedCatalog = ${JSON.stringify(parsed)} as const;\n`,
+    'utf8',
+  ),
+]);

@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 
-import { sourceRevision } from '../lib/build';
+import { sourceRevision } from '../lib/source-revision';
 import { catalog } from '../lib/catalog';
 
 const payload = {
