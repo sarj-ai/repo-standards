@@ -41,6 +41,41 @@ _MIGRATION_CONSISTENCY = RuleDefinition(
     ),
 )
 
+_GENERATED_SCHEMA_PROVENANCE = RuleDefinition(
+    rule_id=RuleId("repository/database/generated-schema-provenance"),
+    version=1,
+    default_severity="warning",
+    title="Regenerate PostgreSQL schemas from migrations",
+    description=(
+        "Every semantic PostgreSQL object added to a generated schema is attributable to an "
+        "authored migration in the same pull-request diff."
+    ),
+    why=(
+        "Dump-only types, tables, columns, constraints, and indexes cannot be reproduced when "
+        "another environment runs migrations."
+    ),
+    fix="Add the migration that creates the object, then regenerate the committed schema dump.",
+    taxonomy=taxonomy(CHANGE_SAFETY, MIGRATIONS),
+    examples=(
+        RuleExamplePair(
+            example_id=FixtureId("core.schema-provenance.dump-only-enum.v1"),
+            title="Dump-only enum gains its migration",
+            language="text",
+            before=(
+                "db/schema.sql\n"
+                "CREATE TYPE public.workflow_status AS ENUM ('pending', 'completed');"
+            ),
+            after=(
+                "db/migrations/20260831_workflow_status.sql\n"
+                "CREATE TYPE workflow_status AS ENUM ('pending', 'completed');\n"
+                "db/schema.sql\n"
+                "CREATE TYPE public.workflow_status AS ENUM ('pending', 'completed');"
+            ),
+            expected_severity="warning",
+        ),
+    ),
+)
+
 
 def core_rules() -> tuple[RuleDefinition, ...]:
-    return (_MIGRATION_CONSISTENCY,)
+    return (_MIGRATION_CONSISTENCY, _GENERATED_SCHEMA_PROVENANCE)

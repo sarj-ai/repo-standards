@@ -33,6 +33,11 @@ from repo_standards.core.models import (
     WorkspaceEvidence,
 )
 from repo_standards.core.parser import parse_baseline_bytes, parse_manifest_bytes
+from repo_standards.core.schema_provenance import (
+    SchemaObject,
+    parse_postgresql_objects,
+    unattributed_schema_objects,
+)
 
 
 type ExampleRunner = Callable[[bytes], tuple[str, ...]]
@@ -209,16 +214,32 @@ def _run_baseline(content: bytes) -> tuple[str, ...]:
     return _rule_ids(check_baseline(report, baseline))
 
 
+def _run_schema_provenance(content: bytes) -> tuple[str, ...]:
+    sql = b"\n".join(
+        line for line in content.splitlines() if not line.strip().lower().endswith(b".sql")
+    )
+    generated = parse_postgresql_objects(sql)
+    migrations: frozenset[SchemaObject] = (
+        generated if b"/migrations/" in content else frozenset()
+    )
+    findings = unattributed_schema_objects(frozenset(), generated, migrations)
+    return ("repository/database/generated-schema-provenance",) if findings else ()
+
+
 _RUNNERS: dict[FixtureId, ExampleRunner] = {
     FixtureId("core.migration.target-missing.v2"): _run_target,
     FixtureId("core.migration.source-retained.v2"): _run_source,
     FixtureId("core.migration.workspace-membership-lost.v2"): _run_workspace,
+    FixtureId("core.schema-provenance.dump-only-enum.v1"): _run_schema_provenance,
 }
 
 _EXPECTED_FLAGGED: dict[FixtureId, tuple[str, ...]] = {
     FixtureId("core.migration.target-missing.v2"): ("repository/migration/consistency",),
     FixtureId("core.migration.source-retained.v2"): ("repository/migration/consistency",),
     FixtureId("core.migration.workspace-membership-lost.v2"): ("repository/migration/consistency",),
+    FixtureId("core.schema-provenance.dump-only-enum.v1"): (
+        "repository/database/generated-schema-provenance",
+    ),
 }
 
 _EXPECTED_PASSES: dict[FixtureId, tuple[str, ...]] = dict.fromkeys(_RUNNERS, ())
@@ -252,6 +273,6 @@ def test_every_core_rule_has_one_registered_executable_example() -> None:
     rules = core_rules()
     fixture_ids = tuple(example.example_id for rule in rules for example in rule.examples)
 
-    assert len(rules) == 1
-    assert len(_RUNNERS) == len(set(fixture_ids)) == 3
+    assert len(rules) == 2
+    assert len(_RUNNERS) == len(set(fixture_ids)) == 4
     assert set(fixture_ids) == set(_RUNNERS) == set(_EXPECTED_FLAGGED) == set(_EXPECTED_PASSES)

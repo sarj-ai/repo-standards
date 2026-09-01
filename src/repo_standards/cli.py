@@ -52,6 +52,7 @@ from repo_standards.core.rule_reviews import (
     activated_rule_ids,
     activated_rule_versions,
 )
+from repo_standards.core.schema_provenance import analyze_schema_provenance
 from repo_standards.openapi import AnalysisReport as OpenApiAnalysisReport
 from repo_standards.openapi import AnalysisRequest as OpenApiAnalysisRequest
 from repo_standards.openapi import DocumentInput as OpenApiDocumentInput
@@ -293,6 +294,64 @@ def pull_request_size_command(
     payload = _pull_request_size_payload(result, top_files=top_files)
     if output_format is OutputFormat.TEXT:
         typer.echo(_render_pull_request_size(result, top_files=top_files), nl=False)
+    elif output_format is OutputFormat.PRETTY_JSON:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True) + "\n", nl=False)
+    else:
+        typer.echo(canonical_json(payload) + "\n", nl=False)
+
+
+@pull_request_app.command("schema-provenance")
+def pull_request_schema_provenance_command(
+    root: Annotated[Path, typer.Argument()] = Path(),
+    base: Annotated[str, typer.Option(help="Exact trusted base commit.")] = "",
+    head: Annotated[str, typer.Option(help="Exact head commit to inspect.")] = "HEAD",
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
+) -> None:
+    """Find generated PostgreSQL schema additions without a migration in the same diff."""
+    if not base:
+        _emit_command_error(
+            "pull-request schema-provenance",
+            "request.invalid",
+            "--base is required",
+            phase="request",
+            remediation="Pass --base with the exact trusted pull-request base commit.",
+        )
+    try:
+        result = analyze_schema_provenance(root, base=base, head=head)
+    except (ConfigurationError, OSError) as error:
+        _emit_command_error(
+            "pull-request schema-provenance",
+            "analysis.incomplete",
+            str(error),
+            phase="analysis",
+            remediation="Fetch and verify the exact base and head commits, then retry.",
+        )
+    diagnostics = [asdict(item) for item in result.diagnostics]
+    payload = {
+        **_envelope(
+            "pull-request schema-provenance",
+            provenance={"kind": "git-revisions", "base": result.base, "head": result.head},
+        ),
+        "summary": {
+            "diagnostics": len(diagnostics),
+            "warnings": len(diagnostics),
+            "errors": 0,
+        },
+        "generated_paths": list(result.generated_paths),
+        "migration_paths": list(result.migration_paths),
+        "diagnostics": diagnostics,
+    }
+    if output_format is OutputFormat.TEXT:
+        if result.diagnostics:
+            typer.echo(
+                "".join(
+                    f"warning: {item.path}: {item.message} [{item.rule_id}]\n"
+                    for item in result.diagnostics
+                ),
+                nl=False,
+            )
+        else:
+            typer.echo("Generated PostgreSQL schema provenance: no warnings.\n", nl=False)
     elif output_format is OutputFormat.PRETTY_JSON:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True) + "\n", nl=False)
     else:

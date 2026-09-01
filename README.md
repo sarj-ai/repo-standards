@@ -29,6 +29,7 @@ Use the current release without installing it:
 
 ```bash
 uvx --from repo-standards repo-standards pull-request size . --base origin/main
+uvx --from repo-standards repo-standards pull-request schema-provenance . --base origin/main
 ```
 
 For a persistent user installation:
@@ -36,6 +37,7 @@ For a persistent user installation:
 ```bash
 uv tool install repo-standards
 repo-standards pull-request size . --base origin/main
+repo-standards pull-request schema-provenance . --base origin/main
 ```
 
 Upgrade with `uv tool upgrade repo-standards`. Automation should pin the package version or

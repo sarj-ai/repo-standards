@@ -110,6 +110,40 @@ def test_pull_request_size_errors_have_command_specific_remediation(tmp_path: Pa
     assert "Fetch and verify" in str(invalid_issue["remediation"])
 
 
+def test_pull_request_schema_provenance_returns_warning_json(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    database = tmp_path / "db"
+    database.mkdir()
+    (database / "schema.sql").write_text("-- empty\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    (database / "schema.sql").write_text(
+        "CREATE TYPE public.workflow_status AS ENUM ('pending', 'completed');\n",
+        encoding="utf-8",
+    )
+    _commit_changes(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "schema-provenance",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            "HEAD",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_object(result.stdout)
+    assert payload["command"] == "pull-request schema-provenance"
+    assert _object(payload["summary"]) == {"diagnostics": 1, "errors": 0, "warnings": 1}
+
+
 def _manifest(root: Path, text: str) -> None:
     policy_directory = root / ".repo-standards"
     policy_directory.mkdir()

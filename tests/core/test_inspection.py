@@ -427,7 +427,10 @@ def test_selected_blob_reader_rejects_absent_and_duplicate_paths(tmp_path: Path)
 
 
 def test_core_catalog_is_stable_and_complete() -> None:
-    assert tuple(rule.rule_id for rule in core_rules()) == ("repository/migration/consistency",)
+    assert tuple(rule.rule_id for rule in core_rules()) == (
+        "repository/migration/consistency",
+        "repository/database/generated-schema-provenance",
+    )
 
 
 def test_migration_diagnostics_verify_tree_and_workspace_state(tmp_path: Path) -> None:
