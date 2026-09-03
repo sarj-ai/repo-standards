@@ -1,4 +1,4 @@
-@import '@sarj/docs-ui/starlight.css';
+@import '@sarj/design/starlight.css';
 
 .sidebar-content a[data-sidebar-category] { gap: .55rem; }
 .sidebar-content a[data-sidebar-category]::before {
