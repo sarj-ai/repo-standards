@@ -1,4 +1,4 @@
-import { changedLineMarks } from '@sarj/docs-ui/line-diff';
+import { changedLineMarks } from '@sarj/design/line-diff';
 
 import type { Rule } from './catalog';
 
