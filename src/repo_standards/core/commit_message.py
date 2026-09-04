@@ -180,7 +180,7 @@ def _temporary_commit_result(content: bytes) -> CommitMessageResult | None:
     header = text.splitlines()[0] if text.splitlines() else ""
     if _CONTROLS.search(header) is None and any(
         header.startswith(prefix) and header.removeprefix(prefix).strip()
-        for prefix in ("fixup! ", "squash! ")
+        for prefix in ("fixup! ", "squash! ", "amend! ")
     ):
         return CommitMessageResult(header=header, findings=())
     return None
