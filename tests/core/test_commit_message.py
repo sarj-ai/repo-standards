@@ -95,7 +95,7 @@ def test_non_utf8_and_symlinks_fail_closed(tmp_path: Path) -> None:
         check_commit_message_file(link)
 
 
-@pytest.mark.parametrize("prefix", ["fixup! ", "squash! "])
+@pytest.mark.parametrize("prefix", ["fixup! ", "squash! ", "amend! "])
 def test_local_hook_allows_temporary_autosquash_messages_but_strict_analysis_does_not(
     tmp_path: Path,
     prefix: str,
@@ -103,8 +103,19 @@ def test_local_hook_allows_temporary_autosquash_messages_but_strict_analysis_doe
     path = tmp_path / "COMMIT_EDITMSG"
     path.write_text(f"{prefix}feat: add search\n")
 
-    assert check_commit_message_file(path, allow_temporary=True).satisfied
+    assert check_local_commit_message_file(path, root=tmp_path).satisfied
     assert not check_commit_message_file(path).satisfied
+
+
+@pytest.mark.parametrize("subject", ["amend!", "amend! ", "Amend! feat: add search"])
+def test_local_hook_rejects_noncanonical_or_empty_amend_subjects(
+    tmp_path: Path,
+    subject: str,
+) -> None:
+    path = tmp_path / "COMMIT_EDITMSG"
+    path.write_text(subject + "\n")
+
+    assert not check_local_commit_message_file(path, root=tmp_path).satisfied
 
 
 def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> None:
