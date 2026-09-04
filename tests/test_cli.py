@@ -110,6 +110,86 @@ def test_pull_request_size_errors_have_command_specific_remediation(tmp_path: Pa
     assert "Fetch and verify" in str(invalid_issue["remediation"])
 
 
+def test_pull_request_commits_command_enforces_default_limit(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    (tmp_path / "change.txt").write_text("base\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    for index in range(6):
+        (tmp_path / "change.txt").write_text(f"change {index}\n", encoding="utf-8")
+        _commit_changes(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "commits",
+            str(tmp_path),
+            "--base",
+            base,
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = _json_object(result.stdout)
+    assert payload["command"] == "pull-request commits"
+    assert payload["conclusion"] == "findings"
+    assert _object(payload["summary"])["commit_count"] == 6
+    assert _object(payload["policy"])["maximum_commits"] == 5
+
+
+def test_pull_request_commits_advisory_reports_without_blocking(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    (tmp_path / "change.txt").write_text("base\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    for index in range(6):
+        (tmp_path / "change.txt").write_text(f"change {index}\n", encoding="utf-8")
+        _commit_changes(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["pull-request", "commits", str(tmp_path), "--base", base, "--advisory"],
+    )
+
+    assert result.exit_code == 0
+    assert "Advisory only" in result.stdout
+
+
+def test_pull_request_commits_advisory_incomplete_does_not_block(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "commits",
+            str(tmp_path),
+            "--base",
+            "missing",
+            "--advisory",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_object(result.stdout)
+    assert payload["completion"] == "incomplete"
+    assert payload["conclusion"] == "inconclusive"
+
+
+def test_pull_request_commits_requires_exact_base(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["pull-request", "commits", str(tmp_path), "--format", "json"],
+    )
+
+    assert result.exit_code == 2
+    issue = _object_list(_json_object(result.stdout)["execution_issues"])[0]
+    assert issue["code"] == "request.invalid"
+
+
 def _manifest(root: Path, text: str) -> None:
     policy_directory = root / ".repo-standards"
     policy_directory.mkdir()
@@ -570,6 +650,7 @@ def test_capabilities_are_machine_discoverable() -> None:
     commands = capabilities["commands"]
     assert isinstance(commands, list)
     assert "catalog" in commands
+    assert "pull-request commits" in commands
     safety = _object(capabilities["safety"])
     assert safety["repository_code_execution"] is False
     assert safety["mutation"] is False
