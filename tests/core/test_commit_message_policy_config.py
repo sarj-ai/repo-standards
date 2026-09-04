@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from repo_standards.core.models import CommitMessageEnforcement
-from repo_standards.core.parser import parse_manifest_bytes
+from repo_standards.core.parser import enable_commit_message_policy_bytes, parse_manifest_bytes
 
 
 def _manifest(extra: bytes = b"") -> bytes:
@@ -40,3 +40,17 @@ def test_commit_message_config_is_closed_and_schema_gated() -> None:
             b'schema_version = 5\nrepository_id = "example"\ncomponents = []\n'
             b'\n[commit_message]\nenforcement = "strict"\n'
         )
+
+
+def test_adoption_api_only_changes_the_schema_value_and_is_idempotent() -> None:
+    original = (
+        b'schema_version  = 5 # preserve this comment\r\nrepository_id = "example"\r\n'
+        b"components = []\r\n\r\n[pull_request.commit_history]\r\n"
+        b'advisory_base_ref = "dev"\r\n'
+    )
+
+    migrated = enable_commit_message_policy_bytes(original)
+
+    assert migrated == original.replace(b"= 5 #", b"= 6 #", 1)
+    assert enable_commit_message_policy_bytes(migrated) == migrated
+    assert parse_manifest_bytes(migrated).commit_message is not None

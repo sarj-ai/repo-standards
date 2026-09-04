@@ -42,6 +42,10 @@ if TYPE_CHECKING:
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_SCHEMA_VERSION_LINE = re.compile(
+    rb"(?m)^schema_version(?P<spacing>[ \t]*=[ \t]*)"
+    rb"(?P<version>[23456])(?P<tail>[ \t]*(?:#.*)?\r?)$"
+)
 _MAX_EXCEPTION_DURATION = timedelta(days=90)
 _MAX_INPUT_BYTES = 1_048_576
 _MAX_COMPONENTS = 10_000
@@ -593,6 +597,20 @@ def _validate_manifest_schema(data: dict[str, object]) -> None:
 
 def load_manifest(path: Path) -> Manifest:
     return parse_manifest_bytes(_read_bounded(path, "manifest"))
+
+
+def enable_commit_message_policy_bytes(content: bytes) -> bytes:
+    """Upgrade a valid repository manifest to schema 6 without rewriting owned content."""
+    parse_manifest_bytes(content)
+    matches = tuple(_SCHEMA_VERSION_LINE.finditer(content))
+    if len(matches) != 1:
+        ConfigurationError.fail("manifest must contain one canonical schema_version assignment")
+    match = matches[0]
+    if match.group("version") == b"6":
+        return content
+    migrated = content[: match.start("version")] + b"6" + content[match.end("version") :]
+    parse_manifest_bytes(migrated)
+    return migrated
 
 
 def parse_baseline_bytes(content: bytes) -> Baseline:
