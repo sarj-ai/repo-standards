@@ -113,7 +113,17 @@ def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> N
     subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture command
         (git, "init", "-q"), cwd=tmp_path, check=True, env={}
     )
-    message = tmp_path / "COMMIT_EDITMSG"
+    message_path = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture query
+        (git, "rev-parse", "--git-path", "COMMIT_EDITMSG"),
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        env={},
+        text=True,
+    ).stdout.strip()
+    message = Path(message_path)
+    if not message.is_absolute():
+        message = tmp_path / message
     message.write_text("Merge branch 'feature'\n")
     merge_head = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture query
         (git, "rev-parse", "--git-path", "MERGE_HEAD"),
@@ -131,3 +141,38 @@ def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> N
     assert check_local_commit_message_file(message, root=tmp_path).satisfied
     marker.unlink()
     assert not check_local_commit_message_file(message, root=tmp_path).satisfied
+
+
+def test_merge_state_does_not_bypass_message_file_safety(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture command
+        (git, "init", "-q"), cwd=tmp_path, check=True, env={}
+    )
+    git_dir = tmp_path / ".git"
+    (git_dir / "MERGE_HEAD").write_text("0" * 40 + "\n")
+    message = git_dir / "COMMIT_EDITMSG"
+    message.write_bytes(b"Merge branch 'feature'\x00\n")
+
+    assert not check_local_commit_message_file(message, root=tmp_path).satisfied
+    message.unlink()
+    with pytest.raises(ConfigurationError, match="cannot read commit message"):
+        check_local_commit_message_file(message, root=tmp_path)
+
+
+def test_merge_state_cannot_exempt_another_repository_message(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    for root in (first, second):
+        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture command
+            (git, "init", "-q"), cwd=root, check=True, env={}
+        )
+    (first / ".git" / "MERGE_HEAD").write_text("0" * 40 + "\n")
+    message = second / ".git" / "COMMIT_EDITMSG"
+    message.write_text("Merge branch 'feature'\n")
+
+    assert not check_local_commit_message_file(message, root=first).satisfied
