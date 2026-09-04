@@ -41,6 +41,57 @@ repo-standards pull-request size . --base origin/main
 Upgrade with `uv tool upgrade repo-standards`. Automation should pin the package version or
 the GitHub Action's full commit SHA.
 
+## Pull-request commit policy
+
+`pull-request commits` is strict by default and defaults to five non-merge pull-request commits.
+A pull request above that limit passes only when every commit subject begins with the complete,
+exact ASCII series `(1/N) ` through `(N/N) `, unless a trusted transition exemption is verified.
+Indices must be unique, totals must match the actual commit count, and zero-padded or partial
+markers do not pass.
+
+Authoritative CI must fetch complete history and pass the provider's exact pull-request base and
+head SHAs. Exit status `1` means the history violates policy; `2` means required evidence was
+incomplete. For example:
+
+```bash
+repo-standards pull-request commits . \
+  --base "$PR_BASE_SHA" \
+  --head "$PR_HEAD_SHA"
+```
+
+Local hooks should use `--advisory`: findings and incomplete local history remain visible but do
+not block a commit. The CI result remains authoritative.
+
+```bash
+repo-standards pull-request commits . \
+  --base "$(git merge-base origin/dev HEAD)" \
+  --head HEAD \
+  --advisory
+```
+
+When a series is not intentional, prefer one reviewable commit:
+
+```bash
+git rebase -i "$(git merge-base origin/dev HEAD)"
+```
+
+Trusted promotion/synchronization workflows may provide narrowly scoped transition exemptions.
+An exemption matches an exact repository, destination ref, automation branch prefix, source ref,
+and immutable source-SHA suffix. The PR head must equal that captured source snapshot, which must
+still belong to the configured source history. Any manual or conflict-resolution commit removes
+the exemption. Use remote-tracking source refs in CI, never configure exemptions in local hooks,
+and protect the automation branch namespace; never exempt by title, label, or a broad author
+match. Merge commits are excluded while their unique non-merge ancestors are counted, preventing
+routine synchronization merges from creating developer-facing noise.
+
+Each repeated `--transition-exemption` value is a trusted JSON object. The caller must also pass
+the exact PR **head** repository as `--repository-id`, plus `--base-ref` and `--head-ref`, from the
+pull-request provider. Using the base repository identity here would incorrectly exempt forks:
+
+```bash
+--transition-exemption '{"id":"dev-preview","repository_id":"owner/repo","source_ref":"origin/dev","base_ref":"preview","head_prefix":"automation/promote-dev-","sha_prefix_length":12}'
+```
+
 ## GitHub Action
 
 The Action measures size only. It enables no repository lint rules and needs no inputs on a
@@ -83,6 +134,7 @@ Thresholds, labels, comments, and approval requirements remain consumer policy. 
 - Repository contents come from one exact Git tree.
 - Workflow YAML and API descriptions are parsed as inert data.
 - Missing required evidence produces an inconclusive result rather than a false pass.
+- Advisory commit-history analysis reports incomplete evidence without blocking local commits.
 - The linter has no autofix or repository mutation mode.
 
 ## Development

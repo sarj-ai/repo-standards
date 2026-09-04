@@ -13,7 +13,7 @@ import yaml
 
 from repo_standards.cli import app
 from repo_standards.core.parser import parse_manifest_bytes
-from repo_standards.pull_request import analyze_pull_request_size
+from repo_standards.pull_request import analyze_pull_request_commits, analyze_pull_request_size
 from repo_standards.repository import inspect_repository
 
 
@@ -72,6 +72,7 @@ def test_removed_commands_are_absent() -> None:
 
 
 def test_feature_apis_are_explicit() -> None:
+    assert callable(analyze_pull_request_commits)
     assert callable(analyze_pull_request_size)
     assert callable(inspect_repository)
 

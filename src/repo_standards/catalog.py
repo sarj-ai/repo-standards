@@ -842,6 +842,14 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
             input_kinds=("git-tree", "repository-manifest"),
         ),
         CapabilityDescriptor(
+            capability_id=CapabilityId("pull-request-commits"),
+            title="Pull-request commit policy",
+            summary="Require concise history or one complete explicitly numbered series.",
+            status="stable",
+            command_ids=(CommandId("pull-request.commits"),),
+            input_kinds=("git-history", "pull-request-metadata"),
+        ),
+        CapabilityDescriptor(
             capability_id=CapabilityId("pull-request-size"),
             title="Pull-request review size",
             summary="Count reviewable churn while excluding tests and declared generated output.",

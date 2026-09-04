@@ -7,8 +7,9 @@ from enum import StrEnum
 from importlib import metadata
 import json
 from pathlib import Path
-from typing import Annotated, NamedTuple, NoReturn, TypeGuard
+from typing import Annotated, ClassVar, NamedTuple, NoReturn, TypeGuard
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import typer
 
 from repo_standards.catalog import (
@@ -44,6 +45,13 @@ from repo_standards.core.models import (
     RepositoryPolicy,
     Rule,
     RuleId,
+)
+from repo_standards.core.pull_request_commits import (
+    DEFAULT_MAXIMUM_COMMITS,
+    PullRequestCommits,
+    TransitionExemption,
+    TransitionExemptionId,
+    analyze_pull_request_commits,
 )
 from repo_standards.core.pull_request_size import PullRequestSize, analyze_pull_request_size
 from repo_standards.core.render import render_text, report_dict
@@ -116,6 +124,17 @@ class RequestError(ValueError):
 
 class BaselineError(ConfigurationError):
     """One baseline-specific input failure for explicit ratchet reporting."""
+
+
+class _TransitionExemptionInput(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    id: TransitionExemptionId = Field(min_length=1)
+    repository_id: RepositoryId = Field(min_length=1)
+    source_ref: str = Field(min_length=1)
+    base_ref: str = Field(min_length=1)
+    head_prefix: str = Field(min_length=1)
+    sha_prefix_length: int = Field(default=12, ge=7, le=40)
 
 
 class OutputFormat(StrEnum):
@@ -201,6 +220,7 @@ def capabilities_command() -> None:
             "check",
             "explain",
             "inspect",
+            "pull-request commits",
             "pull-request size",
             "report",
             "rest check",
@@ -349,6 +369,198 @@ def _render_pull_request_size(result: PullRequestSize, *, top_files: int) -> str
     if largest:
         lines.append("Largest counted files:")
         lines.extend(f"  {item.lines:>6}  {item.path}" for item in largest)
+    return "\n".join(lines) + "\n"
+
+
+@pull_request_app.command("commits")
+def pull_request_commits_command(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - Typer command options stay explicit
+    root: Annotated[Path, typer.Argument()] = Path(),
+    base: Annotated[str, typer.Option(help="Exact pull-request base revision.")] = "",
+    head: Annotated[str, typer.Option(help="Exact pull-request head revision.")] = "HEAD",
+    base_ref: Annotated[str | None, typer.Option(help="Pull-request base ref name.")] = None,
+    head_ref: Annotated[str | None, typer.Option(help="Pull-request head ref name.")] = None,
+    repository_id: Annotated[
+        str | None,
+        typer.Option(help="Exact PR head owner/name identity used by transition exemptions."),
+    ] = None,
+    maximum_commits: Annotated[
+        int,
+        typer.Option("--max-commits", help="Maximum unnumbered non-merge commits."),
+    ] = DEFAULT_MAXIMUM_COMMITS,
+    transition_exemption: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--transition-exemption",
+            help="Trusted JSON transition exemption; repeat for multiple transitions.",
+        ),
+    ] = None,
+    advisory: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - Typer renders this as an option
+        bool,
+        typer.Option(help="Report policy findings without a nonzero policy exit."),
+    ] = False,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
+) -> None:
+    """Require concise PR history or one complete explicitly numbered series."""
+    if not base:
+        _emit_command_error(
+            "pull-request commits",
+            "request.invalid",
+            "--base is required",
+            phase="request",
+            remediation="Pass the exact pull-request base revision supplied by the provider.",
+        )
+    try:
+        exemptions = tuple(
+            _parse_transition_exemption(value) for value in (transition_exemption or ())
+        )
+    except (TypeError, ValueError) as error:
+        _emit_command_error(
+            "pull-request commits",
+            "request.invalid",
+            str(error),
+            phase="request",
+            remediation="Correct the trusted transition exemption configuration.",
+        )
+    try:
+        result = analyze_pull_request_commits(
+            root,
+            base=base,
+            head=head,
+            maximum_commits=maximum_commits,
+            repository_id=repository_id,
+            base_ref=base_ref,
+            head_ref=head_ref,
+            transition_exemptions=exemptions,
+        )
+    except (ConfigurationError, OSError) as error:
+        if advisory:
+            _emit_pull_request_commits_advisory_incomplete(
+                error,
+                output_format=output_format,
+            )
+            return
+        _emit_command_error(
+            "pull-request commits",
+            "analysis.incomplete",
+            str(error),
+            phase="analysis",
+            remediation=(
+                "Fetch complete base/head history and verify every trusted transition input."
+            ),
+        )
+    payload = _pull_request_commits_payload(result, advisory=advisory)
+    if output_format is OutputFormat.TEXT:
+        typer.echo(_render_pull_request_commits(result, advisory=advisory), nl=False)
+    elif output_format is OutputFormat.PRETTY_JSON:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True) + "\n", nl=False)
+    else:
+        typer.echo(canonical_json(payload) + "\n", nl=False)
+    if not advisory and not result.satisfied:
+        raise typer.Exit(1)
+
+
+def _parse_transition_exemption(value: str) -> TransitionExemption:
+    try:
+        document = _TransitionExemptionInput.model_validate_json(value)
+    except ValidationError as error:
+        message = "transition exemption does not match the required JSON schema"
+        raise RequestError(message) from error
+    return TransitionExemption(
+        exemption_id=document.id,
+        repository_id=document.repository_id,
+        source_ref=document.source_ref,
+        base_ref=document.base_ref,
+        head_prefix=document.head_prefix,
+        sha_prefix_length=document.sha_prefix_length,
+    )
+
+
+def _emit_pull_request_commits_advisory_incomplete(
+    error: Exception,
+    *,
+    output_format: OutputFormat,
+) -> None:
+    payload = _envelope(
+        "pull-request commits",
+        completion="incomplete",
+        conclusion="inconclusive",
+        issues=[
+            _issue_payload(
+                "analysis.incomplete",
+                "analysis",
+                str(error),
+                "Authoritative pull-request CI will retry with complete exact revisions.",
+            )
+        ],
+    )
+    if output_format is OutputFormat.TEXT:
+        typer.echo(
+            "PR commit policy: advisory analysis incomplete; continuing.\n"
+            f"Reason: {error}\n"
+            "Authoritative pull-request CI will evaluate exact revisions."
+        )
+        return
+    rendered = (
+        json.dumps(payload, indent=2, sort_keys=True)
+        if output_format is OutputFormat.PRETTY_JSON
+        else canonical_json(payload)
+    )
+    typer.echo(rendered)
+
+
+def _pull_request_commits_payload(
+    result: PullRequestCommits,
+    *,
+    advisory: bool,
+) -> Mapping[str, object]:
+    return {
+        **_envelope(
+            "pull-request commits",
+            conclusion="passed" if result.satisfied else "findings",
+            provenance={
+                "kind": "git-revisions",
+                "base": result.base_object_id,
+                "head": result.head_object_id,
+            },
+        ),
+        "policy": {
+            "enabled": True,
+            "maximum_commits": result.maximum_commits,
+            "counting": "base-exclusive-non-merge-commits",
+            "numbered_series": "complete-(i/n)-subject-prefixes",
+            "enforcement": "advisory" if advisory else "strict",
+        },
+        "summary": {
+            "commit_count": result.commit_count,
+            "satisfied": result.satisfied,
+            "disposition": result.disposition,
+            "numbering_issue": result.numbering_issue,
+            "exemption_id": result.exemption_id,
+        },
+    }
+
+
+def _render_pull_request_commits(result: PullRequestCommits, *, advisory: bool) -> str:
+    lines = [
+        f"PR commits: {result.commit_count} non-merge commit(s); limit {result.maximum_commits}",
+        f"Disposition: {result.disposition}",
+        f"Base: {result.base_object_id}",
+        f"Head: {result.head_object_id}",
+    ]
+    if result.numbering_issue is not None:
+        lines.append(f"Numbered series: {result.numbering_issue}")
+    if result.exemption_id is not None:
+        lines.append(f"Verified transition: {result.exemption_id}")
+    if not result.satisfied:
+        lines.append(
+            "Remediation: reduce the PR to at most "
+            f"{result.maximum_commits} commits (prefer one), or prefix every subject with the "
+            "complete canonical `(i/n) ` series."
+        )
+        if advisory:
+            lines.append(
+                "Advisory only: authoritative PR CI will evaluate the exact base and head."
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -1077,9 +1289,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         policy.evaluate_repository(snapshot) if isinstance(policy, RepositoryPolicy) else ()
     )
     if snapshot.manifest.enabled_rules and enabled_rule_ids:
-        ConfigurationError.fail(
-            "manifest enabled_rules cannot be combined with --enable-rule"
-        )
+        ConfigurationError.fail("manifest enabled_rules cannot be combined with --enable-rule")
     report = analyze(
         snapshot.manifest,
         policy,
@@ -1087,9 +1297,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         as_of=_parse_date(as_of),
         additional_diagnostics=migration_diagnostics(snapshot) + repository_diagnostics,
         enabled_rules=(
-            activated_rule_ids
-            if snapshot.manifest.enabled_rules
-            else activated_rule_versions
+            activated_rule_ids if snapshot.manifest.enabled_rules else activated_rule_versions
         )(
             snapshot.manifest.enabled_rules or enabled_rule_ids,
             current_rules=frozenset(
