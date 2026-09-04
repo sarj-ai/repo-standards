@@ -30,7 +30,18 @@ def test_pull_request_commits_hook_is_quiet_advisory_and_history_scoped() -> Non
             "pass_filenames": False,
             "verbose": True,
             "stages": ["pre-commit", "pre-push"],
-        }
+        },
+        {
+            "id": "repo-standards-commit-message",
+            "name": "Repo Standards - managed conventional commit header",
+            "description": "Validates and safely normalizes the commit message header.",
+            "entry": "repo-standards commit-message --fix-safe",
+            "language": "python",
+            "always_run": True,
+            "pass_filenames": True,
+            "require_serial": True,
+            "stages": ["commit-msg"],
+        },
     ]
 
 

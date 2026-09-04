@@ -136,6 +136,18 @@ class PullRequestConfig:
     commit_history: PullRequestCommitHistoryConfig
 
 
+class CommitMessageEnforcement(StrEnum):
+    """Managed Conventional Header v1 rollout state."""
+
+    OBSERVE = "observe"
+    STRICT = "strict"
+
+
+@dataclass(frozen=True, slots=True)
+class CommitMessageConfig:
+    enforcement: CommitMessageEnforcement = CommitMessageEnforcement.STRICT
+
+
 @dataclass(frozen=True, slots=True)
 class DeploymentAuthority:
     authority_id: AuthorityId
@@ -158,6 +170,7 @@ class Manifest:
     documentation: DocumentationConfig | None = None
     active_configuration: tuple[ActiveConfiguration, ...] = ()
     pull_request: PullRequestConfig | None = None
+    commit_message: CommitMessageConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)

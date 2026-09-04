@@ -14,6 +14,8 @@ from .models import (
     ActiveConfiguration,
     AuthorityId,
     Baseline,
+    CommitMessageConfig,
+    CommitMessageEnforcement,
     Component,
     ComponentId,
     ConfigurationFormat,
@@ -45,7 +47,8 @@ _MAX_INPUT_BYTES = 1_048_576
 _MAX_COMPONENTS = 10_000
 _MAX_MIGRATIONS = 10_000
 _MAX_EXCEPTIONS = 1_000
-_MANIFEST_SCHEMA_VERSION = 5
+_MANIFEST_SCHEMA_VERSION = 6
+_PULL_REQUEST_SCHEMA_VERSION = 5
 _RULE_ACTIVATION_SCHEMA_VERSION = 4
 _REPOSITORY_EVIDENCE_SCHEMA_VERSION = 3
 _LEGACY_MANIFEST_SCHEMA_VERSION = 2
@@ -421,9 +424,7 @@ def parse_pull_request_commit_history(value: object) -> PullRequestCommitHistory
     )
     raw_transitions = _list(data.get("transitions", []), f"{context}.transitions")
     if len(raw_transitions) > _MAXIMUM_TRANSITIONS:
-        ConfigurationError.fail(
-            f"{context} may contain at most {_MAXIMUM_TRANSITIONS} transitions"
-        )
+        ConfigurationError.fail(f"{context} may contain at most {_MAXIMUM_TRANSITIONS} transitions")
     transitions = tuple(
         parse_pull_request_commit_history_transition(item, index)
         for index, item in enumerate(raw_transitions)
@@ -455,6 +456,20 @@ def parse_pull_request(value: object) -> PullRequestConfig:
     )
 
 
+def parse_commit_message(value: object) -> CommitMessageConfig:
+    context = "commit_message"
+    data = _mapping(value, context)
+    _strict_keys(data, {"enforcement"}, set(), context)
+    raw = data.get("enforcement", CommitMessageEnforcement.STRICT.value)
+    if not isinstance(raw, str):
+        ConfigurationError.fail(f"{context}.enforcement must be observe or strict")
+    try:
+        enforcement = CommitMessageEnforcement(raw)
+    except ValueError:
+        ConfigurationError.fail(f"{context}.enforcement must be observe or strict")
+    return CommitMessageConfig(enforcement=enforcement)
+
+
 def parse_manifest_bytes(content: bytes) -> Manifest:
     try:
         parsed_manifest: object = tomllib.loads(
@@ -474,6 +489,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         "documentation",
         "active_configuration",
         "pull_request",
+        "commit_message",
     }
     required = {"schema_version", "repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
@@ -527,6 +543,13 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         else None,
         active_configuration=active_configuration,
         pull_request=parse_pull_request(data["pull_request"]) if "pull_request" in data else None,
+        commit_message=(
+            parse_commit_message(data["commit_message"])
+            if "commit_message" in data
+            else CommitMessageConfig()
+            if data["schema_version"] == _MANIFEST_SCHEMA_VERSION
+            else None
+        ),
     )
 
 
@@ -536,21 +559,36 @@ def _validate_manifest_schema(data: dict[str, object]) -> None:
         _LEGACY_MANIFEST_SCHEMA_VERSION,
         _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
         _RULE_ACTIVATION_SCHEMA_VERSION,
+        _PULL_REQUEST_SCHEMA_VERSION,
         _MANIFEST_SCHEMA_VERSION,
     }
     if schema_version not in supported_versions:
-        ConfigurationError.fail("manifest.schema_version must be 2, 3, 4, or 5")
+        ConfigurationError.fail("manifest.schema_version must be 2, 3, 4, 5, or 6")
     if schema_version == _LEGACY_MANIFEST_SCHEMA_VERSION and (
         {"documentation", "active_configuration", "delivery"} & data.keys()
     ):
         ConfigurationError.fail("manifest schema version 3 is required for repository evidence")
-    if schema_version in {
-        _LEGACY_MANIFEST_SCHEMA_VERSION,
-        _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
-    } and "enabled_rules" in data:
+    if (
+        schema_version
+        in {
+            _LEGACY_MANIFEST_SCHEMA_VERSION,
+            _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
+        }
+        and "enabled_rules" in data
+    ):
         ConfigurationError.fail("manifest schema version 4 is required for enabled_rules")
-    if schema_version != _MANIFEST_SCHEMA_VERSION and "pull_request" in data:
+    if (
+        schema_version
+        in {
+            _LEGACY_MANIFEST_SCHEMA_VERSION,
+            _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
+            _RULE_ACTIVATION_SCHEMA_VERSION,
+        }
+        and "pull_request" in data
+    ):
         ConfigurationError.fail("manifest schema version 5 is required for pull_request")
+    if schema_version != _MANIFEST_SCHEMA_VERSION and "commit_message" in data:
+        ConfigurationError.fail("manifest schema version 6 is required for commit_message")
 
 
 def load_manifest(path: Path) -> Manifest:

@@ -21,6 +21,7 @@ from repo_standards.catalog import (
 )
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.catalog import core_rules
+from repo_standards.core.commit_message import CommitMessageResult, check_commit_message_file
 from repo_standards.core.engine import analyze, check_baseline
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import (
@@ -85,7 +86,7 @@ from repo_standards.rest import TrackedFile as RestTrackedFile
 
 app = typer.Typer(
     name="repo-standards",
-    help="Deterministic, read-only repository architecture and API contract linter.",
+    help="Deterministic repository, pull-request, commit, and API contract policy.",
     no_args_is_help=True,
     pretty_exceptions_enable=False,
 )
@@ -112,6 +113,7 @@ _INSPECTION_KINDS = frozenset(
 _OPENAPI_BASENAMES = frozenset({"openapi.json", "openapi.yaml", "openapi.yml"})
 _MAX_OPENAPI_DOCUMENTS = 100
 _MAX_OPENAPI_TOTAL_BYTES = 20 * 1024 * 1024
+_MAX_RENDERED_COMMIT_FINDINGS = 3
 
 
 class _CompletedAnalysis(NamedTuple):
@@ -226,6 +228,7 @@ def capabilities_command() -> None:
             "capabilities",
             "catalog",
             "check",
+            "commit-message",
             "explain",
             "inspect",
             "pull-request commits",
@@ -247,8 +250,8 @@ def capabilities_command() -> None:
             "network_default": False,
             "network_mode": "disabled",
             "repository_code_execution": False,
-            "mutation": False,
-            "autofix": False,
+            "mutation": "commit-message --fix-safe only",
+            "autofix": "bounded mechanical commit-header normalization only",
             "inspection_input": "exact-git-head-tree",
         },
         "domains": {
@@ -278,6 +281,72 @@ def catalog_command() -> None:
             remediation="Repair the installed metadata before publishing its public catalog.",
         )
     typer.echo(canonical_json(payload.model_dump(mode="json")))
+
+
+@app.command("commit-message")
+def commit_message_command(
+    message_file: Annotated[Path, typer.Argument(help="Git commit-message file to validate.")],
+    fix_safe: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - Typer option
+        bool,
+        typer.Option(
+            "--fix-safe/--no-fix-safe",
+            help="Apply only verified mechanical header normalization.",
+        ),
+    ] = False,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
+) -> None:
+    """Enforce Managed Conventional Header v1 without changing message semantics."""
+    try:
+        result = check_commit_message_file(message_file, fix_safe=fix_safe)
+    except (ConfigurationError, OSError) as error:
+        _emit_command_error(
+            "commit-message",
+            "analysis.incomplete",
+            str(error),
+            phase="analysis",
+            remediation="Provide exactly one bounded UTF-8 regular commit-message file.",
+        )
+    payload = _commit_message_payload(result)
+    if output_format is OutputFormat.TEXT:
+        rendered = _render_commit_message(result)
+        if rendered:
+            typer.echo(rendered, nl=False)
+    elif output_format is OutputFormat.PRETTY_JSON:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True) + "\n", nl=False)
+    else:
+        typer.echo(canonical_json(payload) + "\n", nl=False)
+    if not result.satisfied:
+        raise typer.Exit(1)
+
+
+def _commit_message_payload(result: CommitMessageResult) -> Mapping[str, object]:
+    return {
+        **_envelope(
+            "commit-message",
+            conclusion="passed" if result.satisfied else "findings",
+            provenance={"kind": "commit-message-file"},
+        ),
+        "policy": {
+            "id": "managed-conventional-header-v1",
+            "enforcement": "strict",
+            "safe_fix": True,
+        },
+        "summary": {
+            "satisfied": result.satisfied,
+            "fix_applied": result.fix_applied,
+            "replacement_message": result.replacement_header,
+        },
+        "findings": [asdict(finding) for finding in result.findings],
+    }
+
+
+def _render_commit_message(result: CommitMessageResult) -> str:
+    if result.fix_applied:
+        return "Commit message: safely normalized; validation passed.\n"
+    if result.satisfied:
+        return ""
+    finding = result.findings[0]
+    return f"Commit message: {finding.code}\n{finding.message}\nFix: {finding.remediation}\n"
 
 
 @pull_request_app.command("size")
@@ -475,7 +544,7 @@ def pull_request_commits_command(  # ruff: ignore[too-many-arguments,too-many-po
         return
     result = resolved
     payload = _pull_request_commits_payload(result, advisory=advisory)
-    if quiet and result.satisfied:
+    if quiet and not result.has_findings:
         pass
     elif output_format is OutputFormat.TEXT:
         typer.echo(_render_pull_request_commits(result, advisory=advisory), nl=False)
@@ -586,6 +655,9 @@ def _resolve_pull_request_commits_request(  # ruff: ignore[too-many-arguments] -
         base=inputs.context.base_sha,
         head=inputs.context.head_sha,
         maximum_commits=history.maximum_commits,
+        commit_message_enforcement=(
+            manifest.commit_message.enforcement if manifest.commit_message is not None else None
+        ),
     )
 
 
@@ -626,6 +698,11 @@ def _analyze_resolved_pull_request_inputs(
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         transition_exemptions=transition_exemptions,
+        commit_message_enforcement=(
+            inputs.manifest.commit_message.enforcement
+            if inputs.manifest is not None and inputs.manifest.commit_message is not None
+            else None
+        ),
     )
 
 
@@ -709,10 +786,17 @@ def _pull_request_commits_payload(
     *,
     advisory: bool,
 ) -> Mapping[str, object]:
-    return {
+    summary: dict[str, object] = {
+        "commit_count": result.commit_count,
+        "satisfied": result.satisfied,
+        "disposition": result.disposition,
+        "numbering_issue": result.numbering_issue,
+        "exemption_id": result.exemption_id,
+    }
+    payload: dict[str, object] = {
         **_envelope(
             "pull-request commits",
-            conclusion="passed" if result.satisfied else "findings",
+            conclusion="findings" if result.has_findings else "passed",
             provenance={
                 "kind": "git-revisions",
                 "base": result.base_object_id,
@@ -726,14 +810,25 @@ def _pull_request_commits_payload(
             "numbered_series": "complete-(i/n)-subject-prefixes",
             "enforcement": "advisory" if advisory else "strict",
         },
-        "summary": {
-            "commit_count": result.commit_count,
-            "satisfied": result.satisfied,
-            "disposition": result.disposition,
-            "numbering_issue": result.numbering_issue,
-            "exemption_id": result.exemption_id,
-        },
+        "summary": summary,
     }
+    if result.commit_message_enforcement is not None:
+        summary.update(
+            {
+                "commit_message_enforcement": result.commit_message_enforcement,
+                "commit_message_findings": len(result.commit_message_findings),
+            }
+        )
+        payload["summary"] = summary
+        payload["commit_message_findings"] = [
+            {
+                "object_id": finding.object_id,
+                "subject": finding.subject,
+                **asdict(finding.finding),
+            }
+            for finding in result.commit_message_findings
+        ]
+    return payload
 
 
 def _render_pull_request_commits(result: PullRequestCommits, *, advisory: bool) -> str:
@@ -748,6 +843,20 @@ def _render_pull_request_commits(result: PullRequestCommits, *, advisory: bool) 
     if result.exemption_id is not None:
         label = "Local transition candidate" if advisory else "Verified transition"
         lines.append(f"{label}: {result.exemption_id}")
+    if result.commit_message_findings:
+        mode = result.commit_message_enforcement or "disabled"
+        lines.append(f"Commit messages: {len(result.commit_message_findings)} finding(s) ({mode})")
+        lines.extend(
+            f"  {finding.object_id}: {finding.finding.code}"
+            for finding in result.commit_message_findings[:_MAX_RENDERED_COMMIT_FINDINGS]
+        )
+        if len(result.commit_message_findings) > _MAX_RENDERED_COMMIT_FINDINGS:
+            remaining = len(result.commit_message_findings) - _MAX_RENDERED_COMMIT_FINDINGS
+            lines.append(f"  ... and {remaining} more")
+        lines.append(
+            "Commit-message fix: rewrite each header as "
+            "`[(i/n) ][TICKET] type(scope)!: description` and retry."
+        )
     if not result.satisfied:
         lines.append(
             "Remediation: reduce the PR to at most "

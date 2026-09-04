@@ -653,7 +653,7 @@ def test_capabilities_are_machine_discoverable() -> None:
     assert "pull-request commits" in commands
     safety = _object(capabilities["safety"])
     assert safety["repository_code_execution"] is False
-    assert safety["mutation"] is False
+    assert safety["mutation"] == "commit-message --fix-safe only"
     assert safety["network"] is False
     assert safety["network_default"] is False
     assert safety["network_mode"] == "disabled"

@@ -60,6 +60,15 @@ wheels = [
 ]
 
 [[package]]
+name = "conventional-pre-commit"
+version = "4.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/6a/c4c902f9526c026b8f5d59ac099028bea7acb2415d5f6603668e92dfa22c/conventional_pre_commit-4.4.0.tar.gz", hash = "sha256:5426bef9039a162c3203cc7de3624954dea7120af8dec6f878d8f1c83c58af7b", size = 27161, upload-time = "2026-02-18T19:14:53.042Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/26/affaaa8928f04729d0e69b33b4643a9713eaa270e9712892347f3c683ce5/conventional_pre_commit-4.4.0-py3-none-any.whl", hash = "sha256:5d266cb32a857344e1c4d87660c290cca1646d1ae480dcef6388e27bbc7f022f", size = 16825, upload-time = "2026-02-18T19:14:51.485Z" },
+]
+
+[[package]]
 name = "distlib"
 version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -400,9 +409,10 @@ wheels = [
 
 [[package]]
 name = "repo-standards"
-version = "5.10.0"
+version = "5.11.0"
 source = { editable = "." }
 dependencies = [
+    { name = "conventional-pre-commit" },
     { name = "markdown-it-py" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -420,6 +430,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "conventional-pre-commit", specifier = "==4.4.0" },
     { name = "markdown-it-py", specifier = ">=4,<5" },
     { name = "pydantic", specifier = ">=2.13.5,<3" },
     { name = "pyyaml", specifier = ">=6.0.2,<7" },
