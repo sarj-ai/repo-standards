@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - isolated Git fixture
 
 import pytest
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from repo_standards.core.commit_message import (
     analyze_commit_header,
     check_commit_message_file,
+    check_local_commit_message_file,
 )
 from repo_standards.core.errors import ConfigurationError
 
@@ -94,3 +93,41 @@ def test_non_utf8_and_symlinks_fail_closed(tmp_path: Path) -> None:
     link.symlink_to(target)
     with pytest.raises(ConfigurationError, match="regular file"):
         check_commit_message_file(link)
+
+
+@pytest.mark.parametrize("prefix", ["fixup! ", "squash! "])
+def test_local_hook_allows_temporary_autosquash_messages_but_strict_analysis_does_not(
+    tmp_path: Path,
+    prefix: str,
+) -> None:
+    path = tmp_path / "COMMIT_EDITMSG"
+    path.write_text(f"{prefix}feat: add search\n")
+
+    assert check_commit_message_file(path, allow_temporary=True).satisfied
+    assert not check_commit_message_file(path).satisfied
+
+
+def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture command
+        (git, "init", "-q"), cwd=tmp_path, check=True, env={}
+    )
+    message = tmp_path / "COMMIT_EDITMSG"
+    message.write_text("Merge branch 'feature'\n")
+    merge_head = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture query
+        (git, "rev-parse", "--git-path", "MERGE_HEAD"),
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        env={},
+        text=True,
+    ).stdout.strip()
+    marker = Path(merge_head)
+    if not marker.is_absolute():
+        marker = tmp_path / marker
+    marker.write_text("0" * 40 + "\n")
+
+    assert check_local_commit_message_file(message, root=tmp_path).satisfied
+    marker.unlink()
+    assert not check_local_commit_message_file(message, root=tmp_path).satisfied

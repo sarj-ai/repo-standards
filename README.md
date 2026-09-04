@@ -151,8 +151,11 @@ on:
 
 The published `repo-standards-pull-request-commits` hook runs in advisory mode at `pre-commit` and
 `pre-push`. The `repo-standards-commit-message` hook runs at `commit-msg`, applies bounded safe
-normalization, and then enforces the header. Consumers that already lock Repo Standards may invoke
-the same commands from their existing hook manager to avoid a duplicate environment.
+normalization, and then enforces `[(i/N) ][TICKET] type(scope)!: description`. Real merge commits
+are accepted only when Git's `MERGE_HEAD` proves merge state. Temporary `fixup!` and `squash!`
+messages are accepted locally so autosquash remains usable, but exact PR CI rejects them if they
+remain in review history. Consumers that already lock Repo Standards may invoke the same commands
+from their existing hook manager to avoid a duplicate environment.
 
 ## GitHub Action
 

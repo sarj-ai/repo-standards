@@ -46,7 +46,9 @@ def test_semantic_failure_is_machine_readable_and_blocking(tmp_path: Path) -> No
     findings = OBJECT_MAPS.validate_python(payload["findings"])
     summary = OBJECT_MAP.validate_python(payload["summary"])
     assert findings[0]["code"] == "commit-message.invalid-header"
-    assert summary["replacement_message"] is None
+    policy = OBJECT_MAP.validate_python(payload["policy"])
+    assert summary["replacement_header"] is None
+    assert policy["safe_fix_enabled"] is False
 
 
 def test_invalid_file_is_incomplete() -> None:

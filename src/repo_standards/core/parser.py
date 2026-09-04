@@ -613,6 +613,17 @@ def enable_commit_message_policy_bytes(content: bytes) -> bytes:
     return migrated
 
 
+def create_commit_message_policy_manifest(repository_id: str) -> bytes:
+    """Create the canonical minimal schema-6 manifest for one repository."""
+    content = (
+        f'schema_version = 6\nrepository_id = "{repository_id}"\ncomponents = []\n'.encode()
+    )
+    parsed = parse_manifest_bytes(content)
+    if str(parsed.repository_id) != repository_id:
+        ConfigurationError.fail("repository_id did not round-trip through the canonical manifest")
+    return content
+
+
 def parse_baseline_bytes(content: bytes) -> Baseline:
     try:
         data = _OBJECT_MAPPING.validate_json(_bounded_content(content, "baseline"), strict=True)
