@@ -1,6 +1,6 @@
 [project]
 name = "repo-standards"
-version = "5.11.1"
+version = "5.11.2"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"

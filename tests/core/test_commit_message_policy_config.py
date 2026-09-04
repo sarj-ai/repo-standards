@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import pytest
 
+from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import CommitMessageEnforcement
-from repo_standards.core.parser import enable_commit_message_policy_bytes, parse_manifest_bytes
+from repo_standards.core.parser import (
+    create_commit_message_policy_manifest,
+    enable_commit_message_policy_bytes,
+    parse_manifest_bytes,
+)
 
 
 def _manifest(extra: bytes = b"") -> bytes:
@@ -14,6 +19,21 @@ def test_schema_six_enables_strict_commit_messages_by_default() -> None:
     manifest = parse_manifest_bytes(_manifest())
     assert manifest.commit_message is not None
     assert manifest.commit_message.enforcement is CommitMessageEnforcement.STRICT
+
+
+def test_canonical_commit_message_manifest_is_strict_and_round_trips() -> None:
+    content = create_commit_message_policy_manifest("example-repo")
+
+    assert content == b'schema_version = 6\nrepository_id = "example-repo"\ncomponents = []\n'
+    assert parse_manifest_bytes(content).commit_message is not None
+
+
+@pytest.mark.parametrize("repository_id", ["", "bad id", 'bad"\ncomponents = ["escape"]'])
+def test_canonical_commit_message_manifest_rejects_invalid_repository_ids(
+    repository_id: str,
+) -> None:
+    with pytest.raises(ConfigurationError):
+        create_commit_message_policy_manifest(repository_id)
 
 
 def test_schema_six_can_observe_commit_messages() -> None:

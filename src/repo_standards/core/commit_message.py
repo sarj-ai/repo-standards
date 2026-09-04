@@ -4,7 +4,9 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git query
 import tempfile
 from typing import Literal, NamedTuple
 
@@ -109,8 +111,17 @@ def analyze_commit_message_bytes(content: bytes) -> CommitMessageResult:
     return analyze_commit_header(header)
 
 
-def check_commit_message_file(path: Path, *, fix_safe: bool = False) -> CommitMessageResult:
+def check_commit_message_file(
+    path: Path,
+    *,
+    fix_safe: bool = False,
+    allow_temporary: bool = False,
+) -> CommitMessageResult:
     content, metadata = _read_regular_file(path)
+    if allow_temporary:
+        temporary = _temporary_commit_result(content)
+        if temporary is not None:
+            return temporary
     result = analyze_commit_message_bytes(content)
     if not fix_safe or result.replacement_header is None:
         return result
@@ -126,6 +137,57 @@ def check_commit_message_file(path: Path, *, fix_safe: bool = False) -> CommitMe
         replacement_header=result.replacement_header,
         fix_applied=True,
     )
+
+
+def check_local_commit_message_file(
+    path: Path,
+    *,
+    root: Path,
+    fix_safe: bool = True,
+) -> CommitMessageResult:
+    """Validate a local Git message while allowing structurally temporary Git operations."""
+    if _merge_in_progress(root):
+        return CommitMessageResult(header="", findings=())
+    return check_commit_message_file(path, fix_safe=fix_safe, allow_temporary=True)
+
+
+def _temporary_commit_result(content: bytes) -> CommitMessageResult | None:
+    if len(content) > MAXIMUM_MESSAGE_BYTES:
+        ConfigurationError.fail(f"commit message exceeds {MAXIMUM_MESSAGE_BYTES} bytes")
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        ConfigurationError.fail("commit message must be UTF-8")
+    header = text.splitlines()[0] if text.splitlines() else ""
+    if any(
+        header.startswith(prefix) and header.removeprefix(prefix).strip()
+        for prefix in ("fixup! ", "squash! ")
+    ):
+        return CommitMessageResult(header=header, findings=())
+    return None
+
+
+def _merge_in_progress(root: Path) -> bool:
+    executable = shutil.which("git")
+    if executable is None:
+        return False
+    try:
+        completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed read-only query
+            (executable, "-C", str(root), "rev-parse", "--git-path", "MERGE_HEAD"),
+            check=False,
+            capture_output=True,
+            timeout=5,
+            env={"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if completed.returncode != 0:
+        return False
+    raw_path = completed.stdout.decode("utf-8", errors="surrogateescape").strip()
+    if not raw_path:
+        return False
+    marker = Path(raw_path)
+    return (marker if marker.is_absolute() else root / marker).is_file()
 
 
 def _valid_groups(groups: dict[str, str | None], conventional: str) -> bool:

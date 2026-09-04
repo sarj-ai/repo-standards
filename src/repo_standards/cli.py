@@ -21,7 +21,7 @@ from repo_standards.catalog import (
 )
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.catalog import core_rules
-from repo_standards.core.commit_message import CommitMessageResult, check_commit_message_file
+from repo_standards.core.commit_message import CommitMessageResult, check_local_commit_message_file
 from repo_standards.core.engine import analyze, check_baseline
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import (
@@ -295,9 +295,9 @@ def commit_message_command(
     ] = False,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
 ) -> None:
-    """Enforce Managed Conventional Header v1 without changing message semantics."""
+    """Enforce `[(i/n) ][TICKET] type(scope)!: description` and safely normalize spacing/case."""
     try:
-        result = check_commit_message_file(message_file, fix_safe=fix_safe)
+        result = check_local_commit_message_file(message_file, root=Path.cwd(), fix_safe=fix_safe)
     except (ConfigurationError, OSError) as error:
         _emit_command_error(
             "commit-message",
@@ -306,7 +306,7 @@ def commit_message_command(
             phase="analysis",
             remediation="Provide exactly one bounded UTF-8 regular commit-message file.",
         )
-    payload = _commit_message_payload(result)
+    payload = _commit_message_payload(result, fix_safe_enabled=fix_safe)
     if output_format is OutputFormat.TEXT:
         rendered = _render_commit_message(result)
         if rendered:
@@ -319,7 +319,11 @@ def commit_message_command(
         raise typer.Exit(1)
 
 
-def _commit_message_payload(result: CommitMessageResult) -> Mapping[str, object]:
+def _commit_message_payload(
+    result: CommitMessageResult,
+    *,
+    fix_safe_enabled: bool,
+) -> Mapping[str, object]:
     return {
         **_envelope(
             "commit-message",
@@ -329,12 +333,12 @@ def _commit_message_payload(result: CommitMessageResult) -> Mapping[str, object]
         "policy": {
             "id": "managed-conventional-header-v1",
             "enforcement": "strict",
-            "safe_fix": True,
+            "safe_fix_enabled": fix_safe_enabled,
         },
         "summary": {
             "satisfied": result.satisfied,
             "fix_applied": result.fix_applied,
-            "replacement_message": result.replacement_header,
+            "replacement_header": result.replacement_header,
         },
         "findings": [asdict(finding) for finding in result.findings],
     }
