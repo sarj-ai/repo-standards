@@ -333,11 +333,13 @@ def _commit_message_payload(
         "policy": {
             "id": "managed-conventional-header-v1",
             "enforcement": "strict",
+            "safe_fix": True,
             "safe_fix_enabled": fix_safe_enabled,
         },
         "summary": {
             "satisfied": result.satisfied,
             "fix_applied": result.fix_applied,
+            "replacement_message": result.replacement_header,
             "replacement_header": result.replacement_header,
         },
         "findings": [asdict(finding) for finding in result.findings],

@@ -8,7 +8,7 @@ import shutil
 import stat
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git query
 import tempfile
-from typing import Literal, NamedTuple
+from typing import Final, Literal, NamedTuple
 
 from conventional_pre_commit.format import ConventionalCommit
 
@@ -16,6 +16,7 @@ from .errors import ConfigurationError
 
 
 MAXIMUM_MESSAGE_BYTES = 1_048_576
+_LOCAL_GIT_PATH_COUNT: Final = 2
 CONVENTIONAL_TYPES = tuple(ConventionalCommit.DEFAULT_TYPES)
 _NUMBERING_PREFIX = r"\([1-9][0-9]*/[1-9][0-9]*\)"
 _TICKET_PREFIX = r"\[(?:[A-Z][A-Z0-9]*-[0-9]+|NO-TICKET)\]"
@@ -117,7 +118,18 @@ def check_commit_message_file(
     fix_safe: bool = False,
     allow_temporary: bool = False,
 ) -> CommitMessageResult:
-    content, metadata = _read_regular_file(path)
+    regular = _read_regular_file(path)
+    return _check_regular_message(path, regular, fix_safe=fix_safe, allow_temporary=allow_temporary)
+
+
+def _check_regular_message(
+    path: Path,
+    regular: _RegularFile,
+    *,
+    fix_safe: bool,
+    allow_temporary: bool,
+) -> CommitMessageResult:
+    content, metadata = regular
     if allow_temporary:
         temporary = _temporary_commit_result(content)
         if temporary is not None:
@@ -146,9 +158,16 @@ def check_local_commit_message_file(
     fix_safe: bool = True,
 ) -> CommitMessageResult:
     """Validate a local Git message while allowing structurally temporary Git operations."""
-    if _merge_in_progress(root):
-        return CommitMessageResult(header="", findings=())
-    return check_commit_message_file(path, fix_safe=fix_safe, allow_temporary=True)
+    regular = _read_regular_file(path)
+    safety = analyze_commit_message_bytes(regular.content)
+    if _merge_in_progress(root, message_file=path):
+        unsafe = tuple(
+            finding
+            for finding in safety.findings
+            if finding.code in {"commit-message.empty", "commit-message.control-character"}
+        )
+        return CommitMessageResult(header=safety.header, findings=unsafe)
+    return _check_regular_message(path, regular, fix_safe=fix_safe, allow_temporary=True)
 
 
 def _temporary_commit_result(content: bytes) -> CommitMessageResult | None:
@@ -159,7 +178,7 @@ def _temporary_commit_result(content: bytes) -> CommitMessageResult | None:
     except UnicodeDecodeError:
         ConfigurationError.fail("commit message must be UTF-8")
     header = text.splitlines()[0] if text.splitlines() else ""
-    if any(
+    if _CONTROLS.search(header) is None and any(
         header.startswith(prefix) and header.removeprefix(prefix).strip()
         for prefix in ("fixup! ", "squash! ")
     ):
@@ -167,13 +186,22 @@ def _temporary_commit_result(content: bytes) -> CommitMessageResult | None:
     return None
 
 
-def _merge_in_progress(root: Path) -> bool:
+def _merge_in_progress(root: Path, *, message_file: Path) -> bool:
     executable = shutil.which("git")
     if executable is None:
         return False
     try:
         completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed read-only query
-            (executable, "-C", str(root), "rev-parse", "--git-path", "MERGE_HEAD"),
+            (
+                executable,
+                "-C",
+                str(root),
+                "rev-parse",
+                "--git-path",
+                "MERGE_HEAD",
+                "--git-path",
+                "COMMIT_EDITMSG",
+            ),
             check=False,
             capture_output=True,
             timeout=5,
@@ -183,11 +211,19 @@ def _merge_in_progress(root: Path) -> bool:
         return False
     if completed.returncode != 0:
         return False
-    raw_path = completed.stdout.decode("utf-8", errors="surrogateescape").strip()
-    if not raw_path:
+    raw_paths = completed.stdout.decode("utf-8", errors="surrogateescape").splitlines()
+    if len(raw_paths) != _LOCAL_GIT_PATH_COUNT:
         return False
-    marker = Path(raw_path)
-    return (marker if marker.is_absolute() else root / marker).is_file()
+    marker, expected_message = (Path(value) for value in raw_paths)
+    marker = marker if marker.is_absolute() else root / marker
+    expected_message = (
+        expected_message if expected_message.is_absolute() else root / expected_message
+    )
+    try:
+        same_message = expected_message.resolve(strict=True) == message_file.resolve(strict=True)
+    except OSError:
+        return False
+    return same_message and marker.is_file()
 
 
 def _valid_groups(groups: dict[str, str | None], conventional: str) -> bool:

@@ -48,6 +48,8 @@ def test_semantic_failure_is_machine_readable_and_blocking(tmp_path: Path) -> No
     assert findings[0]["code"] == "commit-message.invalid-header"
     policy = OBJECT_MAP.validate_python(payload["policy"])
     assert summary["replacement_header"] is None
+    assert summary["replacement_message"] is None
+    assert policy["safe_fix"] is True
     assert policy["safe_fix_enabled"] is False
 
 
