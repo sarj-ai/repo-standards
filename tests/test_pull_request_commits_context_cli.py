@@ -48,7 +48,13 @@ def _commit(root: Path, subject: str) -> str:
     return _git(root, "rev-parse", "HEAD")
 
 
-def _manifest(*, maximum_commits: int = 5, transition: bool = False) -> str:
+def _manifest(
+    *,
+    maximum_commits: int = 5,
+    transition: bool = False,
+    schema_version: int = 5,
+    enforcement: str = "strict",
+) -> str:
     transition_table = ""
     if transition:
         transition_table = """
@@ -58,8 +64,11 @@ source_ref = "dev"
 base_ref = "preview"
 head_prefix = "automation/promote-dev-"
 """
+    commit_message = (
+        f'\n[commit_message]\nenforcement = "{enforcement}"\n' if schema_version == 6 else ""
+    )
     return f"""\
-schema_version = 5
+schema_version = {schema_version}
 repository_id = "fixture"
 components = []
 
@@ -67,6 +76,7 @@ components = []
 maximum_commits = {maximum_commits}
 advisory_base_ref = "dev"
 {transition_table}
+{commit_message}
 """
 
 
@@ -153,6 +163,52 @@ def test_github_event_enforces_default_without_manifest(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "limit 5" in result.stdout
+
+
+def test_github_event_enforces_commit_messages_from_exact_base(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet", "--initial-branch=dev")
+    policy = tmp_path / ".repo-standards"
+    policy.mkdir()
+    (policy / "repository.toml").write_text(_manifest(schema_version=6), encoding="utf-8")
+    (tmp_path / "change.txt").write_text("base\n", encoding="utf-8")
+    base = _commit(tmp_path, "chore: configure policy")
+    (tmp_path / "change.txt").write_text("change\n", encoding="utf-8")
+    head = _commit(tmp_path, "WIP")
+    event = tmp_path.parent / f"{tmp_path.name}-messages-event.json"
+    _event(event, base=base, head=head)
+
+    result = runner.invoke(
+        app,
+        ["pull-request", "commits", str(tmp_path), "--github-event", str(event)],
+        env={"GITHUB_EVENT_NAME": "pull_request"},
+    )
+
+    assert result.exit_code == 1
+    assert "commit-message.invalid-header" in result.stdout
+
+
+def test_github_event_observe_mode_reports_without_blocking(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet", "--initial-branch=dev")
+    policy = tmp_path / ".repo-standards"
+    policy.mkdir()
+    (policy / "repository.toml").write_text(
+        _manifest(schema_version=6, enforcement="observe"), encoding="utf-8"
+    )
+    (tmp_path / "change.txt").write_text("base\n", encoding="utf-8")
+    base = _commit(tmp_path, "chore: configure policy")
+    (tmp_path / "change.txt").write_text("change\n", encoding="utf-8")
+    head = _commit(tmp_path, "WIP")
+    event = tmp_path.parent / f"{tmp_path.name}-observe-event.json"
+    _event(event, base=base, head=head)
+
+    result = runner.invoke(
+        app,
+        ["pull-request", "commits", str(tmp_path), "--github-event", str(event)],
+        env={"GITHUB_EVENT_NAME": "pull_request"},
+    )
+
+    assert result.exit_code == 0
+    assert "1 finding(s) (observe)" in result.stdout
 
 
 def test_github_merge_group_is_explicitly_not_applicable(tmp_path: Path) -> None:

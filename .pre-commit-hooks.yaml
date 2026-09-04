@@ -7,3 +7,12 @@
   pass_filenames: false
   verbose: true
   stages: [pre-commit, pre-push]
+- id: repo-standards-commit-message
+  name: Repo Standards - managed conventional commit header
+  description: Validates and safely normalizes the commit message header.
+  entry: repo-standards commit-message --fix-safe
+  language: python
+  always_run: true
+  pass_filenames: true
+  require_serial: true
+  stages: [commit-msg]

@@ -73,15 +73,19 @@ When a series is not intentional, prefer one reviewable commit:
 git rebase -i "$(git merge-base origin/dev HEAD)"
 ```
 
-Configure local base discovery and narrowly scoped promotion/synchronization transitions in schema
-5. Strict CI reads this TOML from the exact PR **base** commit, so a PR cannot raise its own limit
+Configure local base discovery, commit-message enforcement, and narrowly scoped
+promotion/synchronization transitions in schema 6. Strict CI reads this TOML from the exact PR
+**base** commit, so a PR cannot raise its own limit
 or grant itself an exemption. Each transition also requires the exact destination, a same-repository
 PR, an immutable source-SHA branch suffix equal to the PR head, and proof that the head remains in
 the configured source ancestry. Protect automation branch namespaces so only the promotion app can
 create or update them.
 
 ```toml
-schema_version = 5
+schema_version = 6
+
+[commit_message]
+enforcement = "strict" # default in schema 6; use "observe" only for measured migrations
 
 [pull_request.commit_history]
 advisory_base_ref = "dev"
@@ -106,6 +110,26 @@ already-evaluated PRs; keep the containing required workflow enabled for `merge_
 still receives its required status. The explicit `edited` activity ensures retargeting always
 re-evaluates the new exact base.
 
+## Commit-message policy
+
+Schema 6 enables Managed Conventional Header v1 by default. It checks only the first physical
+line; bodies, trailers, punctuation, prose, and language remain untouched. Valid headers use
+`[(i/N) ][TICKET] type(scope)!: description`, where the numbering and ticket prefixes and scope
+are optional. Types are the fixed Conventional Commits set: `build`, `chore`, `ci`, `docs`, `feat`,
+`fix`, `perf`, `refactor`, `revert`, `style`, and `test`.
+
+The `commit-msg` hook safely repairs only unambiguous type casing and structural whitespace. It
+never guesses intent or rewrites prose. Semantic findings fail with a short actionable diagnostic,
+so a developer or coding agent can update the message and retry.
+
+```bash
+repo-standards commit-message .git/COMMIT_EDITMSG --fix-safe
+```
+
+Authoritative PR CI validates every direct base-to-head non-merge commit using the policy from the
+exact base object. A cryptographically attested promotion or synchronization transition bypasses
+inherited legacy messages; branch names, actors, bots, and forks never grant an exemption.
+
 ## Pull-request commits Action and pre-commit hook
 
 After a full-history checkout, use the dedicated Action inside an existing required job. Pin the
@@ -122,12 +146,13 @@ on:
   with:
     fetch-depth: 0
     persist-credentials: false
-- uses: sarj-ai/repo-standards/pull-request-commits@FULL_RELEASE_COMMIT_SHA # v5.10.0
+- uses: sarj-ai/repo-standards/pull-request-commits@FULL_RELEASE_COMMIT_SHA # v5.11.0
 ```
 
-The published `repo-standards-pull-request-commits` pre-commit hook runs in advisory mode at both
-`pre-commit` and `pre-push`. Consumers that already lock Repo Standards may instead invoke the same
-quiet advisory command from their existing hook manager to avoid a duplicate environment.
+The published `repo-standards-pull-request-commits` hook runs in advisory mode at `pre-commit` and
+`pre-push`. The `repo-standards-commit-message` hook runs at `commit-msg`, applies bounded safe
+normalization, and then enforces the header. Consumers that already lock Repo Standards may invoke
+the same commands from their existing hook manager to avoid a duplicate environment.
 
 ## GitHub Action
 

@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+from repo_standards.core.commit_message import (
+    analyze_commit_header,
+    check_commit_message_file,
+)
+from repo_standards.core.errors import ConfigurationError
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "feat: add search",
+        "fix(api): handle empty input",
+        "feat!: remove legacy endpoint",
+        "(1/7) docs: explain deployment",
+        "[SARJ-437] fix(parser): preserve العربية",
+        "(2/7) [NO-TICKET] test: cover promotion",
+    ],
+)
+def test_managed_conventional_headers_pass(header: str) -> None:
+    assert analyze_commit_header(header).satisfied
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "update parser",
+        "feature: add search",
+        "feat:",
+        "[sarj-1] feat: lowercase ticket",
+        "(01/2) feat: padded marker",
+        "feat(@api): unsupported scope",
+        "feat:   ",
+        "feat: bad\x00header",
+    ],
+)
+def test_semantic_or_unsafe_headers_fail_without_replacement(header: str) -> None:
+    result = analyze_commit_header(header)
+    assert not result.satisfied
+    assert result.replacement_header is None
+
+
+def test_safe_fix_only_normalizes_structure_and_type(tmp_path: Path) -> None:
+    path = tmp_path / "COMMIT_EDITMSG"
+    body = "\n\nBody stays byte-for-byte.\n\nRefs: SARJ-1\n"
+    path.write_text(f"(1/2) [SARJ-1] FeAt (api) ! :   Preserve العربية  {body}")
+
+    result = check_commit_message_file(path, fix_safe=True)
+
+    assert result.satisfied
+    assert result.fix_applied
+    assert path.read_text() == f"(1/2) [SARJ-1] feat(api)!: Preserve العربية  {body}"
+    assert check_commit_message_file(path, fix_safe=True).fix_applied is False
+
+
+def test_semantic_failure_never_mutates_file(tmp_path: Path) -> None:
+    path = tmp_path / "COMMIT_EDITMSG"
+    original = b"choose a type\n\nBody\n"
+    path.write_bytes(original)
+
+    result = check_commit_message_file(path, fix_safe=True)
+
+    assert not result.satisfied
+    assert path.read_bytes() == original
+
+
+def test_crlf_suffix_is_preserved(tmp_path: Path) -> None:
+    path = tmp_path / "COMMIT_EDITMSG"
+    path.write_bytes(b"FIX : repair\r\n\r\nBody\r\n")
+
+    check_commit_message_file(path, fix_safe=True)
+
+    assert path.read_bytes() == b"fix: repair\r\n\r\nBody\r\n"
+
+
+def test_non_utf8_and_symlinks_fail_closed(tmp_path: Path) -> None:
+    invalid = tmp_path / "invalid"
+    invalid.write_bytes(b"feat: \xff")
+    with pytest.raises(ConfigurationError, match="UTF-8"):
+        check_commit_message_file(invalid)
+
+    target = tmp_path / "target"
+    target.write_text("feat: valid")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    with pytest.raises(ConfigurationError, match="regular file"):
+        check_commit_message_file(link)

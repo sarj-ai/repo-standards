@@ -16,8 +16,9 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import NoReturn
 
+from .commit_message import CommitMessageFinding, analyze_commit_header
 from .errors import ConfigurationError
-from .models import GitObjectId, RepositoryId
+from .models import CommitMessageEnforcement, GitObjectId, RepositoryId
 
 
 DEFAULT_MAXIMUM_COMMITS = 5
@@ -76,6 +77,13 @@ class PullRequestCommit:
 
 
 @dataclass(frozen=True, slots=True)
+class PullRequestCommitMessageFinding:
+    object_id: GitObjectId
+    subject: str
+    finding: CommitMessageFinding
+
+
+@dataclass(frozen=True, slots=True)
 class TransitionExemption:
     exemption_id: TransitionExemptionId
     repository_id: RepositoryId
@@ -111,6 +119,8 @@ class PullRequestCommits:
     disposition: Disposition
     numbering_issue: NumberingIssue | None = None
     exemption_id: TransitionExemptionId | None = None
+    commit_message_enforcement: CommitMessageEnforcement | None = None
+    commit_message_findings: tuple[PullRequestCommitMessageFinding, ...] = ()
 
     @property
     def commit_count(self) -> int:
@@ -118,7 +128,15 @@ class PullRequestCommits:
 
     @property
     def satisfied(self) -> bool:
-        return self.disposition != "over-limit"
+        count_satisfied = self.disposition != "over-limit"
+        messages_satisfied = not self.commit_message_findings or (
+            self.commit_message_enforcement is CommitMessageEnforcement.OBSERVE
+        )
+        return count_satisfied and messages_satisfied
+
+    @property
+    def has_findings(self) -> bool:
+        return self.disposition == "over-limit" or bool(self.commit_message_findings)
 
 
 def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence stays explicit
@@ -131,6 +149,7 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
     base_ref: str | None = None,
     head_ref: str | None = None,
     transition_exemptions: tuple[TransitionExemption, ...] = (),
+    commit_message_enforcement: CommitMessageEnforcement | None = None,
 ) -> PullRequestCommits:
     resolved = root.resolve(strict=True)
     if not resolved.is_dir():
@@ -143,6 +162,62 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
     if shallow:
         ConfigurationError.fail("Git history is shallow; complete history is required")
     _require_common_history(resolved, base_object_id, head_object_id)
+
+    if commit_message_enforcement is not None:
+        commits = _commits(
+            resolved,
+            base_object_id,
+            head_object_id,
+            maximum=MAXIMUM_ANALYZED_COMMITS + 1,
+        )
+        if len(commits) > MAXIMUM_ANALYZED_COMMITS:
+            ConfigurationError.fail("pull-request history exceeds the 10000-commit safety limit")
+        exemption_id = _transition_exemption(
+            resolved,
+            head_object_id=head_object_id,
+            repository_id=None if repository_id is None else RepositoryId(repository_id),
+            base_ref=base_ref,
+            head_ref=head_ref,
+            exemptions=transition_exemptions,
+        )
+        if exemption_id is not None:
+            return PullRequestCommits(
+                base=base,
+                head=head,
+                base_object_id=base_object_id,
+                head_object_id=head_object_id,
+                maximum_commits=maximum_commits,
+                commits=commits,
+                disposition="transition-exemption",
+                exemption_id=exemption_id,
+                commit_message_enforcement=commit_message_enforcement,
+            )
+        message_findings = _commit_message_findings(commits)
+        if len(commits) <= maximum_commits:
+            return PullRequestCommits(
+                base=base,
+                head=head,
+                base_object_id=base_object_id,
+                head_object_id=head_object_id,
+                maximum_commits=maximum_commits,
+                commits=commits,
+                disposition="within-limit",
+                commit_message_enforcement=commit_message_enforcement,
+                commit_message_findings=message_findings,
+            )
+        numbering_issue = _numbering_issue(commits)
+        return PullRequestCommits(
+            base=base,
+            head=head,
+            base_object_id=base_object_id,
+            head_object_id=head_object_id,
+            maximum_commits=maximum_commits,
+            commits=commits,
+            disposition="numbered-series" if numbering_issue is None else "over-limit",
+            numbering_issue=numbering_issue,
+            commit_message_enforcement=commit_message_enforcement,
+            commit_message_findings=message_findings,
+        )
 
     fast_limit = maximum_commits + 1
     commits = _commits(
@@ -201,6 +276,23 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
         disposition="numbered-series" if numbering_issue is None else "over-limit",
         numbering_issue=numbering_issue,
     )
+
+
+def _commit_message_findings(
+    commits: tuple[PullRequestCommit, ...],
+) -> tuple[PullRequestCommitMessageFinding, ...]:
+    findings: list[PullRequestCommitMessageFinding] = []
+    for commit in commits:
+        result = analyze_commit_header(commit.subject)
+        findings.extend(
+            PullRequestCommitMessageFinding(
+                object_id=commit.object_id,
+                subject=commit.subject,
+                finding=finding,
+            )
+            for finding in result.findings
+        )
+    return tuple(findings)
 
 
 def _safe_revision(value: str, *, name: str) -> None:

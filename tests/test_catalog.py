@@ -146,6 +146,7 @@ def test_catalog_graph_is_complete() -> None:
         "capabilities",
         "catalog",
         "check",
+        "commit-message",
         "explain",
         "inspect",
         "pull-request.commits",

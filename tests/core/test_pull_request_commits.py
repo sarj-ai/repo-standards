@@ -8,7 +8,7 @@ from typing import NamedTuple
 import pytest
 
 from repo_standards.core.errors import ConfigurationError
-from repo_standards.core.models import RepositoryId
+from repo_standards.core.models import CommitMessageEnforcement, RepositoryId
 from repo_standards.core.pull_request_commits import (
     TransitionExemption,
     TransitionExemptionId,
@@ -99,6 +99,52 @@ def test_six_ordinary_commits_fail(tmp_path: Path) -> None:
     assert not result.satisfied
     assert result.disposition == "over-limit"
     assert result.numbering_issue == "missing-marker"
+
+
+def test_strict_commit_message_policy_checks_even_one_commit(tmp_path: Path) -> None:
+    repository, base = _repository(tmp_path)
+    _commit(repository, "WIP")
+
+    result = analyze_pull_request_commits(
+        repository,
+        base=base,
+        commit_message_enforcement=CommitMessageEnforcement.STRICT,
+    )
+
+    assert not result.satisfied
+    assert result.disposition == "within-limit"
+    assert result.commit_message_findings[0].finding.code == "commit-message.invalid-header"
+
+
+def test_observe_commit_message_policy_reports_without_blocking(tmp_path: Path) -> None:
+    repository, base = _repository(tmp_path)
+    _commit(repository, "WIP")
+
+    result = analyze_pull_request_commits(
+        repository,
+        base=base,
+        commit_message_enforcement=CommitMessageEnforcement.OBSERVE,
+    )
+
+    assert result.satisfied
+    assert result.has_findings
+    assert len(result.commit_message_findings) == 1
+
+
+def test_numbered_series_also_requires_conventional_remainders(tmp_path: Path) -> None:
+    repository, base = _repository(tmp_path)
+    for index in range(1, 7):
+        _commit(repository, f"({index}/6) step {index}")
+
+    result = analyze_pull_request_commits(
+        repository,
+        base=base,
+        commit_message_enforcement=CommitMessageEnforcement.STRICT,
+    )
+
+    assert result.disposition == "numbered-series"
+    assert not result.satisfied
+    assert len(result.commit_message_findings) == 6
 
 
 def test_complete_numbered_series_passes(tmp_path: Path) -> None:
@@ -215,6 +261,36 @@ def test_exact_transition_exemption_passes(tmp_path: Path) -> None:
     assert result.satisfied
     assert result.disposition == "transition-exemption"
     assert result.exemption_id == "bulbul-dev-preview"
+
+
+def test_verified_transition_bypasses_legacy_headers_even_within_limit(tmp_path: Path) -> None:
+    repository, base = _repository(tmp_path)
+    _git(repository, "branch", "preview", base)
+    head = _commit(repository, "legacy promotion subject")
+    _git(repository, "branch", "dev", head)
+
+    result = analyze_pull_request_commits(
+        repository,
+        base=base,
+        head=head,
+        base_ref="preview",
+        head_ref=f"automation/promote-dev-{head[:12]}",
+        repository_id="sarj-ai/bulbul",
+        transition_exemptions=(
+            TransitionExemption(
+                exemption_id=TransitionExemptionId("bulbul-dev-preview"),
+                repository_id=RepositoryId("sarj-ai/bulbul"),
+                source_ref="dev",
+                base_ref="preview",
+                head_prefix="automation/promote-dev-",
+            ),
+        ),
+        commit_message_enforcement=CommitMessageEnforcement.STRICT,
+    )
+
+    assert result.satisfied
+    assert result.disposition == "transition-exemption"
+    assert not result.commit_message_findings
 
 
 def test_transition_snapshot_allows_source_advance(tmp_path: Path) -> None:
