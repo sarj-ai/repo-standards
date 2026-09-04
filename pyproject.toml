@@ -1,6 +1,6 @@
 [project]
 name = "repo-standards"
-version = "5.9.0"
+version = "5.10.0"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
@@ -35,9 +35,10 @@ repo-standards = "repo_standards.cli:main"
 
 [dependency-groups]
 dev = [
-  "basedpyright>=1.39.10",
-  "jsonschema>=4.26.0",
-  "pytest>=9.1.1",
+    "basedpyright>=1.39.10",
+    "jsonschema>=4.26.0",
+    "pre-commit>=4.6.0,<5",
+    "pytest>=9.1.1",
   "ruff>=0.16.5",
 ]
 

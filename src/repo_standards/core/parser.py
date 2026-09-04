@@ -26,6 +26,9 @@ from .models import (
     Manifest,
     MigrationPath,
     PolicyId,
+    PullRequestCommitHistoryConfig,
+    PullRequestCommitHistoryTransition,
+    PullRequestConfig,
     RepositoryId,
     RuleId,
 )
@@ -42,10 +45,19 @@ _MAX_INPUT_BYTES = 1_048_576
 _MAX_COMPONENTS = 10_000
 _MAX_MIGRATIONS = 10_000
 _MAX_EXCEPTIONS = 1_000
-_MANIFEST_SCHEMA_VERSION = 4
+_MANIFEST_SCHEMA_VERSION = 5
+_RULE_ACTIVATION_SCHEMA_VERSION = 4
 _REPOSITORY_EVIDENCE_SCHEMA_VERSION = 3
 _LEGACY_MANIFEST_SCHEMA_VERSION = 2
 _BASELINE_SCHEMA_VERSION = 2
+_DEFAULT_MAXIMUM_COMMITS = 5
+_MAXIMUM_COMMITS = 9_999
+_MAXIMUM_TRANSITIONS = 64
+_MINIMUM_SHA_PREFIX_LENGTH = 12
+_MAXIMUM_SHA_PREFIX_LENGTH = 40
+_MAXIMUM_LOGICAL_REF_BYTES = 1_024
+_ASCII_CONTROL_LIMIT = 32
+_ASCII_DELETE = 127
 _OBJECT_MAPPING = TypeAdapter(dict[str, object])
 _CONFIG_SUFFIXES = MappingProxyType(
     {
@@ -113,6 +125,41 @@ def _string(data: dict[str, object], key: str, context: str) -> str:
 def _identifier(value: str, context: str) -> str:
     if not _ID.fullmatch(value):
         ConfigurationError.fail(f"{context} must be lowercase ASCII segments: {value!r}")
+    return value
+
+
+def _integer(data: dict[str, object], key: str, context: str, *, default: int) -> int:
+    value = data.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        ConfigurationError.fail(f"{context}.{key} must be an integer")
+    return value
+
+
+def _logical_branch_ref(value: str, context: str) -> str:
+    invalid_character = any(
+        ord(character) < _ASCII_CONTROL_LIMIT
+        or ord(character) == _ASCII_DELETE
+        or character.isspace()
+        or character in "~^:?*[\\"
+        for character in value
+    )
+    components = value.split("/")
+    invalid = any(
+        (
+            len(value.encode("utf-8")) > _MAXIMUM_LOGICAL_REF_BYTES,
+            value == "@",
+            value.startswith(("-", "/", "refs/", "origin/")),
+            value.endswith(("/", ".", ".lock")),
+            "//" in value,
+            ".." in value,
+            "@{" in value,
+            invalid_character,
+            any(not component or component.startswith(".") for component in components),
+            any(component.endswith(".lock") for component in components),
+        )
+    )
+    if invalid:
+        ConfigurationError.fail(f"{context} must be a safe logical branch name")
     return value
 
 
@@ -319,6 +366,95 @@ def parse_active_configuration(value: object, index: int) -> ActiveConfiguration
     )
 
 
+def parse_pull_request_commit_history_transition(
+    value: object, index: int
+) -> PullRequestCommitHistoryTransition:
+    context = f"pull_request.commit_history.transitions[{index}]"
+    data = _mapping(value, context)
+    fields = {"id", "source_ref", "base_ref", "head_prefix", "sha_prefix_length"}
+    _strict_keys(data, fields, {"id", "source_ref", "base_ref", "head_prefix"}, context)
+    transition_id = _identifier(_string(data, "id", context), f"{context}.id")
+    source_ref = _logical_branch_ref(_string(data, "source_ref", context), f"{context}.source_ref")
+    base_ref = _logical_branch_ref(_string(data, "base_ref", context), f"{context}.base_ref")
+    if source_ref == base_ref:
+        ConfigurationError.fail(f"{context}.source_ref and base_ref must differ")
+    sha_prefix_length = _integer(
+        data,
+        "sha_prefix_length",
+        context,
+        default=_MINIMUM_SHA_PREFIX_LENGTH,
+    )
+    if not _MINIMUM_SHA_PREFIX_LENGTH <= sha_prefix_length <= _MAXIMUM_SHA_PREFIX_LENGTH:
+        ConfigurationError.fail(
+            f"{context}.sha_prefix_length must be between "
+            f"{_MINIMUM_SHA_PREFIX_LENGTH} and {_MAXIMUM_SHA_PREFIX_LENGTH}"
+        )
+    head_prefix = _string(data, "head_prefix", context)
+    _logical_branch_ref(f"{head_prefix}{'a' * sha_prefix_length}", f"{context}.head_prefix")
+    return PullRequestCommitHistoryTransition(
+        transition_id=transition_id,
+        source_ref=source_ref,
+        base_ref=base_ref,
+        head_prefix=head_prefix,
+        sha_prefix_length=sha_prefix_length,
+    )
+
+
+def parse_pull_request_commit_history(value: object) -> PullRequestCommitHistoryConfig:
+    context = "pull_request.commit_history"
+    data = _mapping(value, context)
+    fields = {"maximum_commits", "advisory_base_ref", "transitions"}
+    _strict_keys(data, fields, {"advisory_base_ref"}, context)
+    maximum_commits = _integer(
+        data,
+        "maximum_commits",
+        context,
+        default=_DEFAULT_MAXIMUM_COMMITS,
+    )
+    if not 1 <= maximum_commits <= _MAXIMUM_COMMITS:
+        ConfigurationError.fail(
+            f"{context}.maximum_commits must be between 1 and {_MAXIMUM_COMMITS}"
+        )
+    advisory_base_ref = _logical_branch_ref(
+        _string(data, "advisory_base_ref", context),
+        f"{context}.advisory_base_ref",
+    )
+    raw_transitions = _list(data.get("transitions", []), f"{context}.transitions")
+    if len(raw_transitions) > _MAXIMUM_TRANSITIONS:
+        ConfigurationError.fail(
+            f"{context} may contain at most {_MAXIMUM_TRANSITIONS} transitions"
+        )
+    transitions = tuple(
+        parse_pull_request_commit_history_transition(item, index)
+        for index, item in enumerate(raw_transitions)
+    )
+    transition_ids = tuple(item.transition_id for item in transitions)
+    if len(transition_ids) != len(set(transition_ids)):
+        ConfigurationError.fail(f"{context}.transitions must have unique IDs")
+    for index, transition in enumerate(transitions):
+        for previous in transitions[:index]:
+            prefix_overlaps = transition.head_prefix.startswith(
+                previous.head_prefix
+            ) or previous.head_prefix.startswith(transition.head_prefix)
+            if prefix_overlaps:
+                ConfigurationError.fail(
+                    f"{context}.transitions must not have overlapping head prefixes"
+                )
+    return PullRequestCommitHistoryConfig(
+        advisory_base_ref=advisory_base_ref,
+        maximum_commits=maximum_commits,
+        transitions=transitions,
+    )
+
+
+def parse_pull_request(value: object) -> PullRequestConfig:
+    data = _mapping(value, "pull_request")
+    _strict_keys(data, {"commit_history"}, {"commit_history"}, "pull_request")
+    return PullRequestConfig(
+        commit_history=parse_pull_request_commit_history(data["commit_history"])
+    )
+
+
 def parse_manifest_bytes(content: bytes) -> Manifest:
     try:
         parsed_manifest: object = tomllib.loads(
@@ -337,22 +473,11 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         "delivery",
         "documentation",
         "active_configuration",
+        "pull_request",
     }
     required = {"schema_version", "repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
-    schema_version = data["schema_version"]
-    if schema_version not in {
-        _LEGACY_MANIFEST_SCHEMA_VERSION,
-        _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
-        _MANIFEST_SCHEMA_VERSION,
-    }:
-        ConfigurationError.fail("manifest.schema_version must be 2, 3, or 4")
-    if schema_version == _LEGACY_MANIFEST_SCHEMA_VERSION and (
-        {"documentation", "active_configuration", "delivery"} & data.keys()
-    ):
-        ConfigurationError.fail("manifest schema version 3 is required for repository evidence")
-    if schema_version != _MANIFEST_SCHEMA_VERSION and "enabled_rules" in data:
-        ConfigurationError.fail("manifest schema version 4 is required for enabled_rules")
+    _validate_manifest_schema(data)
     raw_components = _list(data["components"], "manifest.components")
     if len(raw_components) > _MAX_COMPONENTS:
         ConfigurationError.fail(f"manifest may contain at most {_MAX_COMPONENTS} components")
@@ -401,7 +526,31 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         if "documentation" in data
         else None,
         active_configuration=active_configuration,
+        pull_request=parse_pull_request(data["pull_request"]) if "pull_request" in data else None,
     )
+
+
+def _validate_manifest_schema(data: dict[str, object]) -> None:
+    schema_version = data["schema_version"]
+    supported_versions = {
+        _LEGACY_MANIFEST_SCHEMA_VERSION,
+        _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
+        _RULE_ACTIVATION_SCHEMA_VERSION,
+        _MANIFEST_SCHEMA_VERSION,
+    }
+    if schema_version not in supported_versions:
+        ConfigurationError.fail("manifest.schema_version must be 2, 3, 4, or 5")
+    if schema_version == _LEGACY_MANIFEST_SCHEMA_VERSION and (
+        {"documentation", "active_configuration", "delivery"} & data.keys()
+    ):
+        ConfigurationError.fail("manifest schema version 3 is required for repository evidence")
+    if schema_version in {
+        _LEGACY_MANIFEST_SCHEMA_VERSION,
+        _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
+    } and "enabled_rules" in data:
+        ConfigurationError.fail("manifest schema version 4 is required for enabled_rules")
+    if schema_version != _MANIFEST_SCHEMA_VERSION and "pull_request" in data:
+        ConfigurationError.fail("manifest schema version 5 is required for pull_request")
 
 
 def load_manifest(path: Path) -> Manifest:

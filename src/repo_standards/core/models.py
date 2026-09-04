@@ -116,6 +116,27 @@ class ActiveConfiguration:
 
 
 @dataclass(frozen=True, slots=True)
+class PullRequestCommitHistoryTransition:
+    transition_id: str
+    source_ref: str
+    base_ref: str
+    head_prefix: str
+    sha_prefix_length: int = 12
+
+
+@dataclass(frozen=True, slots=True)
+class PullRequestCommitHistoryConfig:
+    advisory_base_ref: str
+    maximum_commits: int = 5
+    transitions: tuple[PullRequestCommitHistoryTransition, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PullRequestConfig:
+    commit_history: PullRequestCommitHistoryConfig
+
+
+@dataclass(frozen=True, slots=True)
 class DeploymentAuthority:
     authority_id: AuthorityId
     component_id: ComponentId
@@ -136,6 +157,7 @@ class Manifest:
     delivery: DeliveryConfig | None = None
     documentation: DocumentationConfig | None = None
     active_configuration: tuple[ActiveConfiguration, ...] = ()
+    pull_request: PullRequestConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)

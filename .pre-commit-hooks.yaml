@@ -1,0 +1,9 @@
+- id: repo-standards-pull-request-commits
+  name: Repo Standards - concise pull-request history
+  description: Advises when pull-request history should be squashed or explicitly numbered.
+  entry: repo-standards pull-request commits . --advisory --quiet
+  language: python
+  always_run: true
+  pass_filenames: false
+  verbose: true
+  stages: [pre-commit, pre-push]

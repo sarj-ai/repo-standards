@@ -52,6 +52,7 @@ NumberingIssue = Literal[
     "wrong-total",
     "duplicate-index",
     "missing-index",
+    "out-of-order",
 ]
 Disposition = Literal[
     "within-limit",
@@ -283,6 +284,7 @@ def _commits(root: Path, base: str, head: str, *, maximum: int) -> tuple[PullReq
 def _numbering_issue(commits: tuple[PullRequestCommit, ...]) -> NumberingIssue | None:
     expected_total = len(commits)
     indices: set[int] = set()
+    ordered_indices: list[int] = []
     for commit in commits:
         raw_subject = commit.subject.encode("utf-8", errors="backslashreplace")
         match = _NUMBERED_SUBJECT.fullmatch(raw_subject)
@@ -298,9 +300,14 @@ def _numbering_issue(commits: tuple[PullRequestCommit, ...]) -> NumberingIssue |
         if index in indices:
             return "duplicate-index"
         indices.add(index)
-    if indices != set(range(1, expected_total + 1)):
-        return "missing-index"
-    return None
+        ordered_indices.append(index)
+    expected_indices = list(range(1, expected_total + 1))
+    issue: NumberingIssue | None = None
+    if indices != set(expected_indices):
+        issue = "missing-index"
+    elif ordered_indices != expected_indices:
+        issue = "out-of-order"
+    return issue
 
 
 def _transition_exemption(  # ruff: ignore[too-many-arguments] - identity proof is conjunctive
@@ -327,14 +334,9 @@ def _transition_exemption(  # ruff: ignore[too-many-arguments] - identity proof 
             continue
         _safe_revision(exemption.source_ref, name="source")
         source_object_id = _resolve_source(root, exemption.source_ref)
-        snapshot_object_id = _try_resolve_snapshot(root, snapshot_prefix)
-        if snapshot_object_id is None:
+        if not head_object_id.startswith(snapshot_prefix):
             continue
-        if not snapshot_object_id.startswith(snapshot_prefix):
-            continue
-        if snapshot_object_id == head_object_id and _is_ancestor(
-            root, snapshot_object_id, source_object_id
-        ):
+        if _is_ancestor(root, head_object_id, source_object_id):
             return exemption.exemption_id
     return None
 
@@ -348,28 +350,6 @@ def _resolve_source(root: Path, source_ref: str) -> GitObjectId:
     ).strip()
     if _OBJECT_ID.fullmatch(output) is None:
         ConfigurationError.fail("Git returned a malformed transition source object ID")
-    return GitObjectId(output.decode("ascii"))
-
-
-def _try_resolve_snapshot(root: Path, snapshot_prefix: str) -> GitObjectId | None:
-    executable = shutil.which("git")
-    if executable is None:
-        ConfigurationError.fail("Git is required for pull-request commit analysis")
-    try:
-        completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed read-only Git invocation
-            [executable, "-C", str(root), "rev-parse", f"{snapshot_prefix}^{{commit}}"],
-            check=False,
-            capture_output=True,
-            timeout=_GIT_TIMEOUT.total_seconds(),
-            env=_GIT_ENVIRONMENT,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        ConfigurationError.fail("Git could not resolve the transition snapshot")
-    if completed.returncode != 0:
-        return None
-    output = completed.stdout.strip()
-    if _OBJECT_ID.fullmatch(output) is None:
-        ConfigurationError.fail("Git returned a malformed transition snapshot object ID")
     return GitObjectId(output.decode("ascii"))
 
 
