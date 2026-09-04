@@ -136,6 +136,10 @@ def test_complete_numbered_series_passes(tmp_path: Path) -> None:
             ["(1/6)  step", "(2/6) step", "(3/6) step", "(4/6) step", "(5/6) step", "(6/6) step"],
             "malformed-marker",
         ),
+        (
+            ["(6/6) step", "(5/6) step", "(4/6) step", "(3/6) step", "(2/6) step", "(1/6) step"],
+            "out-of-order",
+        ),
     ],
 )
 def test_malformed_numbered_series_fails(

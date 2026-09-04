@@ -6,6 +6,7 @@ from datetime import date
 from enum import StrEnum
 from importlib import metadata
 import json
+import os
 from pathlib import Path
 from typing import Annotated, ClassVar, NamedTuple, NoReturn, TypeGuard
 
@@ -46,6 +47,7 @@ from repo_standards.core.models import (
     Rule,
     RuleId,
 )
+from repo_standards.core.parser import load_manifest
 from repo_standards.core.pull_request_commits import (
     DEFAULT_MAXIMUM_COMMITS,
     PullRequestCommits,
@@ -67,6 +69,12 @@ from repo_standards.openapi import analyze as analyze_openapi
 from repo_standards.openapi import local_reference_paths
 from repo_standards.openapi import rules as openapi_rules
 from repo_standards.policy_sarj import SarjPolicy
+from repo_standards.pull_request._context import NotApplicable
+from repo_standards.pull_request._inputs import (
+    ResolvedPullRequestInputs,
+    resolve_github_pull_request_inputs,
+    resolve_local_pull_request_inputs,
+)
 from repo_standards.rest import (
     InstrumentationDetectionReport,
     detect_instrumentation,
@@ -394,20 +402,28 @@ def pull_request_commits_command(  # ruff: ignore[too-many-arguments,too-many-po
             help="Trusted JSON transition exemption; repeat for multiple transitions.",
         ),
     ] = None,
+    github_event: Annotated[
+        Path | None,
+        typer.Option(help="GitHub Actions event payload containing exact pull-request evidence."),
+    ] = None,
     advisory: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - Typer renders this as an option
         bool,
         typer.Option(help="Report policy findings without a nonzero policy exit."),
     ] = False,
+    quiet: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - Typer renders this as an option
+        bool,
+        typer.Option(help="Suppress output only when analysis completes successfully."),
+    ] = False,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
 ) -> None:
     """Require concise PR history or one complete explicitly numbered series."""
-    if not base:
+    if github_event is None and not base and not advisory:
         _emit_command_error(
             "pull-request commits",
             "request.invalid",
-            "--base is required",
+            "--base is required unless --github-event is used",
             phase="request",
-            remediation="Pass the exact pull-request base revision supplied by the provider.",
+            remediation="Pass exact provider evidence or use advisory local discovery.",
         )
     try:
         exemptions = tuple(
@@ -422,15 +438,17 @@ def pull_request_commits_command(  # ruff: ignore[too-many-arguments,too-many-po
             remediation="Correct the trusted transition exemption configuration.",
         )
     try:
-        result = analyze_pull_request_commits(
-            root,
+        resolved = _resolve_pull_request_commits_request(
+            root=root,
             base=base,
             head=head,
-            maximum_commits=maximum_commits,
-            repository_id=repository_id,
             base_ref=base_ref,
             head_ref=head_ref,
-            transition_exemptions=exemptions,
+            repository_id=repository_id,
+            maximum_commits=maximum_commits,
+            exemptions=exemptions,
+            github_event=github_event,
+            advisory=advisory,
         )
     except (ConfigurationError, OSError) as error:
         if advisory:
@@ -448,8 +466,18 @@ def pull_request_commits_command(  # ruff: ignore[too-many-arguments,too-many-po
                 "Fetch complete base/head history and verify every trusted transition input."
             ),
         )
+    if isinstance(resolved, NotApplicable):
+        if not quiet:
+            _emit_pull_request_commits_not_applicable(
+                resolved,
+                output_format=output_format,
+            )
+        return
+    result = resolved
     payload = _pull_request_commits_payload(result, advisory=advisory)
-    if output_format is OutputFormat.TEXT:
+    if quiet and result.satisfied:
+        pass
+    elif output_format is OutputFormat.TEXT:
         typer.echo(_render_pull_request_commits(result, advisory=advisory), nl=False)
     elif output_format is OutputFormat.PRETTY_JSON:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True) + "\n", nl=False)
@@ -457,6 +485,174 @@ def pull_request_commits_command(  # ruff: ignore[too-many-arguments,too-many-po
         typer.echo(canonical_json(payload) + "\n", nl=False)
     if not advisory and not result.satisfied:
         raise typer.Exit(1)
+
+
+def _resolve_pull_request_commits_request(  # ruff: ignore[too-many-arguments] - CLI evidence remains explicit
+    *,
+    root: Path,
+    base: str,
+    head: str,
+    base_ref: str | None,
+    head_ref: str | None,
+    repository_id: str | None,
+    maximum_commits: int,
+    exemptions: tuple[TransitionExemption, ...],
+    github_event: Path | None,
+    advisory: bool,
+) -> PullRequestCommits | NotApplicable:
+    if github_event is not None:
+        manual_input = any(
+            (
+                bool(base),
+                head != "HEAD",
+                base_ref is not None,
+                head_ref is not None,
+                repository_id is not None,
+                maximum_commits != DEFAULT_MAXIMUM_COMMITS,
+                bool(exemptions),
+                advisory,
+            )
+        )
+        if manual_input:
+            ConfigurationError.fail(
+                "--github-event cannot be combined with manual evidence, "
+                "policy overrides, or --advisory"
+            )
+        event_name = os.environ.get(  # ruff: ignore[banned-api] - GitHub supplies the trusted event kind
+            "GITHUB_EVENT_NAME", ""
+        )
+        if not event_name:
+            ConfigurationError.fail("GITHUB_EVENT_NAME is required with --github-event")
+        inputs = resolve_github_pull_request_inputs(
+            root,
+            github_event,
+            event_name=event_name,
+        )
+        if isinstance(inputs, NotApplicable):
+            return inputs
+        return _analyze_resolved_pull_request_inputs(root, inputs)
+    if base:
+        return analyze_pull_request_commits(
+            root,
+            base=base,
+            head=head,
+            maximum_commits=maximum_commits,
+            repository_id=repository_id,
+            base_ref=base_ref,
+            head_ref=head_ref,
+            transition_exemptions=exemptions,
+        )
+    if not advisory:
+        ConfigurationError.fail(
+            "--base is required unless --github-event or --advisory local discovery is used"
+        )
+    manifest = load_manifest(root / ".repo-standards" / "repository.toml")
+    policy = manifest.pull_request
+    if policy is None:
+        ConfigurationError.fail(
+            "local discovery requires pull_request.commit_history configuration"
+        )
+    history = policy.commit_history
+    inputs = resolve_local_pull_request_inputs(
+        root,
+        default_base_ref=history.advisory_base_ref,
+        transition_bases=tuple(
+            (
+                transition.head_prefix,
+                transition.base_ref,
+                transition.sha_prefix_length,
+            )
+            for transition in history.transitions
+        ),
+    )
+    for transition in history.transitions:
+        expected_head_ref = (
+            f"{transition.head_prefix}"
+            f"{inputs.context.head_sha[: transition.sha_prefix_length]}"
+        )
+        if (
+            inputs.context.base_ref == transition.base_ref
+            and inputs.context.head_ref == expected_head_ref
+        ):
+            return NotApplicable(
+                event_name="local",
+                reason=(
+                    f"candidate transition {transition.transition_id}; "
+                    "authoritative CI will verify repository identity and source ancestry"
+                ),
+            )
+    return analyze_pull_request_commits(
+        root,
+        base=inputs.context.base_sha,
+        head=inputs.context.head_sha,
+        maximum_commits=history.maximum_commits,
+    )
+
+
+def _analyze_resolved_pull_request_inputs(
+    root: Path,
+    inputs: ResolvedPullRequestInputs,
+) -> PullRequestCommits:
+    context = inputs.context
+    configured = inputs.manifest.pull_request if inputs.manifest is not None else None
+    history = configured.commit_history if configured is not None else None
+    maximum_commits = (
+        history.maximum_commits if history is not None else DEFAULT_MAXIMUM_COMMITS
+    )
+    repository_id = (
+        str(context.head_repository_id)
+        if context.head_repository_id is not None
+        else None
+    )
+    transition_exemptions = ()
+    if history is not None and context.base_repository_id is not None:
+        transition_exemptions = tuple(
+            TransitionExemption(
+                exemption_id=TransitionExemptionId(transition.transition_id),
+                repository_id=RepositoryId(str(context.base_repository_id)),
+                source_ref=f"origin/{transition.source_ref}",
+                base_ref=transition.base_ref,
+                head_prefix=transition.head_prefix,
+                sha_prefix_length=transition.sha_prefix_length,
+            )
+            for transition in history.transitions
+        )
+    return analyze_pull_request_commits(
+        root,
+        base=context.base_sha,
+        head=context.head_sha,
+        maximum_commits=maximum_commits,
+        repository_id=repository_id,
+        base_ref=context.base_ref,
+        head_ref=context.head_ref,
+        transition_exemptions=transition_exemptions,
+    )
+
+
+def _emit_pull_request_commits_not_applicable(
+    result: NotApplicable,
+    *,
+    output_format: OutputFormat,
+) -> None:
+    is_local_advisory = result.event_name == "local"
+    payload = {
+        **_envelope(
+            "pull-request commits",
+            conclusion="inconclusive" if is_local_advisory else "passed",
+            provenance=(
+                {"kind": "local-advisory"}
+                if is_local_advisory
+                else {"kind": "github-event", "event_name": result.event_name}
+            ),
+        ),
+        "summary": {"disposition": "not-applicable", "reason": result.reason},
+    }
+    if output_format is OutputFormat.TEXT:
+        typer.echo(f"PR commits: not applicable — {result.reason}.\n", nl=False)
+    elif output_format is OutputFormat.PRETTY_JSON:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True) + "\n", nl=False)
+    else:
+        typer.echo(canonical_json(payload) + "\n", nl=False)
 
 
 def _parse_transition_exemption(value: str) -> TransitionExemption:
@@ -550,7 +746,8 @@ def _render_pull_request_commits(result: PullRequestCommits, *, advisory: bool) 
     if result.numbering_issue is not None:
         lines.append(f"Numbered series: {result.numbering_issue}")
     if result.exemption_id is not None:
-        lines.append(f"Verified transition: {result.exemption_id}")
+        label = "Local transition candidate" if advisory else "Verified transition"
+        lines.append(f"{label}: {result.exemption_id}")
     if not result.satisfied:
         lines.append(
             "Remediation: reduce the PR to at most "

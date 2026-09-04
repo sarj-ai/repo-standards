@@ -1,0 +1,28 @@
+name: Sarj pull-request commit history
+description: Enforce concise or explicitly numbered pull-request commit history
+
+inputs:
+  root:
+    description: Repository root to inspect
+    required: false
+    default: .
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        version: '0.12.5'
+        enable-cache: true
+        cache-dependency-glob: ${{ github.action_path }}/../uv.lock
+    - name: Install locked commit-history environment
+      shell: bash
+      run: uv sync --project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.12
+    - name: Enforce pull-request commit history
+      shell: bash
+      env:
+        INPUT_ROOT: ${{ inputs.root }}
+      run: |
+        uv run --project "$GITHUB_ACTION_PATH/.." --no-sync repo-standards \
+          pull-request commits "$INPUT_ROOT" --github-event "$GITHUB_EVENT_PATH"
