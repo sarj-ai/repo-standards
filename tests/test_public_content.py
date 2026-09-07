@@ -40,6 +40,7 @@ EXCLUDED_DIRECTORIES = frozenset(
 JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
 OBJECT_MAP = TypeAdapter(dict[str, object])
 STRING_MAP = TypeAdapter(dict[str, str])
+OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
 
 def test_public_distribution_has_no_legacy_compatibility_surface() -> None:
@@ -81,6 +82,29 @@ def test_publish_revalidates_immutable_tag_before_registry_write() -> None:
     assert publish_section.index("Verify immutable version tag") < publish_section.index(
         "Publish with trusted identity"
     )
+
+
+def test_publish_build_disables_setup_uv_cache() -> None:
+    publish_document = OBJECT_MAP.validate_python(
+        yaml.load(
+            (REPOSITORY_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8"),
+            Loader=yaml.BaseLoader,
+        ),
+        strict=True,
+    )
+    jobs = OBJECT_MAP.validate_python(publish_document["jobs"], strict=True)
+    build_job = OBJECT_MAP.validate_python(jobs["build"], strict=True)
+    steps = OBJECT_LIST.validate_python(build_job["steps"], strict=True)
+    setup_uv_steps = [
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("astral-sh/setup-uv@")
+    ]
+
+    assert len(setup_uv_steps) == 1
+    setup_uv_options = OBJECT_MAP.validate_python(setup_uv_steps[0]["with"], strict=True)
+    assert setup_uv_options["enable-cache"] == "false"
+    assert "cache-dependency-glob" not in setup_uv_options
 
 
 def _public_files() -> tuple[Path, ...]:

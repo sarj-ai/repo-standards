@@ -5,12 +5,13 @@ from importlib.metadata import version
 from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import TypeAdapter
+import pytest
 
 from repo_standards.catalog import build_catalog, catalog_schema
 from repo_standards.cli import app
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.models import JSONValue
-from repo_standards.verify_release_artifacts import verify_site_catalog
+from repo_standards.verify_release_artifacts import verify_site, verify_site_catalog
 
 
 if TYPE_CHECKING:
@@ -102,3 +103,35 @@ def test_release_site_rejects_a_non_v7_catalog(tmp_path: Path) -> None:
     )
 
     assert any("invalid catalog v7" in item for item in violations)
+
+
+@pytest.mark.parametrize(
+    ("script", "expected_violation"),
+    [
+        ("<SCRIPT>alert('unsafe')</SCRIPT>", True),
+        ("<ScRiPt>alert('unsafe')</sCrIpT>", True),
+        ("<script>alert('unsafe')</script >", True),
+        ('<script data-src="/lazy.js">alert(\'unsafe\')</script>', True),
+        ('<script aria-src="/lazy.js">alert(\'unsafe\')</script>', True),
+        ("<script>alert('unsafe')</script\t\n ignored>", True),
+        ('<SCRIPT SRC="/app.js"></SCRIPT>', False),
+        ('<script src = "/app.js"></script >', False),
+    ],
+)
+def test_release_site_csp_handles_case_insensitive_script_tags(
+    tmp_path: Path,
+    script: str,
+    *,
+    expected_violation: bool,
+) -> None:
+    (tmp_path / "_headers").write_text("/*\n  Content-Security-Policy: default-src 'self'\n")
+    (tmp_path / "index.html").write_text(
+        "<html><head><title>Test</title></head><body><main><h1>Test</h1>"
+        f"{script}</main></body></html>",
+        encoding="utf-8",
+    )
+
+    violations = verify_site(tmp_path)
+
+    violation = "site:index.html: inline script is missing from the CSP"
+    assert (violation in violations) is expected_violation

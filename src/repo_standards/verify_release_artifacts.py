@@ -33,7 +33,6 @@ PERSONAL_HOME_PATH = re.compile(
     rf"(?:/{'Users'}/|/{'home'}/|[A-Z]:\\\\{'Users'}\\\\)[a-z0-9._-]+".encode(),
     re.IGNORECASE,
 )
-INLINE_SCRIPT: re.Pattern[bytes] = re.compile(rb"<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)</script>")
 ALLOWED_REPOSITORIES = frozenset({b"repo-standards", b"code-standards", b"standards"})
 ALLOWED_EMAILS = frozenset({b"api.github.com@evil.example", b"git@github.com", b"token@github.com"})
 SITE_SUFFIXES = frozenset(
@@ -142,6 +141,7 @@ class HTMLTag(StrEnum):
     MAIN = "main"
     META = "meta"
     NAV = "nav"
+    SCRIPT = "script"
     TITLE = "title"
 
 
@@ -206,6 +206,27 @@ class PageSemantics(HTMLParser):
             self.h1_text.append(data)
         if self._capture_title:
             self.title_text.append(data)
+
+
+@final
+class InlineScripts(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.scripts: list[str] = []
+        self._chunks: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == HTMLTag.SCRIPT and "src" not in dict(attrs):
+            self._chunks = []
+
+    def handle_data(self, data: str) -> None:
+        if self._chunks is not None:
+            self._chunks.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == HTMLTag.SCRIPT and self._chunks is not None:
+            self.scripts.append("".join(self._chunks))
+            self._chunks = None
 
 
 def _safe_path(raw_path: str) -> PurePosixPath:
@@ -408,12 +429,14 @@ def _verify_site_csp(directory: Path) -> list[str]:
     violations: list[str] = []
     for path in directory.rglob("*.html"):
         relative = path.relative_to(directory).as_posix()
-        document = path.read_bytes()
-        if b'http-equiv="content-security-policy"' in document:
+        document = path.read_text(encoding="utf-8")
+        if 'http-equiv="content-security-policy"' in document:
             violations.append(f"site:{relative}: CSP must be delivered by the response header only")
-        for match in INLINE_SCRIPT.finditer(document):
-            script = match.group(1)
-            digest = base64.b64encode(hashlib.sha256(script).digest()).decode("ascii")
+        parser = InlineScripts()
+        parser.feed(document)
+        parser.close()
+        for script in parser.scripts:
+            digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode("ascii")
             if f"'sha256-{digest}'" not in headers:
                 violations.append(f"site:{relative}: inline script is missing from the CSP")
     return violations
