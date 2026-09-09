@@ -29,13 +29,18 @@ def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> 
     root_verifier_review = ApprovedRuleReview(
         reviewed_in="319d3ee27278f2b915ee7fb063592298a8b49485"
     )
+    clarity_review = ApprovedRuleReview(
+        reviewed_in="23c6cb225373f0b33d256191d93605c6a63917b9"
+    )
     assert approved_rule_versions() == frozenset(
         {
             RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 3),
             RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 4),
             RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 5),
             RuleVersion(RuleId("repository/artifacts/operational-script-tests"), 1),
+            RuleVersion(RuleId("repository/artifacts/operational-script-tests"), 2),
             RuleVersion(RuleId("repository/artifacts/schema-derived-config-examples"), 2),
+            RuleVersion(RuleId("repository/artifacts/schema-derived-config-examples"), 3),
             RuleVersion(RuleId("repository/artifacts/terraform-test-files"), 1),
             RuleVersion(RuleId("repository/documentation/placement"), 2),
             RuleVersion(RuleId("repository/documentation/placement"), 3),
@@ -62,6 +67,14 @@ def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> 
     assert (
         review_for(RuleId("repository/artifacts/bespoke-iac-verifiers"), 5)
         == root_verifier_review
+    )
+    assert (
+        review_for(RuleId("repository/artifacts/operational-script-tests"), 2)
+        == clarity_review
+    )
+    assert (
+        review_for(RuleId("repository/artifacts/schema-derived-config-examples"), 3)
+        == clarity_review
     )
     assert review_for(RuleId("core/layout/non-overlapping-root"), 1) == PendingRuleReview()
 
@@ -95,6 +108,8 @@ def test_historical_reviews_remain_auditable_but_obsolete_selectors_are_rejected
         activated_rule_versions(obsolete_selectors, current_rules=_current_rule_versions())
     current_selectors = (
         "repository/artifacts/bespoke-iac-verifiers@5",
+        "repository/artifacts/operational-script-tests@2",
+        "repository/artifacts/schema-derived-config-examples@3",
         "repository/documentation/placement@3",
     )
     assert activated_rule_versions(
@@ -102,6 +117,8 @@ def test_historical_reviews_remain_auditable_but_obsolete_selectors_are_rejected
     ) == frozenset(
         {
             RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 5),
+            RuleVersion(RuleId("repository/artifacts/operational-script-tests"), 2),
+            RuleVersion(RuleId("repository/artifacts/schema-derived-config-examples"), 3),
             RuleVersion(RuleId("repository/documentation/placement"), 3),
         }
     )
