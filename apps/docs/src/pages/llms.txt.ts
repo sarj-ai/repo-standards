@@ -11,6 +11,7 @@ const lines = [
   '## Reference',
   '',
   `- [Rules](${origin}/rules/)`,
+  `- [Git policies](${origin}/git-policies/)`,
   `- [CLI](${origin}/cli/)`,
   `- [Schemas](${origin}/schemas/)`,
   `- [Catalog JSON](${origin}/api/v7/catalog.json)`,

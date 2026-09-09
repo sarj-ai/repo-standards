@@ -45,6 +45,13 @@ h2 { margin-top: 1.5rem; }
 .overview > section > h2 { margin: 1.25rem 0 .65rem; font-size: 1.25rem; letter-spacing: -.015em; }
 .about-page > section { margin-top: 2rem; }
 .about-page > section h2 { margin: 0 0 .7rem; font-size: 1.2rem; }
+.git-policies { max-width: 68rem; }
+.git-policy-grammar { margin: 2rem 0; padding: 1.25rem 0; border-block: 1px solid var(--sarj-color-rule); }
+.git-policy-grammar h2 { margin: 0; font-size: clamp(1.05rem, 2.4vw, 1.45rem); overflow-wrap: anywhere; }
+.git-policy-grammar > p:last-child { max-width: 48rem; margin-bottom: 0; color: var(--sl-color-gray-2); }
+.git-policy-grid .capability-card h2 { margin: .35rem 0 .8rem; font-size: 1.2rem; }
+.git-policy-grid .capability-card > p { color: var(--sl-color-gray-2); }
+.git-policy-grid .data-line { margin: 0; color: var(--sl-color-accent-high); }
 
 .capability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--sarj-color-rule); border-left: 1px solid var(--sarj-color-rule); }
 .capability-card { padding: 1.35rem; border-right: 1px solid var(--sarj-color-rule); border-bottom: 1px solid var(--sarj-color-rule); }

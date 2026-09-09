@@ -57,6 +57,7 @@ REQUIRED_SITE_FILES = frozenset(
         "api/v7/catalog.json",
         "api/v7/catalog.schema.json",
         "health.json",
+        "git-policies/index.html",
         "index.html",
         "review/index.html",
     }

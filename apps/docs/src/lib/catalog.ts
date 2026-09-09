@@ -104,6 +104,7 @@ export function referenceSidebar() {
           })),
       ],
     },
+    { label: 'Git policies', link: '/git-policies/' },
     { label: 'CLI', link: '/cli/' },
     { label: 'Schemas', link: '/schemas/' },
   ];
