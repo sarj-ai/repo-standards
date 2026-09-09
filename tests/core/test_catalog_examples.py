@@ -154,6 +154,30 @@ def _run_workspace(content: bytes) -> tuple[str, ...]:
     return _rule_ids(migration_diagnostics(snapshot))
 
 
+def test_migration_workspace_membership_supports_recursive_glob_members() -> None:
+    manifest = parse_manifest_bytes(_SINGLE_MIGRATION)
+    package_path = f"{_TARGET}/package.json"
+    project = parse_project_metadata(
+        package_path,
+        b'{"name":"@example/api","private":true}',
+    )
+    snapshot = _snapshot(
+        manifest,
+        (package_path,),
+        packages=(project,),
+        workspaces=(
+            WorkspaceEvidence(
+                ecosystem="npm",
+                path="package.json",
+                member_patterns=("apps/**", "applications/**"),
+                exclude_patterns=(),
+            ),
+        ),
+    )
+
+    assert migration_diagnostics(snapshot) == ()
+
+
 def _run_exception(content: bytes) -> tuple[str, ...]:
     fields = _STRING_MAPPING.validate_python(
         tomllib.loads(content.decode("utf-8")),

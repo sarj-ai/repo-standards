@@ -7,11 +7,9 @@ from typing import TYPE_CHECKING, NoReturn
 
 from repo_standards.core.engine import core_diagnostics
 from repo_standards.core.models import (
-    ActiveConfiguration,
     AuthorityId,
     Component,
     ComponentId,
-    ConfigurationFormat,
     DeliveryConfig,
     Dependency,
     DeploymentAuthority,
@@ -77,8 +75,6 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
         return _run_repository_path(source)
     if identifier == "sarj-documentation-reachability":
         return _run_documentation_example(source)
-    if identifier == "sarj-configuration-unresolved-placeholder":
-        return _run_configuration_example(source)
     if identifier == "sarj-delivery-duplicate-authority":
         return _run_authority_example(source)
     manifest = _manifest(fixture_id=identifier, source=source)
@@ -175,25 +171,6 @@ def _run_documentation_example(source: str) -> RuleExampleResult:
             documentation=DocumentationConfig(("README.md",)),
         ),
         files=files,
-    )
-    diagnostics = SarjPolicy.evaluate_repository(snapshot)
-    return RuleExampleResult(
-        tuple(sorted((item.rule_id for item in diagnostics), key=str)), complete=True
-    )
-
-
-def _run_configuration_example(source: str) -> RuleExampleResult:
-    path = "config/production.yaml"
-    component = _application("api")
-    snapshot = _repository_snapshot(
-        manifest=Manifest(
-            RepositoryId("example-repository"),
-            (component,),
-            active_configuration=(
-                ActiveConfiguration(component.component_id, path, ConfigurationFormat.YAML),
-            ),
-        ),
-        files={path: source.encode()},
     )
     diagnostics = SarjPolicy.evaluate_repository(snapshot)
     return RuleExampleResult(
