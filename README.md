@@ -210,7 +210,7 @@ uv run pytest
 uv run ruff check .
 uv run basedpyright
 uvx --no-config --isolated --python 3.14 \
-  --from sarj-standards-bootstrap==2.0.0 \
+  --from sarj-standards-bootstrap==2.0.3 \
   code-standards check --trust-repository-code
 ```
 

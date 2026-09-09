@@ -36,11 +36,11 @@ repo-standards = "repo_standards.cli:main"
 
 [dependency-groups]
 dev = [
-    "basedpyright>=1.39.10",
+    "basedpyright>=1.40.0",
     "jsonschema>=4.26.0",
     "pre-commit>=4.6.0,<5",
     "pytest>=9.1.1",
-  "ruff>=0.16.5",
+  "ruff>=0.16.6",
 ]
 
 [build-system]
