@@ -44,7 +44,7 @@ runs:
         cache-dependency-glob: ${{ github.action_path }}/uv.lock
     - name: Install locked pull-request-size environment
       shell: bash
-      run: uv sync --project "$GITHUB_ACTION_PATH" --locked --no-dev --python 3.12
+      run: uv sync --project "$GITHUB_ACTION_PATH" --locked --no-dev --python 3.14
     - name: Analyze pull-request size
       id: pull-request-size
       shell: bash

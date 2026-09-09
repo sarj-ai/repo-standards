@@ -19,19 +19,20 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
-    "@astrojs/sitemap": "3.7.3",
+    "@astrojs/sitemap": "3.7.4",
     "@eslint/js": "10.0.1",
-    "@sarj/eslint-plugin": "15.12.1",
-    "eslint": "10.9.1",
+    "@sarj/eslint-plugin": "15.17.11",
+    "eslint": "10.10.0",
     "eslint-plugin-astro": "3.1.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.68.0",
-    "wrangler": "4.127.1"
+    "typescript-eslint": "8.70.0",
+    "wrangler": "4.130.0"
   },
   "engines": {
     "node": ">=22.14.0"
   },
   "overrides": {
-    "@astrojs/markdown-satteri": "0.3.6"
+    "@astrojs/markdown-satteri": "0.3.6",
+    "sharp": "0.35.4"
   }
 }

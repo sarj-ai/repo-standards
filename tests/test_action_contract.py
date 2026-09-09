@@ -30,5 +30,5 @@ def test_public_action_is_pull_request_size_only() -> None:
 
 def test_action_uses_locked_non_mutating_environment() -> None:
     serialized = _action_source()
-    assert "--locked --no-dev --python 3.12" in serialized
+    assert "--locked --no-dev --python 3.14" in serialized
     assert "setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d" in serialized

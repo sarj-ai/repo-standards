@@ -33,7 +33,6 @@ def canonical_path(value: str) -> str:
 
 
 def workspace_pattern_matches(relative: PurePosixPath, pattern: str) -> bool:
-    """Match a normalized workspace member path with portable globstar semantics."""
     if pattern == ".":
         return not relative.parts
     pending = [(0, 0)]

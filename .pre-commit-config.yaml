@@ -3,10 +3,18 @@ repos:
     hooks:
       - id: sarj-standards-check
         name: sarj standards -- staged checks
-        entry: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap==2.0.3 code-standards check --staged --trust-repository-code --
+        entry: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards check --staged --trust-repository-code --
         language: system
         always_run: true
         pass_filenames: true
         require_serial: true
-        files: '(?i)(\.py|\.[cm]?[jt]s|\.[jt]sx|\.sql|\.tf|\.tfvars|\.hcl|\.ya?ml|\.toml|\.jsonc|\.mdx?|\.(?:bash|cfg|conf|env|ini|properties|sh|tftpl|zsh)|(?:^|/)\.env(?:\..*)?$|(?:^|/)requirements(?:/.*|[^/]*\.(?:txt|in))$|(?:^|/)(?:Dockerfile(?:\..*)?|Gnumakefile|Justfile|Makefile|package\.json|pyrightconfig\.json))$'
+        files: '(?i)(\.py|\.[cm]?[jt]s|\.[jt]sx|\.kts?|\.swift|\.sql|\.tf|\.tfvars|\.hcl|\.ya?ml|\.toml|\.jsonc|\.mdx?|\.(?:bash|cfg|conf|env|ini|properties|sh|tftpl|zsh)|(?:^|/)\.env(?:\..*)?$|(?:^|/)requirements(?:/.*|[^/]*\.(?:txt|in))$|(?:^|/)(?:Dockerfile(?:\..*)?|Gnumakefile|Justfile|Makefile|package\.json|pyrightconfig\.json))$'
         stages: [pre-commit]
+      - id: repo-standards-commit-message
+        name: repo standards -- managed commit message
+        entry: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards commit-message
+        language: system
+        always_run: true
+        pass_filenames: true
+        require_serial: true
+        stages: [commit-msg]

@@ -19,29 +19,23 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Harden the runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@v2
         with:
           egress-policy: audit
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
-          version: '0.12.12'
+          version: '0.12.5'
           enable-cache: true
           cache-dependency-glob: |
             .sarj-standards.toml
             **/uv.lock
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 24
-      - name: Install JavaScript dependencies
-        run: npm ci --no-audit --no-fund --ignore-scripts
-        working-directory: "apps/docs"
       - name: Install Python dependencies
         run: uv sync --locked
       - name: Run standards
         env:
-          SARJ_REACT_DOCTOR_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap==2.0.3 code-standards check --trust-repository-code --format github
+          SARJ_STANDARDS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards check --trust-repository-code --format github

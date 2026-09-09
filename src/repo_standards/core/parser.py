@@ -600,7 +600,6 @@ def load_manifest(path: Path) -> Manifest:
 
 
 def enable_commit_message_policy_bytes(content: bytes) -> bytes:
-    """Upgrade a valid repository manifest to schema 6 without rewriting owned content."""
     parse_manifest_bytes(content)
     matches = tuple(_SCHEMA_VERSION_LINE.finditer(content))
     if len(matches) != 1:
@@ -614,7 +613,6 @@ def enable_commit_message_policy_bytes(content: bytes) -> bytes:
 
 
 def create_commit_message_policy_manifest(repository_id: str) -> bytes:
-    """Create the canonical minimal schema-6 manifest for one repository."""
     content = (
         f'schema_version = 6\nrepository_id = "{repository_id}"\ncomponents = []\n'.encode()
     )

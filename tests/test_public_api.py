@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - isolated import smoke test
+import subprocess
 import sys
 from typing import NotRequired, TypedDict
 
@@ -34,7 +34,7 @@ def test_root_import_is_lightweight() -> None:
         "import sys; import repo_standards; "
         "assert 'typer' not in sys.modules; assert 'pydantic' not in sys.modules"
     )
-    completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed interpreter smoke test
+    completed = subprocess.run(
         [
             sys.executable,
             "-c",

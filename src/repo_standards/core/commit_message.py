@@ -157,7 +157,6 @@ def check_local_commit_message_file(
     root: Path,
     fix_safe: bool = True,
 ) -> CommitMessageResult:
-    """Validate a local Git message while allowing structurally temporary Git operations."""
     regular = _read_regular_file(path)
     safety = analyze_commit_message_bytes(regular.content)
     if _merge_in_progress(root, message_file=path):

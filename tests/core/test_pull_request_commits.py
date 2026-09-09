@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - local Git fixture only
+import subprocess
 from typing import NamedTuple
 
 import pytest
@@ -24,7 +24,7 @@ class RepositoryFixture(NamedTuple):
 def _git(repository: Path, *arguments: str) -> str:
     executable = shutil.which("git")
     assert executable is not None
-    completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture
+    completed = subprocess.run(
         [executable, "-C", str(repository), *arguments],
         check=True,
         capture_output=True,

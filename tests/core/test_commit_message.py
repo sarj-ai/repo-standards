@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - isolated Git fixture
+import subprocess
 
 import pytest
 
@@ -121,10 +121,10 @@ def test_local_hook_rejects_noncanonical_or_empty_amend_subjects(
 def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> None:
     git = shutil.which("git")
     assert git is not None
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture command
+    subprocess.run(
         (git, "init", "-q"), cwd=tmp_path, check=True, env={}
     )
-    message_path = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture query
+    message_path = subprocess.run(
         (git, "rev-parse", "--git-path", "COMMIT_EDITMSG"),
         cwd=tmp_path,
         check=True,
@@ -136,7 +136,7 @@ def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> N
     if not message.is_absolute():
         message = tmp_path / message
     message.write_text("Merge branch 'feature'\n")
-    merge_head = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture query
+    merge_head = subprocess.run(
         (git, "rev-parse", "--git-path", "MERGE_HEAD"),
         cwd=tmp_path,
         check=True,
@@ -157,7 +157,7 @@ def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> N
 def test_merge_state_does_not_bypass_message_file_safety(tmp_path: Path) -> None:
     git = shutil.which("git")
     assert git is not None
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture command
+    subprocess.run(
         (git, "init", "-q"), cwd=tmp_path, check=True, env={}
     )
     git_dir = tmp_path / ".git"
@@ -179,7 +179,7 @@ def test_merge_state_cannot_exempt_another_repository_message(tmp_path: Path) ->
     first.mkdir()
     second.mkdir()
     for root in (first, second):
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture command
+        subprocess.run(
             (git, "init", "-q"), cwd=root, check=True, env={}
         )
     (first / ".git" / "MERGE_HEAD").write_text("0" * 40 + "\n")

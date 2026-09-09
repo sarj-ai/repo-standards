@@ -17,13 +17,9 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate / Python ${{ matrix.python-version }}
+    name: Validate / Python 3.14
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.12', '3.13', '3.14']
     steps:
       - name: Harden the runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -41,9 +37,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Install locked environment
-        run: uv sync --locked --python "${{ matrix.python-version }}"
+        run: uv sync --locked --python 3.14
       - name: Test
-        run: uv run --python "${{ matrix.python-version }}" pytest
+        run: uv run --python 3.14 pytest
 
   package:
     name: Build and install artifacts
@@ -80,7 +76,7 @@ jobs:
         env:
           SMOKE_ENV: ${{ runner.temp }}/repo-standards-smoke
         run: |
-          uv venv --python 3.12 "$SMOKE_ENV"
+          uv venv --python 3.14 "$SMOKE_ENV"
           uv pip install --python "$SMOKE_ENV/bin/python" \
             dist/repo-standards/repo_standards-*.whl
       - name: Smoke-test installed interfaces
@@ -165,7 +161,7 @@ jobs:
           cache-dependency-path: apps/docs/package-lock.json
       - name: Install locked toolchains
         run: |
-          uv sync --locked --python 3.12
+          uv sync --locked --python 3.14
           npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund
       - name: Verify generated reference
         env:

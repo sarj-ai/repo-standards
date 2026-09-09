@@ -5,10 +5,9 @@ import json
 from pathlib import Path
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local Git fixture only
+import subprocess
 
-from jsonschema import ValidationError as JSONSchemaValidationError
-from jsonschema import validate
+from jsonschema import ValidationError as JSONSchemaValidationError, validate
 import pytest
 from typer.testing import CliRunner
 
@@ -31,7 +30,7 @@ def test_version_matches_installed_distribution() -> None:
 def _git(repository: Path, *arguments: str) -> str:
     executable = shutil.which("git")
     assert executable is not None
-    completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Git fixture only
+    completed = subprocess.run(
         [executable, "-C", str(repository), *arguments],
         check=True,
         capture_output=True,
