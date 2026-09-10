@@ -168,6 +168,7 @@ jobs:
           WORKERS_CI_COMMIT_SHA: ${{ github.sha }}
         run: |
           npm --prefix apps/docs run lint
+          npm --prefix apps/docs test
           npm --prefix apps/docs run build
           uv run python -m repo_standards.verify_release_artifacts --site apps/docs/dist
 

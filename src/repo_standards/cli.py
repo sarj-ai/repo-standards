@@ -1922,12 +1922,6 @@ def _mapping_list(value: object) -> list[Mapping[str, object]]:
     return result
 
 
-def _string_key_mapping(value: object) -> Mapping[str, object]:
-    if not _is_object_mapping(value):
-        return {}
-    return {key: item for key, item in value.items() if isinstance(key, str)}
-
-
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 

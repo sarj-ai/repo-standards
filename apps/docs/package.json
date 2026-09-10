@@ -10,7 +10,9 @@
     "deploy": "wrangler deploy",
     "dev": "npm run catalog && astro dev",
     "lint": "npm run catalog && eslint . --max-warnings 0",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "test": "node --test ./scripts/*.test.mjs",
+    "verify:deployment": "node ./scripts/verify-deployment.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "0.41.10",

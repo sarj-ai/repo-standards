@@ -568,8 +568,8 @@ def _validate_manifest_schema(data: dict[str, object]) -> None:
     }
     if schema_version not in supported_versions:
         ConfigurationError.fail("manifest.schema_version must be 2, 3, 4, 5, or 6")
-    if schema_version == _LEGACY_MANIFEST_SCHEMA_VERSION and (
-        {"documentation", "active_configuration", "delivery"} & data.keys()
+    if schema_version == _LEGACY_MANIFEST_SCHEMA_VERSION and not data.keys().isdisjoint(
+        {"documentation", "active_configuration", "delivery"}
     ):
         ConfigurationError.fail("manifest schema version 3 is required for repository evidence")
     if (

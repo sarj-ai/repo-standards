@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import tarfile
 from typing import TYPE_CHECKING
@@ -15,6 +16,7 @@ from release_reconciliation import (
     ReleaseStateError,
     reconciliation_plan,
     render_release_readme,
+    verify_installed_distributions,
     verify_release_documents,
 )
 
@@ -134,3 +136,84 @@ def test_built_package_documents_must_embed_the_exact_release_identity(tmp_path:
         archive.addfile(info, io.BytesIO(content))
 
     verify_release_documents(tmp_path, source_sha=TAG_SHA, version=VERSION)
+
+
+def test_installed_distribution_verifier_checks_both_artifacts_and_writes_checksums(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "dist/packages/repo-standards"
+    directory.mkdir(parents=True)
+    wheel = directory / WHEEL.name
+    sdist = directory / SDIST.name
+    wheel.write_bytes(b"wheel")
+    sdist.write_bytes(b"sdist")
+    commands: list[tuple[str, ...]] = []
+
+    def run(command: tuple[str, ...]) -> str:
+        commands.append(command)
+        return f"{VERSION}\n" if command[-1] == "--version" else ""
+
+    checksum = tmp_path / "dist/SHA256SUMS"
+    verify_installed_distributions(
+        directory,
+        version=VERSION,
+        smoke_root=tmp_path / "smoke",
+        checksum_path=checksum,
+        run_command=run,
+    )
+
+    assert len(commands) == 8
+    assert sum(command[:2] == ("uv", "venv") for command in commands) == 2
+    assert sum(command[:3] == ("uv", "pip", "install") for command in commands) == 2
+    assert checksum.read_text(encoding="utf-8").splitlines() == [
+        f"{hashlib.sha256(wheel.read_bytes()).hexdigest()}  packages/repo-standards/{wheel.name}",
+        f"{hashlib.sha256(sdist.read_bytes()).hexdigest()}  packages/repo-standards/{sdist.name}",
+    ]
+
+
+def test_installed_distribution_verifier_rejects_extra_packages(tmp_path: Path) -> None:
+    directory = tmp_path / "packages"
+    directory.mkdir()
+    (directory / WHEEL.name).write_bytes(b"wheel")
+    (directory / SDIST.name).write_bytes(b"sdist")
+    (directory / "unexpected.whl").write_bytes(b"extra")
+
+    with pytest.raises(ReleaseStateError, match="exactly the expected"):
+        verify_installed_distributions(
+            directory,
+            version=VERSION,
+            smoke_root=tmp_path / "smoke",
+            checksum_path=tmp_path / "SHA256SUMS",
+            run_command=lambda _command: "",
+        )
+
+
+def test_installed_distribution_verifier_rejects_missing_release_directory(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ReleaseStateError, match="release directory does not exist"):
+        verify_installed_distributions(
+            tmp_path / "missing",
+            version=VERSION,
+            smoke_root=tmp_path / "smoke",
+            checksum_path=tmp_path / "SHA256SUMS",
+            run_command=lambda _command: "",
+        )
+
+
+def test_installed_distribution_verifier_rejects_wrong_installed_version(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "packages"
+    directory.mkdir()
+    (directory / WHEEL.name).write_bytes(b"wheel")
+    (directory / SDIST.name).write_bytes(b"sdist")
+
+    with pytest.raises(ReleaseStateError, match="installed version differs"):
+        verify_installed_distributions(
+            directory,
+            version=VERSION,
+            smoke_root=tmp_path / "smoke",
+            checksum_path=tmp_path / "SHA256SUMS",
+            run_command=lambda command: "9.9.9\n" if command[-1] == "--version" else "",
+        )
