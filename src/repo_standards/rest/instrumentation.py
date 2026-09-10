@@ -5,12 +5,18 @@ import json
 from pathlib import PurePosixPath
 import re
 import tomllib
+from types import MappingProxyType
 from typing import (
+    TYPE_CHECKING,
     Literal,
     NamedTuple,
     NoReturn,
     cast,  # ruff: ignore[banned-api] - checks precede narrowing
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 type Language = Literal["artifact", "python", "typescript", "java", "go", "rust"]
@@ -333,27 +339,37 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
         key=lambda item: item.capability_id,
     )
 )
-_CAPABILITY_BY_ID = {item.capability_id: item for item in _CAPABILITIES}
+_CAPABILITY_BY_ID = MappingProxyType(
+    {item.capability_id: item for item in _CAPABILITIES}
+)
 
-_PYTHON_DEPENDENCIES = {
-    "fastapi": "fastapi",
-    "drf-spectacular": "django-drf-spectacular",
-    "flask-smorest": "flask-smorest",
-}
-_NPM_DEPENDENCIES = {"@nestjs/core": "nestjs", "express": "express", "hono": "hono"}
-_GO_DEPENDENCIES = {
-    "github.com/go-chi/chi": "go-chi",
-    "github.com/go-chi/chi/v5": "go-chi",
-    "github.com/gin-gonic/gin": "go-gin",
-    "github.com/labstack/echo/v4": "go-echo",
-    "github.com/danielgtaylor/huma/v2": "go-huma",
-}
-_RUST_DEPENDENCIES = {
-    "axum": "rust-axum",
-    "actix-web": "rust-actix",
-    "rocket": "rust-rocket",
-    "utoipa": "rust-utoipa",
-}
+_PYTHON_DEPENDENCIES = MappingProxyType(
+    {
+        "fastapi": "fastapi",
+        "drf-spectacular": "django-drf-spectacular",
+        "flask-smorest": "flask-smorest",
+    }
+)
+_NPM_DEPENDENCIES = MappingProxyType(
+    {"@nestjs/core": "nestjs", "express": "express", "hono": "hono"}
+)
+_GO_DEPENDENCIES = MappingProxyType(
+    {
+        "github.com/go-chi/chi": "go-chi",
+        "github.com/go-chi/chi/v5": "go-chi",
+        "github.com/gin-gonic/gin": "go-gin",
+        "github.com/labstack/echo/v4": "go-echo",
+        "github.com/danielgtaylor/huma/v2": "go-huma",
+    }
+)
+_RUST_DEPENDENCIES = MappingProxyType(
+    {
+        "axum": "rust-axum",
+        "actix-web": "rust-actix",
+        "rocket": "rust-rocket",
+        "utoipa": "rust-utoipa",
+    }
+)
 
 
 def instrumentation_capabilities() -> tuple[InstrumentationCapability, ...]:
@@ -490,7 +506,7 @@ def _detect_file(tracked: TrackedFile, basename: str) -> tuple[EvidenceTriple, .
 
 
 def _mapped_dependencies(
-    dependencies: set[str], mapping: dict[str, str]
+    dependencies: set[str], mapping: Mapping[str, str]
 ) -> tuple[EvidenceTriple, ...]:
     return tuple(
         sorted(
@@ -502,10 +518,10 @@ def _mapped_dependencies(
 
 
 def _mapped_manifest(
-    dependencies: set[str], project_name: str | None, mapping: dict[str, str]
+    dependencies: set[str], project_name: str | None, mapping: Mapping[str, str]
 ) -> tuple[EvidenceTriple, ...]:
     result = list(_mapped_dependencies(dependencies, mapping))
-    if project_name in mapping:
+    if project_name is not None and project_name in mapping:
         result.append((mapping[project_name], "manifest-project", project_name))
     return tuple(sorted(result))
 

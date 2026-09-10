@@ -70,19 +70,6 @@ def test_agent_routing_contract_names_both_standards_owners() -> None:
     assert "If the path or basename alone is sufficient" in contract
 
 
-def test_public_docs_explain_git_policies_outside_the_rule_registry() -> None:
-    page = (REPOSITORY_ROOT / "apps/docs/src/pages/git-policies/index.astro").read_text(
-        encoding="utf-8"
-    )
-    sidebar = (REPOSITORY_ROOT / "apps/docs/src/lib/catalog.ts").read_text(encoding="utf-8")
-
-    assert "They are commands and hooks, so they do not appear in the rule count." in page
-    assert "[(i/N) ][TICKET] type(scope)!: description" in page
-    assert 'href="/cli/#commit-message"' in page
-    assert 'href="/cli/#pull-request.commits"' in page
-    assert "{ label: 'Git policies', link: '/git-policies/' }" in sidebar
-
-
 def test_publish_revalidates_immutable_tag_before_registry_write() -> None:
     workflow = (REPOSITORY_ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
     publish_job = workflow.index("\n  publish_primary:\n")

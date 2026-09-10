@@ -1,4 +1,1 @@
-from .policy import SarjPolicy
-
-
-__all__ = ["SarjPolicy"]
+from .policy import SarjPolicy as SarjPolicy

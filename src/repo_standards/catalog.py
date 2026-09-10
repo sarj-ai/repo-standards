@@ -34,7 +34,7 @@ from repo_standards.core.models import (
     RuleId,
     RuleTopicId,
 )
-from repo_standards.core.render import output_schema
+from repo_standards.core.render import analysis_outcome_schema, output_schema
 from repo_standards.core.rule_reviews import (
     ApprovedRuleReview,
     review_for,
@@ -87,7 +87,8 @@ SourcePath = Annotated[
 ]
 HttpsUrl = Annotated[str, Field(pattern=r"^https://")]
 
-_RULE_SLUGS: dict[str, RuleSlug] = {
+_RULE_SLUGS = types.MappingProxyType(
+    {
     "api/artifact/provenance": "artifact-provenance",
     "api/errors/problem-details": "problem-details",
     "api/http/message-semantics": "http-message-semantics",
@@ -104,7 +105,8 @@ _RULE_SLUGS: dict[str, RuleSlug] = {
     "repository/documentation/placement": "documentation-placement",
     "repository/documentation/reachability": "documentation-reachability",
     "architecture/delivery/authority": "deployment-authority",
-}
+    }
+)
 
 
 class _ParameterResult(NamedTuple):
@@ -450,35 +452,11 @@ def report_schema() -> dict[str, JSONValue]:
     )
     schema["required"] = required
     schema["properties"] = properties
-    schema["oneOf"] = [
-        {
-            "properties": {
-                "completion": {"const": "complete"},
-                "conclusion": {"const": "passed"},
-                "diagnostics": {"maxItems": 0},
-                "execution_issues": {"maxItems": 0},
-            },
-            "required": ["completion", "conclusion", "diagnostics", "execution_issues"],
-        },
-        {
-            "properties": {
-                "completion": {"const": "complete"},
-                "conclusion": {"const": "findings"},
-                "diagnostics": {"minItems": 1},
-                "execution_issues": {"maxItems": 0},
-            },
-            "required": ["completion", "conclusion", "diagnostics", "execution_issues"],
-        },
-        {
-            "properties": {
-                "completion": {"const": "incomplete"},
-                "conclusion": {"const": "inconclusive"},
-                "diagnostics": {"maxItems": 0},
-                "execution_issues": {"minItems": 1},
-            },
-            "required": ["completion", "conclusion", "diagnostics", "execution_issues"],
-        },
-    ]
+    outcome_document = _JSON_OBJECT.validate_python(
+        {"oneOf": analysis_outcome_schema(repeat_required_members=True)},
+        strict=True,
+    )
+    schema["oneOf"] = outcome_document["oneOf"]
     return schema
 
 

@@ -10,7 +10,7 @@ import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- fixed release commands only
 import sys
 import tarfile
-from typing import TYPE_CHECKING, BinaryIO, Literal, cast, final
+from typing import TYPE_CHECKING, Literal, cast, final
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -149,7 +149,9 @@ def render_release_readme(readme: str, *, source_sha: str, version: str) -> str:
     return rendered
 
 
-def verify_release_documents(directory: Path, *, source_sha: str, version: str) -> None:
+def verify_distribution_release_identity(
+    directory: Path, *, source_sha: str, version: str
+) -> None:
     expected = f"uses: sarj-ai/repo-standards@{source_sha} # v{version}"
     wheel = _exact_file(directory, f"repo_standards-{version}-py3-none-any.whl")
     sdist = _exact_file(directory, f"repo_standards-{version}.tar.gz")
@@ -312,12 +314,9 @@ def _request_json(url: str, *, token: str | None = None) -> dict[str, object] | 
         headers["Authorization"] = f"Bearer {token}"
         headers["X-GitHub-Api-Version"] = "2022-11-28"
     try:
-        with cast(
-            "BinaryIO",
-            urlopen(  # ruff: ignore[suspicious-url-open-usage] -- same exact URL
-                Request(url, headers=headers),  # ruff: ignore[suspicious-url-open-usage]
-                timeout=30,
-            ),
+        with urlopen(  # ruff: ignore[suspicious-url-open-usage] -- same exact URL
+            Request(url, headers=headers),  # ruff: ignore[suspicious-url-open-usage]
+            timeout=30,
         ) as response:
             document = cast("object", json.load(response))
     except HTTPError as error:
@@ -373,9 +372,9 @@ def download_artifacts(side: RegistrySide, directory: Path) -> None:
             artifact.url,
             headers={"User-Agent": "repo-standards-release"},
         )
-        with cast(
-            "BinaryIO",
-            urlopen(request, timeout=60),  # ruff: ignore[suspicious-url-open-usage]
+        with urlopen(  # ruff: ignore[suspicious-url-open-usage]
+            request,
+            timeout=60,
         ) as response:
             content = response.read()
         digest = hashlib.sha256(content).hexdigest()
@@ -518,8 +517,8 @@ def _run(arguments: Arguments) -> None:
             msg = "requested artifact source is unavailable"
             raise ReleaseStateError(msg)
         download_artifacts(side, arguments.directory)
-    elif arguments.command == "verify-documents":
-        verify_release_documents(
+    elif arguments.command == "verify-release-identity":
+        verify_distribution_release_identity(
             arguments.directory,
             source_sha=arguments.source_sha,
             version=arguments.version,
@@ -566,7 +565,7 @@ def _parser() -> argparse.ArgumentParser:
     download.add_argument("--repository", required=True)
     download.add_argument("--source-sha", required=True)
     download.add_argument("--directory", type=Path, required=True)
-    verify = commands.add_parser("verify-documents")
+    verify = commands.add_parser("verify-release-identity")
     verify.add_argument("--directory", type=Path, required=True)
     verify.add_argument("--version", required=True)
     verify.add_argument("--source-sha", required=True)
