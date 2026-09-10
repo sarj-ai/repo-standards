@@ -3,6 +3,7 @@
   description: Advises when pull-request history should be squashed or explicitly numbered.
   entry: repo-standards pull-request commits . --advisory --quiet
   language: python
+  language_version: python3.14
   always_run: true
   pass_filenames: false
   verbose: true
@@ -12,7 +13,18 @@
   description: Validates and safely normalizes the commit message header.
   entry: repo-standards commit-message --fix-safe
   language: python
+  language_version: python3.14
   always_run: true
   pass_filenames: true
   require_serial: true
   stages: [commit-msg]
+- id: repo-standards-check
+  name: Repo Standards - staged repository policy
+  description: Validates the exact prospective Git tree from the staged index.
+  entry: repo-standards check . --staged
+  language: python
+  language_version: python3.14
+  always_run: true
+  pass_filenames: false
+  require_serial: true
+  stages: [pre-commit]
