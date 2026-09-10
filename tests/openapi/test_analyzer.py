@@ -5,8 +5,7 @@ from hashlib import sha256
 import json
 from typing import TYPE_CHECKING
 
-from jsonschema import ValidationError as JSONSchemaValidationError
-from jsonschema import validate
+from jsonschema import ValidationError as JSONSchemaValidationError, validate
 import pytest
 
 from repo_standards.openapi import (

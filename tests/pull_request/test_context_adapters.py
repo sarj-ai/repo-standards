@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local Git fixture
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -73,7 +73,7 @@ def _object(value: object) -> dict[str, object]:
 def _git(repository: Path, *arguments: str) -> str:
     executable = shutil.which("git")
     assert executable is not None
-    completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed fixture
+    completed = subprocess.run(
         [executable, "-C", str(repository), *arguments],
         check=True,
         capture_output=True,

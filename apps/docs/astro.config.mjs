@@ -45,6 +45,7 @@ export default defineConfig({
       sidebar: [
         { label: 'About', link: '/' },
         { label: 'Rules', link: '/rules/' },
+        { label: 'Git policies', link: '/git-policies/' },
         { label: 'CLI', link: '/cli/' },
         { label: 'Schemas', link: '/schemas/' },
       ],

@@ -40,8 +40,7 @@ from repo_standards.core.rule_reviews import (
     review_for,
 )
 from repo_standards.core.taxonomy import CATEGORIES
-from repo_standards.openapi import analysis_schema
-from repo_standards.openapi import rules as rest_rules
+from repo_standards.openapi import analysis_schema, rules as rest_rules
 from repo_standards.policy_sarj.policy import POLICY_SPEC, SarjPolicy
 from repo_standards.rest import instrumentation_capabilities
 
@@ -104,7 +103,6 @@ _RULE_SLUGS: dict[str, RuleSlug] = {
     "repository/artifacts/terraform-test-files": "terraform-test-files",
     "repository/documentation/placement": "documentation-placement",
     "repository/documentation/reachability": "documentation-reachability",
-    "repository/configuration/unresolved-placeholders": "unresolved-placeholders",
     "architecture/delivery/authority": "deployment-authority",
 }
 

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import stat
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local fixture only
+import subprocess
 import sys
 from typing import NamedTuple
 
@@ -34,7 +34,7 @@ class _CalibrationFixture(NamedTuple):
 def _git(repository: Path, *arguments: str) -> str:
     executable = shutil.which("git")
     assert executable is not None
-    completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed Git fixture
+    completed = subprocess.run(
         [executable, "-C", str(repository), *arguments],
         check=True,
         capture_output=True,
@@ -89,7 +89,7 @@ def _fixture(tmp_path: Path) -> _CalibrationFixture:
 
 
 def _run(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed helper invocation
+    return subprocess.run(
         [sys.executable, str(_SCRIPT), *arguments],
         check=check,
         capture_output=True,

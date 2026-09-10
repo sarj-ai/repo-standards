@@ -2,30 +2,24 @@ from __future__ import annotations
 
 from dataclasses import replace
 from enum import StrEnum
-from fnmatch import fnmatchcase
-import json
 from pathlib import PurePosixPath
 import posixpath
 import re
-import tomllib
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
-from pydantic import TypeAdapter
-import yaml
 
+from repo_standards.core.canonical import workspace_pattern_matches
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import (
     Component,
     ComponentId,
-    ConfigurationFormat,
     DeploymentAuthority,
     Diagnostic,
     ExampleLanguage,
     FixtureId,
-    JSONValue,
     Manifest,
     PackageEvidence,
     PolicyId,
@@ -76,11 +70,6 @@ class _DependencyAnalysis(NamedTuple):
 class _CodeBoundary(NamedTuple):
     rule_id: RuleId
     expected: str
-
-
-class _ScalarLocation(NamedTuple):
-    pointer: str
-    value: str
 
 
 class _DocumentPackageRoots(NamedTuple):
@@ -452,9 +441,9 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/schema-derived-config-examples"),
-        version=2,
+        version=3,
         default_severity="warning",
-        title="Generate configuration examples from schemas",
+        title="Reject hand-maintained configuration examples",
         description=(
             "Tracked backend.conf and env example, sample, template, or schema basenames are "
             "prohibited, case-insensitively."
@@ -516,9 +505,9 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/operational-script-tests"),
-        version=1,
+        version=2,
         default_severity="warning",
-        title="Keep operational safety in owned contracts",
+        title="Keep script tests out of operational trees",
         description=(
             "Executable script test/spec artifacts are prohibited in operational trees. "
             "Repository Standards owns this path boundary; semantic workflow analysis belongs "
@@ -615,28 +604,8 @@ RULES = (
         ),
     ),
     Rule(
-        rule_id=RuleId("repository/configuration/unresolved-placeholders"),
-        version=1,
-        default_severity="warning",
-        title="Resolve active configuration placeholders",
-        description="Declared active configuration contains reviewed deployable values.",
-        why="Placeholder values can make configured deployments fail at runtime.",
-        fix="Replace the sentinel with reviewed configuration or remove the unused setting.",
-        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
-        examples=(
-            _example(
-                example_id="sarj-configuration-unresolved-placeholder",
-                title="Active configuration placeholder",
-                language="yaml",
-                before="endpoint: change-me",
-                after="endpoint: ${SERVICE_ENDPOINT}",
-                expected_severity="warning",
-            ),
-        ),
-    ),
-    Rule(
         rule_id=RuleId("architecture/delivery/authority"),
-        version=1,
+        version=2,
         default_severity="warning",
         title="Keep one deployment authority",
         description="Each workload and environment has one declared primary deployment writer.",
@@ -668,7 +637,6 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("repository/artifacts/terraform-test-files"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/reachability"): RuleClassification.JUDGMENT,
-        RuleId("repository/configuration/unresolved-placeholders"): RuleClassification.JUDGMENT,
         RuleId("architecture/delivery/authority"): RuleClassification.OPERATIONAL,
     }
 )
@@ -684,8 +652,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("repository/artifacts/terraform-test-files"): 47,
         RuleId("repository/documentation/placement"): 50,
         RuleId("repository/documentation/reachability"): 60,
-        RuleId("repository/configuration/unresolved-placeholders"): 70,
-        RuleId("architecture/delivery/authority"): 80,
+        RuleId("architecture/delivery/authority"): 70,
     }
 )
 _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = MappingProxyType(
@@ -728,7 +695,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=13,
+    policy_version=14,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1024,7 +991,6 @@ def _repository_artifact_diagnostics(
             document_package_roots,
         )
     )
-    diagnostics.extend(_active_configuration_diagnostics(snapshot))
     diagnostics.extend(_deployment_authority_diagnostics(snapshot))
     return tuple(
         sorted(diagnostics, key=lambda item: (item.path, item.rule_id, item.manifest_anchor))
@@ -1232,38 +1198,10 @@ def _workspace_includes(workspace: WorkspaceEvidence, project_path: str) -> bool
     except ValueError:
         return False
     return any(
-        _workspace_pattern_matches(relative, pattern) for pattern in workspace.member_patterns
+        workspace_pattern_matches(relative, pattern) for pattern in workspace.member_patterns
     ) and not any(
-        _workspace_pattern_matches(relative, pattern) for pattern in workspace.exclude_patterns
+        workspace_pattern_matches(relative, pattern) for pattern in workspace.exclude_patterns
     )
-
-
-def _workspace_pattern_matches(relative: PurePosixPath, pattern: str) -> bool:
-    if pattern == ".":
-        return not relative.parts
-    return _workspace_parts_match(relative.parts, PurePosixPath(pattern).parts)
-
-
-def _workspace_parts_match(path: tuple[str, ...], pattern: tuple[str, ...]) -> bool:
-    pending = [(0, 0)]
-    visited: set[tuple[int, int]] = set()
-    while pending:
-        path_index, pattern_index = pending.pop()
-        state = (path_index, pattern_index)
-        if state in visited:
-            continue
-        visited.add(state)
-        if pattern_index == len(pattern):
-            if path_index == len(path):
-                return True
-            continue
-        if pattern[pattern_index] == "**":
-            pending.append((path_index, pattern_index + 1))
-            if path_index < len(path):
-                pending.append((path_index + 1, pattern_index))
-        elif path_index < len(path) and fnmatchcase(path[path_index], pattern[pattern_index]):
-            pending.append((path_index + 1, pattern_index + 1))
-    return False
 
 
 def _is_owned_package_document(path: str, package_roots: frozenset[str]) -> bool:
@@ -1388,23 +1326,6 @@ def _is_github_automation_path(path: str) -> bool:
 
 
 _MARKDOWN = MarkdownIt("commonmark")
-_CONFIG_VALUE: TypeAdapter[JSONValue] = TypeAdapter(JSONValue)
-_PLACEHOLDER_SENTINELS = frozenset(
-    {
-        "<replace-me>",
-        "<required>",
-        "change-me",
-        "change_me",
-        "changeme",
-        "replace-me",
-        "replace-this",
-        "replace_me",
-        "your-value-here",
-        "your_value_here",
-    }
-)
-_MIN_QUOTED_VALUE_LENGTH = 2
-_MIN_COMPETING_AUTHORITIES = 2
 
 
 def _documentation_reachability_diagnostics(  # ruff: ignore[too-many-branches]
@@ -1518,160 +1439,37 @@ def _markdown_link_target(source: str, href: str | None, tracked: frozenset[str]
     return index if index in tracked else None
 
 
-def _active_configuration_diagnostics(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
-    content_by_path = {item.path: item.content for item in snapshot.content}
-    components = {item.component_id: item for item in snapshot.manifest.components}
-    diagnostics: list[Diagnostic] = []
-    for declaration in snapshot.manifest.active_configuration:
-        for pointer, value in _parse_active_configuration(
-            declaration.path, declaration.format, content_by_path[declaration.path]
-        ):
-            if value.strip().casefold() not in _PLACEHOLDER_SENTINELS:
-                continue
-            diagnostics.append(
-                replace(
-                    _repository_diagnostic(
-                        rule_id=RuleId("repository/configuration/unresolved-placeholders"),
-                        component=components[declaration.component_id],
-                        subject_kind="active-configuration-placeholder",
-                        observed=f"unresolved placeholder sentinel at {pointer}",
-                        expected="reviewed active configuration or a typed runtime reference",
-                        message="active configuration contains an unresolved placeholder sentinel",
-                        path=declaration.path,
-                        remediation=Remediation(
-                            summary="Replace the sentinel or remove the setting.",
-                            steps=("Use typed configuration or a secret reference.",),
-                            validation=("Rerun repo-standards.",),
-                        ),
-                    ),
-                    manifest_anchor=f"active_configuration.{declaration.path}.{pointer}",
-                    observed_value={"category": "unresolved-placeholder", "pointer": pointer},
-                )
-            )
-    return tuple(diagnostics)
-
-
-def _parse_active_configuration(
-    path: str, format_name: ConfigurationFormat, content: bytes
-) -> tuple[tuple[str, str], ...]:
-    try:
-        text = content.decode("utf-8")
-        decoded = _decode_active_configuration(format_name, text)
-        value = _CONFIG_VALUE.validate_python(decoded, strict=True)
-    except (
-        UnicodeError,
-        ValueError,
-        json.JSONDecodeError,
-        tomllib.TOMLDecodeError,
-        yaml.YAMLError,
-    ):
-        ConfigurationError.fail(f"cannot parse declared active configuration: {path}")
-    return tuple(_string_scalars(value))
-
-
-def _decode_active_configuration(format_name: ConfigurationFormat, text: str) -> object:
-    match format_name:
-        case ConfigurationFormat.JSON:
-            return json.loads(  # pyright: ignore[reportAny]
-                text, object_pairs_hook=_unique_json_mapping
-            )
-        case ConfigurationFormat.TOML:
-            return tomllib.loads(text)
-        case ConfigurationFormat.YAML:
-            return yaml.safe_load(text)  # pyright: ignore[reportAny]
-        case ConfigurationFormat.DOTENV:
-            return _parse_dotenv(text)
-
-
-def _unique_json_mapping(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            ConfigurationError.fail("active JSON configuration contains a duplicate key")
-        result[key] = value
-    return result
-
-
-def _parse_dotenv(text: str) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for number, raw in enumerate(text.splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[7:].lstrip()
-        key, separator, value = line.partition("=")
-        key = key.strip()
-        if (
-            separator != "="
-            or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None
-            or key in result
-        ):
-            ConfigurationError.fail(
-                f"active dotenv configuration has an invalid assignment at line {number}"
-            )
-        value = value.strip()
-        if len(value) >= _MIN_QUOTED_VALUE_LENGTH and value[0] in {'"', "'"}:
-            closing = value.find(value[0], 1)
-            if closing < 1 or (
-                value[closing + 1 :].strip() and not value[closing + 1 :].strip().startswith("#")
-            ):
-                ConfigurationError.fail(
-                    f"active dotenv configuration has an invalid value at line {number}"
-                )
-            value = value[1:closing]
-        elif " #" in value:
-            value = value.partition(" #")[0].rstrip()
-        result[key] = value
-    return result
-
-
-def _string_scalars(value: JSONValue, pointer: str = "$") -> list[_ScalarLocation]:
-    match value:
-        case str():
-            return [_ScalarLocation(pointer, value)]
-        case dict():
-            return [
-                item
-                for key in sorted(value, key=str)
-                for item in _string_scalars(
-                    value[key], f"{pointer}/{str(key).replace('~', '~0').replace('/', '~1')}"
-                )
-            ]
-        case list():
-            return [
-                item
-                for index, child in enumerate(value)
-                for item in _string_scalars(child, f"{pointer}/{index}")
-            ]
-        case _:
-            return []
-
-
 def _deployment_authority_diagnostics(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
     if snapshot.manifest.delivery is None:
         return ()
     groups: dict[tuple[ComponentId, str], list[DeploymentAuthority]] = {}
     for authority in snapshot.manifest.delivery.authorities:
-        if authority.authority == "primary":
-            groups.setdefault((authority.component_id, authority.environment), []).append(authority)
+        groups.setdefault((authority.component_id, authority.environment), []).append(authority)
     diagnostics: list[Diagnostic] = []
     for (component_id, environment), values in sorted(groups.items()):
-        if len(values) < _MIN_COMPETING_AUTHORITIES:
-            continue
         authorities = sorted(values, key=lambda item: item.authority_id)
-        first = authorities[0]
+        primaries = [item for item in authorities if item.authority == "primary"]
+        if len(primaries) == 1:
+            continue
+        first = primaries[0] if primaries else authorities[0]
+        if primaries:
+            observed = ", ".join(item.authority_id for item in primaries)
+            message = "multiple primary deployment authorities target one workload environment"
+            related = primaries[1:]
+        else:
+            recoveries = ", ".join(item.authority_id for item in authorities)
+            observed = f"no primary authority; recovery: {recoveries}"
+            message = "deployment authority group has recovery paths but no primary writer"
+            related = authorities[1:]
         diagnostics.append(
             replace(
                 _diagnostic(
                     rule_id=RuleId("architecture/delivery/authority"),
                     component_id=component_id,
                     subject_kind="deployment-authority",
-                    observed=", ".join(item.authority_id for item in authorities),
+                    observed=observed,
                     expected=f"one primary authority for {component_id} in {environment}",
-                    message=(
-                        "multiple primary deployment authorities target one workload environment"
-                    ),
+                    message=message,
                     path=first.path,
                     anchor=f"delivery.authorities.{component_id}.{environment}",
                     remediation=_remediation(
@@ -1679,7 +1477,7 @@ def _deployment_authority_diagnostics(snapshot: RepositorySnapshot) -> tuple[Dia
                         "Move helpers to delegates or recovery.",
                     ),
                 ),
-                related_locations=tuple(SourceLocation(path=item.path) for item in authorities[1:]),
+                related_locations=tuple(SourceLocation(path=item.path) for item in related),
             )
         )
     return tuple(diagnostics)

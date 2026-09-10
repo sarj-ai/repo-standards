@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed local Git fixture only
+import subprocess
 from typing import TYPE_CHECKING, Literal
 
 import pytest
@@ -38,7 +38,7 @@ owner = "@example/alpha"
 def _git(repository: Path, *arguments: str) -> None:
     git_executable = shutil.which("git")
     assert git_executable is not None
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Git fixture only
+    subprocess.run(
         [git_executable, "-C", str(repository), *arguments],
         check=True,
         capture_output=True,

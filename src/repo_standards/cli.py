@@ -63,12 +63,14 @@ from repo_standards.core.rule_reviews import (
     activated_rule_ids,
     activated_rule_versions,
 )
-from repo_standards.openapi import AnalysisReport as OpenApiAnalysisReport
-from repo_standards.openapi import AnalysisRequest as OpenApiAnalysisRequest
-from repo_standards.openapi import DocumentInput as OpenApiDocumentInput
-from repo_standards.openapi import analyze as analyze_openapi
-from repo_standards.openapi import local_reference_paths
-from repo_standards.openapi import rules as openapi_rules
+from repo_standards.openapi import (
+    AnalysisReport as OpenApiAnalysisReport,
+    AnalysisRequest as OpenApiAnalysisRequest,
+    DocumentInput as OpenApiDocumentInput,
+    analyze as analyze_openapi,
+    local_reference_paths,
+    rules as openapi_rules,
+)
 from repo_standards.policy_sarj import SarjPolicy
 from repo_standards.pull_request._context import NotApplicable
 from repo_standards.pull_request._inputs import (
@@ -78,10 +80,10 @@ from repo_standards.pull_request._inputs import (
 )
 from repo_standards.rest import (
     InstrumentationDetectionReport,
+    TrackedFile as RestTrackedFile,
     detect_instrumentation,
     instrumentation_capabilities,
 )
-from repo_standards.rest import TrackedFile as RestTrackedFile
 
 
 app = typer.Typer(

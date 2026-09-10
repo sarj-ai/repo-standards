@@ -6,7 +6,7 @@ from .taxonomy import CHANGE_SAFETY, MIGRATIONS, taxonomy
 
 _MIGRATION_CONSISTENCY = RuleDefinition(
     rule_id=RuleId("repository/migration/consistency"),
-    version=1,
+    version=2,
     default_severity="warning",
     title="Complete component migrations",
     description="A declared component move is complete in the selected Git tree.",

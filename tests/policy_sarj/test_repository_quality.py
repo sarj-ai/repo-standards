@@ -180,7 +180,7 @@ def test_images_and_external_links_do_not_create_reachability() -> None:
     assert _rule_ids(snapshot).count(RuleId("repository/documentation/reachability")) == 1
 
 
-def test_exact_placeholder_is_reported_without_value_disclosure() -> None:
+def test_active_configuration_remains_parseable_without_repository_semantic_findings() -> None:
     component = _component()
     snapshot = _snapshot(
         {"config/active.yaml": b"nested:\n  endpoint: CHANGE_ME\n"},
@@ -190,49 +190,10 @@ def test_exact_placeholder_is_reported_without_value_disclosure() -> None:
             ),
         ),
     )
-    finding = next(
-        item
-        for item in SarjPolicy.evaluate_repository(snapshot)
-        if item.rule_id == RuleId("repository/configuration/unresolved-placeholders")
-    )
-    assert finding.observed_value == {
-        "category": "unresolved-placeholder",
-        "pointer": "$/nested/endpoint",
+    assert "repository/configuration/unresolved-placeholders" not in {
+        str(item.rule_id) for item in SarjPolicy.rules()
     }
-    assert "CHANGE_ME" not in finding.observed
-
-
-def test_placeholder_near_misses_are_clean() -> None:
-    component = _component()
-    snapshot = _snapshot(
-        {
-            "config/active.json": (
-                b'{"interpolation":"${SERVICE_URL}","domain":"example.com",'
-                b'"name":"changeme-service","empty":""}'
-            )
-        },
-        active=(
-            ActiveConfiguration(
-                component.component_id, "config/active.json", ConfigurationFormat.JSON
-            ),
-        ),
-    )
-    assert RuleId("repository/configuration/unresolved-placeholders") not in _rule_ids(snapshot)
-
-
-def test_dotenv_quotes_comments_and_case_are_normalized() -> None:
-    component = _component()
-    snapshot = _snapshot(
-        {"config/prod.env": b"export ENDPOINT='Replace-Me' # unresolved\n"},
-        active=(
-            ActiveConfiguration(
-                component.component_id, "config/prod.env", ConfigurationFormat.DOTENV
-            ),
-        ),
-    )
-    assert (
-        _rule_ids(snapshot).count(RuleId("repository/configuration/unresolved-placeholders")) == 1
-    )
+    assert _rule_ids(snapshot) == []
 
 
 def _authority(
@@ -269,6 +230,26 @@ def test_duplicate_primary_authorities_emit_one_grouped_finding() -> None:
     ]
     assert len(findings) == 1
     assert findings[0].observed == "first, second"
+    assert len(findings[0].related_locations) == 1
+
+
+def test_recovery_only_authority_group_requires_one_primary() -> None:
+    authorities = (
+        _authority("break-glass", role="recovery"),
+        _authority("manual-recovery", role="recovery"),
+    )
+    snapshot = _snapshot(
+        {item.path: b"deployment" for item in authorities},
+        delivery=DeliveryConfig(authorities=authorities),
+    )
+    findings = [
+        item
+        for item in SarjPolicy.evaluate_repository(snapshot)
+        if item.rule_id == RuleId("architecture/delivery/authority")
+    ]
+    assert len(findings) == 1
+    assert findings[0].rule_version == 2
+    assert findings[0].observed == "no primary authority; recovery: break-glass, manual-recovery"
     assert len(findings[0].related_locations) == 1
 
 

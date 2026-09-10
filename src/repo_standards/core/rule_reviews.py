@@ -66,9 +66,19 @@ APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = (
         ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),
     ),
     (
+        RuleId("repository/artifacts/operational-script-tests"),
+        2,
+        ApprovedRuleReview(reviewed_in="23c6cb225373f0b33d256191d93605c6a63917b9"),
+    ),
+    (
         RuleId("repository/artifacts/schema-derived-config-examples"),
         2,
         ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),
+    ),
+    (
+        RuleId("repository/artifacts/schema-derived-config-examples"),
+        3,
+        ApprovedRuleReview(reviewed_in="23c6cb225373f0b33d256191d93605c6a63917b9"),
     ),
     (
         RuleId("repository/artifacts/terraform-test-files"),

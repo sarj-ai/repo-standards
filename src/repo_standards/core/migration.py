@@ -4,6 +4,7 @@ from bisect import bisect_left
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from .canonical import workspace_pattern_matches
 from .models import (
     Diagnostic,
     MigrationPath,
@@ -65,7 +66,7 @@ def _within(paths: tuple[str, ...], root: str) -> _PathMatch:
 def _missing_target(migration: MigrationPath) -> Diagnostic:
     return Diagnostic(
         rule_id=_MIGRATION_RULE,
-        rule_version=1,
+        rule_version=2,
         severity="warning",
         evidence_level="verified",
         component_id=migration.component_id,
@@ -89,7 +90,7 @@ def _missing_target(migration: MigrationPath) -> Diagnostic:
 def _retained_source(migration: MigrationPath, source_files: _PathMatch) -> Diagnostic:
     return Diagnostic(
         rule_id=_MIGRATION_RULE,
-        rule_version=1,
+        rule_version=2,
         severity="warning",
         evidence_level="verified",
         component_id=migration.component_id,
@@ -159,8 +160,12 @@ def _workspace_includes(workspace: WorkspaceEvidence, project_path: str) -> bool
         relative = project_directory.relative_to(workspace_root)
     except ValueError:
         return False
-    member = any(relative.match(pattern) for pattern in workspace.member_patterns)
-    excluded = any(relative.match(pattern) for pattern in workspace.exclude_patterns)
+    member = any(
+        workspace_pattern_matches(relative, pattern) for pattern in workspace.member_patterns
+    )
+    excluded = any(
+        workspace_pattern_matches(relative, pattern) for pattern in workspace.exclude_patterns
+    )
     return member and not excluded
 
 
@@ -171,7 +176,7 @@ def _workspace_membership_lost(
 ) -> Diagnostic:
     return Diagnostic(
         rule_id=_MIGRATION_RULE,
-        rule_version=1,
+        rule_version=2,
         severity="warning",
         evidence_level="verified",
         component_id=migration.component_id,

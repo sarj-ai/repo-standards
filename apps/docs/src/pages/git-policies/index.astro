@@ -1,0 +1,46 @@
+---
+import { Code } from '@astrojs/starlight/components';
+
+import ReferencePage from '../../components/ReferencePage.astro';
+
+const commitGrammar = '[(i/N) ][TICKET] type(scope)!: description';
+const hookCommand = 'repo-standards commit-message .git/COMMIT_EDITMSG --fix-safe';
+---
+
+<ReferencePage
+  title="Git policies"
+  description="Commit-message and pull-request history policies enforced outside the repository rule registry."
+>
+  <article class="git-policies">
+    <header class="section-heading">
+      <p class="eyebrow">Version-control contracts</p>
+      <h1>Git policies</h1>
+      <p class="lede">Commit messages and pull-request history are enforced outside the repository rule registry. They are commands and hooks, so they do not appear in the rule count.</p>
+    </header>
+
+    <section class="git-policy-grammar" aria-labelledby="commit-header-grammar">
+      <p class="eyebrow">Commit header grammar</p>
+      <h2 id="commit-header-grammar"><code>{commitGrammar}</code></h2>
+      <p>The optional series marker comes first, followed by an optional ticket, a conventional-commit type, optional scope and breaking marker, then a concise description.</p>
+    </section>
+
+    <div class="capability-grid git-policy-grid">
+      <section class="capability-card" aria-labelledby="managed-commit-headers">
+        <p class="data-line">commit-msg · local and CI</p>
+        <h2 id="managed-commit-headers">Managed commit headers</h2>
+        <p>The hook validates new commit headers. Safe fixing normalizes only casing and spacing; commit bodies and trailers remain untouched.</p>
+        <Code code={hookCommand} lang="bash" frame="terminal" wrap />
+        <p>CI validates every direct non-merge commit, including commits created before a contributor installed the hook.</p>
+        <p><a href="/cli/#commit-message">Commit-message command reference</a></p>
+      </section>
+
+      <section class="capability-card" aria-labelledby="reviewable-pr-history">
+        <p class="data-line">pull-request history · CI authoritative</p>
+        <h2 id="reviewable-pr-history">Reviewable pull-request history</h2>
+        <p>Pull requests may contain up to five direct commits by default. Longer histories must use a complete, ordered <code>(1/N)</code> through <code>(N/N)</code> series.</p>
+        <p>The local hook is advisory because it cannot know the final base and head refs. CI evaluates the direct commits in the submitted pull request.</p>
+        <p><a href="/cli/#pull-request.commits">Pull-request commit command reference</a></p>
+      </section>
+    </div>
+  </article>
+</ReferencePage>

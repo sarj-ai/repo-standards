@@ -67,7 +67,7 @@ def test_pull_request_commits_action_uses_runner_event_file_and_locked_package()
     assert "${{ inputs.root }}" in source
     assert '--github-event "$GITHUB_EVENT_PATH"' in source
     assert 'pull-request commits "$INPUT_ROOT"' in source
-    assert '--project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.12' in source
+    assert '--project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.14' in source
     assert '--project "$GITHUB_ACTION_PATH/.." --no-sync repo-standards' in source
     assert "uvx" not in source
 

@@ -1,18 +1,19 @@
-# Managed by `sarj-standards setup`; commit this file.
-schema = 3
-bundle = "7.0.5"
-profile = "application"
+# Managed by `code-standards setup`; commit this file.
+schema = 4
+bundle = "7.14.23"
 rule_profile = "all"
 
 [capabilities]
-disable = ["eslint"]
+disable = ["eslint", "swiftformat", "swiftlint", "ktlint", "detekt", "mobile-security"]
 
 [artifacts]
 durable = [".github/**"]
 
 [dest]
 python = "."
-typescript = "."
+typescript = "apps/docs"
+swift = "."
+kotlin = "."
 
 [hooks]
 manager = "pre-commit"

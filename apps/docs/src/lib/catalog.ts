@@ -3,12 +3,13 @@ import { generatedCatalog } from '../generated/catalog.generated';
 
 export const catalog = generatedCatalog;
 export const catalogJson = rawCatalogJson;
-export type Catalog = typeof catalog;
 export type Rule = Catalog['rules'][number];
-export type Category = Catalog['categories'][number];
-export type Topic = Category['topics'][number];
-export type Command = Catalog['commands'][number];
 export type Parameter = Command['options'][number] | Command['arguments'][number];
+
+type Catalog = typeof catalog;
+type Category = Catalog['categories'][number];
+type Topic = Category['topics'][number];
+type Command = Catalog['commands'][number];
 
 export interface RuleView {
   readonly rule: Rule;
@@ -16,7 +17,7 @@ export interface RuleView {
   readonly category: string;
 }
 
-export interface TopicView {
+interface TopicView {
   readonly topic: Topic;
   readonly rules: readonly RuleView[];
 }
@@ -27,7 +28,7 @@ export interface CategoryView {
   readonly ruleCount: number;
 }
 
-export function ruleHref(rule: Rule): string {
+function ruleHref(rule: Rule): string {
   return `/rules/${encodeURIComponent(rule.slug)}/`;
 }
 
@@ -103,6 +104,7 @@ export function referenceSidebar() {
           })),
       ],
     },
+    { label: 'Git policies', link: '/git-policies/' },
     { label: 'CLI', link: '/cli/' },
     { label: 'Schemas', link: '/schemas/' },
   ];

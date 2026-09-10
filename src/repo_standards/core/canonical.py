@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from fnmatch import fnmatchcase
 import hashlib
 import json
+from pathlib import PurePosixPath
 import posixpath
 from typing import TYPE_CHECKING
 import unicodedata
@@ -28,6 +30,33 @@ def canonical_path(value: str) -> str:
     if value.startswith("/") or normalized in {".", ".."} or normalized.startswith("../"):
         ConfigurationError.fail(f"path escapes repository root: {value!r}")
     return normalized
+
+
+def workspace_pattern_matches(relative: PurePosixPath, pattern: str) -> bool:
+    if pattern == ".":
+        return not relative.parts
+    pending = [(0, 0)]
+    visited: set[tuple[int, int]] = set()
+    pattern_parts = PurePosixPath(pattern).parts
+    while pending:
+        path_index, pattern_index = pending.pop()
+        state = (path_index, pattern_index)
+        if state in visited:
+            continue
+        visited.add(state)
+        if pattern_index == len(pattern_parts):
+            if path_index == len(relative.parts):
+                return True
+            continue
+        if pattern_parts[pattern_index] == "**":
+            pending.append((path_index, pattern_index + 1))
+            if path_index < len(relative.parts):
+                pending.append((path_index + 1, pattern_index))
+        elif path_index < len(relative.parts) and fnmatchcase(
+            relative.parts[path_index], pattern_parts[pattern_index]
+        ):
+            pending.append((path_index + 1, pattern_index + 1))
+    return False
 
 
 def canonical_json(value: object) -> str:
