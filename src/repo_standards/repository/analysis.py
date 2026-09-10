@@ -16,7 +16,6 @@ from repo_standards.core.models import (
     Mode,
     PolicyId,
     RepositoryId,
-    RepositoryPolicy,
 )
 from repo_standards.core.rule_reviews import (
     RuleVersion,
@@ -28,8 +27,6 @@ from repo_standards.policy_sarj import SarjPolicy
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RepositoryAnalysisRequest:
-    """Inputs for deterministic analysis of a committed or staged repository tree."""
-
     root: Path
     manifest_path: str = ".repo-standards/repository.toml"
     mode: Mode = Mode.STRICT
@@ -39,7 +36,6 @@ class RepositoryAnalysisRequest:
 
 
 def analyze_repository(request: RepositoryAnalysisRequest) -> AnalysisReport:
-    """Analyze repository policy without routing through the command-line interface."""
     policy = SarjPolicy()
     try:
         return _analyze(request, policy)
@@ -54,9 +50,7 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         manifest_path=request.manifest_path,
         identity=git_index_identity(root) if request.staged else None,
     )
-    repository_diagnostics = (
-        policy.evaluate_repository(snapshot) if isinstance(policy, RepositoryPolicy) else ()
-    )
+    repository_diagnostics = policy.evaluate_repository(snapshot)
     if snapshot.manifest.enabled_rules and request.enabled_rule_ids:
         ConfigurationError.fail("manifest enabled_rules cannot be combined with enabled_rule_ids")
     report = analyze(
