@@ -7,13 +7,18 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess  # ruff: ignore[suspicious-subprocess-import] -- fixed release commands only
 import sys
 import tarfile
-from typing import BinaryIO, Literal, cast, final
+from typing import TYPE_CHECKING, BinaryIO, Literal, cast, final
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 import zipfile
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -22,6 +27,7 @@ _ACTION_PIN = re.compile(
     r"(?m)^(?P<indent>\s*- uses: sarj-ai/repo-standards@)[^\s]+\s+#\s+v[^\s]+$"
 )
 _HTTP_NOT_FOUND = 404
+_PROCESS_TIMEOUT_SECONDS = 300
 ArtifactSource = Literal["build", "github", "none", "pypi"]
 
 
@@ -382,11 +388,82 @@ def download_artifacts(side: RegistrySide, directory: Path) -> None:
     checksum_path.write_text("".join(lines), encoding="utf-8")
 
 
+def verify_installed_distributions(
+    directory: Path,
+    *,
+    version: str,
+    smoke_root: Path,
+    checksum_path: Path,
+    run_command: Callable[[tuple[str, ...]], str] | None = None,
+) -> None:
+    _validate_version(version)
+    if not directory.is_dir():
+        msg = f"release directory does not exist: {directory}"
+        raise ReleaseStateError(msg)
+    if not checksum_path.parent.is_dir():
+        msg = f"checksum directory does not exist: {checksum_path.parent}"
+        raise ReleaseStateError(msg)
+    expected_names = expected_artifact_names(version)
+    observed_names = {
+        path.name
+        for path in directory.iterdir()
+        if path.is_file() and (path.suffix == ".whl" or path.name.endswith(".tar.gz"))
+    }
+    if observed_names != expected_names:
+        msg = "release directory must contain exactly the expected wheel and source distribution"
+        raise ReleaseStateError(msg)
+
+    execute = _run_release_command if run_command is None else run_command
+    imports = (
+        "import repo_standards, repo_standards.catalog, repo_standards.openapi, "
+        "repo_standards.pull_request, repo_standards.repository"
+    )
+    artifacts = (
+        ("wheel", directory / f"repo_standards-{version}-py3-none-any.whl"),
+        ("sdist", directory / f"repo_standards-{version}.tar.gz"),
+    )
+    for label, artifact in artifacts:
+        environment = smoke_root / label
+        python = environment / "bin" / "python"
+        executable = environment / "bin" / "repo-standards"
+        execute(("uv", "venv", "--python", "3.14", str(environment)))
+        execute(("uv", "pip", "install", "--python", str(python), str(artifact)))
+        installed_version = execute((str(executable), "--version")).strip()
+        if installed_version != version:
+            msg = f"{label} installed version differs: {installed_version!r}"
+            raise ReleaseStateError(msg)
+        execute((str(python), "-c", imports))
+
+    if not checksum_path.exists():
+        lines = []
+        for name in sorted(expected_names):
+            artifact = directory / name
+            relative = artifact.relative_to(checksum_path.parent)
+            lines.append(f"{hashlib.sha256(artifact.read_bytes()).hexdigest()}  {relative}\n")
+        checksum_path.write_text("".join(lines), encoding="utf-8")
+
+
+def _run_release_command(command: tuple[str, ...]) -> str:
+    try:
+        completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed trusted command tuple
+            command,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=_PROCESS_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        msg = f"release smoke command failed: {command[0]}"
+        raise ReleaseStateError(msg) from error
+    return completed.stdout
+
+
 @final
 class Arguments(argparse.Namespace):
     def __init__(self) -> None:
         super().__init__()
         self.command = ""
+        self.checksum = Path()
         self.directory = Path()
         self.github_output = Path()
         self.head_sha = ""
@@ -394,6 +471,7 @@ class Arguments(argparse.Namespace):
         self.repository = ""
         self.source = ""
         self.source_sha = ""
+        self.smoke_root = Path()
         self.version = ""
 
 
@@ -446,6 +524,13 @@ def _run(arguments: Arguments) -> None:
             source_sha=arguments.source_sha,
             version=arguments.version,
         )
+    elif arguments.command == "verify-installed":
+        verify_installed_distributions(
+            arguments.directory,
+            version=arguments.version,
+            smoke_root=arguments.smoke_root,
+            checksum_path=arguments.checksum,
+        )
 
 
 def _write_outputs(plan: ReconciliationPlan, version: str, path: Path) -> None:
@@ -485,6 +570,11 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--directory", type=Path, required=True)
     verify.add_argument("--version", required=True)
     verify.add_argument("--source-sha", required=True)
+    installed = commands.add_parser("verify-installed")
+    installed.add_argument("--directory", type=Path, required=True)
+    installed.add_argument("--version", required=True)
+    installed.add_argument("--smoke-root", type=Path, required=True)
+    installed.add_argument("--checksum", type=Path, required=True)
     return parser
 
 

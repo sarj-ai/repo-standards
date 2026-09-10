@@ -59,6 +59,7 @@ jobs:
           WORKERS_CI_COMMIT_SHA: ${{ github.sha }}
         run: |
           npm --prefix apps/docs run lint
+          npm --prefix apps/docs test
           npm --prefix apps/docs run build
       - name: Verify public site artifacts
         run: uv run python -m repo_standards.verify_release_artifacts --site apps/docs/dist
@@ -122,12 +123,4 @@ jobs:
       - name: Verify deployed revision and catalog
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
-        run: >-
-          node -e "const base='https://repo-standards.sarj.ai/'; const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-          (async()=>{let lastError; for(let attempt=1;attempt<=10;attempt+=1){try{const query='?commit='+process.env.EXPECTED_COMMIT+'&attempt='+attempt;
-          const [healthResponse,catalogResponse]=await Promise.all([fetch(base+'health.json'+query,{cache:'no-store'}),
-          fetch(base+'api/v7/catalog.json'+query,{cache:'no-store'})]); if(!healthResponse.ok||!catalogResponse.ok)throw new Error('reference endpoints are unavailable');
-          const health=await healthResponse.json(); const catalog=await catalogResponse.json(); if(health.commit!==process.env.EXPECTED_COMMIT)
-          throw new Error('deployed commit does not match'); if(health.catalogDigest!==catalog.provenance.content_digest)
-          throw new Error('deployed catalog digest does not match'); console.log('verified '+health.commit); return;}catch(error){lastError=error;
-          if(attempt<10)await wait(3000);}}throw lastError;})()"
+        run: npm run verify:deployment
