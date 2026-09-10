@@ -25,6 +25,18 @@ legacy manifests and calibration runs.
 
 ## Run it
 
+Sarj repositories should use the single Code Standards setup path. It installs the canonical
+staged repository check, managed commit-message check, and authoritative pull-request history
+workflow without creating a second Python environment:
+
+```bash
+uvx --no-config --isolated --python 3.14 --from code-standards code-standards setup
+code-standards doctor
+```
+
+The direct Repo Standards commands and hooks below remain available for standalone consumers and
+advanced debugging.
+
 Use the current release without installing it:
 
 ```bash
@@ -149,13 +161,15 @@ on:
 - uses: sarj-ai/repo-standards/pull-request-commits@FULL_RELEASE_COMMIT_SHA # v5.11.0
 ```
 
-The published `repo-standards-pull-request-commits` hook runs in advisory mode at `pre-commit` and
+The published `repo-standards-check` hook validates the exact staged Git index at `pre-commit`.
+The `repo-standards-pull-request-commits` hook runs in advisory mode at `pre-commit` and
 `pre-push`. The `repo-standards-commit-message` hook runs at `commit-msg`, applies bounded safe
 normalization, and then enforces `[(i/N) ][TICKET] type(scope)!: description`. Real merge commits
 are accepted only when Git's `MERGE_HEAD` proves merge state. Temporary `fixup!`, `squash!`, and
 `amend!` messages are accepted locally so every Git autosquash mode remains usable, but exact PR CI
 rejects them if they remain in review history. Consumers that already lock Repo Standards may
 invoke the same commands from their existing hook manager to avoid a duplicate environment.
+All published Python hooks require Python 3.14.
 
 ## GitHub Action
 

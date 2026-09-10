@@ -14,7 +14,11 @@ import yaml
 from repo_standards.cli import app
 from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.pull_request import analyze_pull_request_commits, analyze_pull_request_size
-from repo_standards.repository import inspect_repository
+from repo_standards.repository import (
+    RepositoryAnalysisRequest,
+    analyze_repository,
+    inspect_repository,
+)
 
 
 class _ActionStep(TypedDict):
@@ -75,6 +79,57 @@ def test_feature_apis_are_explicit() -> None:
     assert callable(analyze_pull_request_commits)
     assert callable(analyze_pull_request_size)
     assert callable(inspect_repository)
+    assert callable(analyze_repository)
+
+
+def test_repository_analysis_api_reports_configuration_failures(tmp_path: Path) -> None:
+    report = analyze_repository(RepositoryAnalysisRequest(root=tmp_path))
+
+    assert report.completion == "incomplete"
+    assert report.execution_issues[0].code == "analysis.configuration"
+
+
+def test_repository_analysis_api_selects_committed_or_staged_tree(tmp_path: Path) -> None:
+    manifest = tmp_path / ".repo-standards" / "repository.toml"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        'schema_version = 6\nrepository_id = "committed"\ncomponents = []\n',
+        encoding="utf-8",
+    )
+    subprocess.run(("git", "init", "--quiet"), cwd=tmp_path, check=True)
+    subprocess.run(("git", "add", "."), cwd=tmp_path, check=True)
+    subprocess.run(
+        (
+            "git",
+            "-c",
+            "user.name=Repository Standards",
+            "-c",
+            "user.email=repository-standards@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "test: initialize fixture",
+        ),
+        cwd=tmp_path,
+        check=True,
+    )
+    manifest.write_text(
+        'schema_version = 6\nrepository_id = "staged"\ncomponents = []\n',
+        encoding="utf-8",
+    )
+    subprocess.run(("git", "add", str(manifest)), cwd=tmp_path, check=True)
+    manifest.write_text(
+        'schema_version = 6\nrepository_id = "unstaged"\ncomponents = []\n',
+        encoding="utf-8",
+    )
+
+    committed = analyze_repository(RepositoryAnalysisRequest(root=tmp_path))
+    staged = analyze_repository(RepositoryAnalysisRequest(root=tmp_path, staged=True))
+
+    assert committed.repository_id == "committed"
+    assert staged.repository_id == "staged"
+    assert staged.input_provenance is not None
+    assert staged.input_provenance.mode == "git-index"
 
 
 def test_manifest_rejects_removed_delivery_provider_configuration() -> None:

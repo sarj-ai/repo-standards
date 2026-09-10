@@ -27,3 +27,7 @@ from repo_standards.core.parser import (
     parse_baseline_bytes as parse_baseline_bytes,
     parse_manifest_bytes as parse_manifest_bytes,
 )
+from repo_standards.repository.analysis import (
+    RepositoryAnalysisRequest as RepositoryAnalysisRequest,
+    analyze_repository as analyze_repository,
+)
