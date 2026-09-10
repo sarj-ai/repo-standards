@@ -197,6 +197,22 @@ def test_snapshot_can_select_the_exact_staged_index(tmp_path: Path) -> None:
     assert repeated.manifest == snapshot.manifest
 
 
+def test_snapshot_can_select_an_unborn_staged_index(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--quiet")
+    manifest = repository / ".repo-standards" / "repository.toml"
+    manifest.parent.mkdir()
+    manifest.write_bytes(_MANIFEST)
+    _git(repository, "add", ".repo-standards/repository.toml")
+
+    snapshot = load_repository_snapshot(repository, identity=git_index_identity(repository))
+
+    assert snapshot.manifest.repository_id == "example-repository"
+    assert snapshot.provenance.mode == "git-index"
+    assert snapshot.provenance.source_revision == "0" * 40
+
+
 def test_staged_index_rejects_symlinks(tmp_path: Path) -> None:
     repository = _committed_repository(tmp_path)
     (repository / "linked.py").symlink_to("apps/application/package.json")

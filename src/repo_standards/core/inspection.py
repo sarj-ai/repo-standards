@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import yaml
 
 from .canonical import canonical_path
-from .errors import ConfigurationError
+from .errors import ConfigurationError, ManifestAbsentError
 from .models import (
     GitObjectId,
     InputProvenance,
@@ -51,6 +51,7 @@ _MAX_TOTAL_MARKDOWN_BYTES = 67_108_864
 _MAX_ACTIVE_CONFIG_BLOBS = 100
 _MAX_ACTIVE_CONFIG_BLOB_BYTES = 1_048_576
 _MAX_TOTAL_ACTIVE_CONFIG_BYTES = 20_971_520
+_UNBORN_REVISION = "0" * 40
 _GIT_TREE_FIELD_COUNT = 3
 _GIT_INDEX_FIELD_COUNT = 3
 _GIT_ENVIRONMENT = MappingProxyType(
@@ -211,7 +212,7 @@ def load_repository_snapshot(  # ruff: ignore[too-many-locals] - immutable input
     canonical_manifest = canonical_path(manifest_path)
     manifest_blob = by_path.get(canonical_manifest)
     if manifest_blob is None:
-        ConfigurationError.fail("manifest is absent from the selected Git tree")
+        ManifestAbsentError.fail("manifest is absent from the selected Git tree")
     selected = [manifest_blob]
     canonical_baseline: str | None = None
     baseline_blob: TrackedBlob | None = None
@@ -526,10 +527,13 @@ def git_identity(root: Path) -> GitIdentity:
 
 
 def git_index_identity(root: Path) -> GitIdentity:
-    committed = git_identity(root)
     _blobs, digest = _indexed_files(root)
+    try:
+        source_revision = git_identity(root).source_revision
+    except ConfigurationError:
+        source_revision = _UNBORN_REVISION
     return GitIdentity(
-        source_revision=committed.source_revision,
+        source_revision=source_revision,
         tree_digest=digest,
         mode="git-index",
     )
