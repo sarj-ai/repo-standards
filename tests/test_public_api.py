@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -12,6 +13,7 @@ from typer.testing import CliRunner
 import yaml
 
 from repo_standards.cli import app
+from repo_standards.core.models import Mode
 from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.pull_request import analyze_pull_request_commits, analyze_pull_request_size
 from repo_standards.repository import (
@@ -155,6 +157,82 @@ def test_repository_analysis_api_selects_committed_or_staged_tree(tmp_path: Path
     assert staged.repository_id == "staged"
     assert staged.input_provenance is not None
     assert staged.input_provenance.mode == "git-index"
+
+
+def test_repository_analysis_api_classifies_a_selected_ratchet_baseline(tmp_path: Path) -> None:
+    manifest = tmp_path / ".repo-standards" / "repository.toml"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        'schema_version = 6\nrepository_id = "ratcheted"\ncomponents = []\n',
+        encoding="utf-8",
+    )
+    subprocess.run(("git", "init", "--quiet"), cwd=tmp_path, check=True)
+    subprocess.run(("git", "add", "."), cwd=tmp_path, check=True)
+    subprocess.run(
+        (
+            "git",
+            "-c",
+            "user.name=Repository Standards",
+            "-c",
+            "user.email=repository-standards@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "test: initialize fixture",
+        ),
+        cwd=tmp_path,
+        check=True,
+    )
+    initial = analyze_repository(RepositoryAnalysisRequest(root=tmp_path))
+    baseline = manifest.with_name("baseline.json")
+    baseline.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "repository_id": initial.repository_id,
+                "policy": initial.policy_id,
+                "policy_version": initial.policy_version,
+                "scope_digest": initial.scope_digest,
+                "fingerprints": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(("git", "add", str(baseline)), cwd=tmp_path, check=True)
+    subprocess.run(
+        (
+            "git",
+            "-c",
+            "user.name=Repository Standards",
+            "-c",
+            "user.email=repository-standards@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "test: add baseline",
+        ),
+        cwd=tmp_path,
+        check=True,
+    )
+
+    report = analyze_repository(
+        RepositoryAnalysisRequest(
+            root=tmp_path,
+            baseline_path=".repo-standards/baseline.json",
+            mode=Mode.RATCHET,
+        )
+    )
+
+    assert report.completion == "complete"
+    assert report.ratchet is not None
+    assert report.ratchet.entries == ()
+
+
+def test_repository_analysis_api_requires_a_ratchet_baseline_path(tmp_path: Path) -> None:
+    report = analyze_repository(RepositoryAnalysisRequest(root=tmp_path, mode=Mode.RATCHET))
+
+    assert report.completion == "incomplete"
+    assert "baseline_path" in report.execution_issues[0].message
 
 
 def test_manifest_rejects_removed_delivery_provider_configuration() -> None:

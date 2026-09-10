@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 
 from repo_standards.core.catalog import core_rules
-from repo_standards.core.engine import analyze
+from repo_standards.core.engine import analyze, check_baseline, classify_baseline
 from repo_standards.core.errors import ConfigurationError, ManifestAbsentError
 from repo_standards.core.inspection import git_index_identity, load_repository_snapshot
 from repo_standards.core.migration import migration_diagnostics
@@ -29,6 +29,7 @@ from repo_standards.policy_sarj import SarjPolicy
 class RepositoryAnalysisRequest:
     root: Path
     manifest_path: str = ".repo-standards/repository.toml"
+    baseline_path: str | None = None
     mode: Mode = Mode.STRICT
     as_of: date | None = None
     staged: bool = False
@@ -52,9 +53,12 @@ def analyze_repository(request: RepositoryAnalysisRequest) -> AnalysisReport:
 
 def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> AnalysisReport:
     root = request.root.resolve(strict=True)
+    if request.mode is Mode.RATCHET and request.baseline_path is None:
+        ConfigurationError.fail("ratchet analysis requires a baseline_path")
     snapshot = load_repository_snapshot(
         root,
         manifest_path=request.manifest_path,
+        baseline_path=request.baseline_path if request.mode is Mode.RATCHET else None,
         identity=git_index_identity(root) if request.staged else None,
     )
     repository_diagnostics = policy.evaluate_repository(snapshot)
@@ -71,12 +75,18 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         )(
             snapshot.manifest.enabled_rules or request.enabled_rule_ids,
             current_rules=frozenset(
-                RuleVersion(rule.rule_id, rule.version)
-                for rule in core_rules() + policy.rules()
+                RuleVersion(rule.rule_id, rule.version) for rule in core_rules() + policy.rules()
             ),
         ),
     )
-    return replace(report, input_provenance=snapshot.provenance)
+    report = replace(report, input_provenance=snapshot.provenance)
+    if request.mode is Mode.RATCHET:
+        baseline = snapshot.baseline
+        if baseline is None:
+            ConfigurationError.fail("selected ratchet baseline was not loaded")
+        _ = check_baseline(report, baseline)
+        report = replace(report, ratchet=classify_baseline(report, baseline))
+    return report
 
 
 def _incomplete(
