@@ -6,7 +6,7 @@ from pathlib import Path
 
 from repo_standards.core.catalog import core_rules
 from repo_standards.core.engine import analyze
-from repo_standards.core.errors import ConfigurationError
+from repo_standards.core.errors import ConfigurationError, ManifestAbsentError
 from repo_standards.core.inspection import git_index_identity, load_repository_snapshot
 from repo_standards.core.migration import migration_diagnostics
 from repo_standards.core.models import (
@@ -39,6 +39,13 @@ def analyze_repository(request: RepositoryAnalysisRequest) -> AnalysisReport:
     policy = SarjPolicy()
     try:
         return _analyze(request, policy)
+    except ManifestAbsentError as error:
+        return _incomplete(
+            policy.policy_id,
+            request.mode,
+            str(error),
+            code="analysis.manifest-absent",
+        )
     except (ConfigurationError, OSError) as error:
         return _incomplete(policy.policy_id, request.mode, str(error))
 
@@ -72,7 +79,13 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
     return replace(report, input_provenance=snapshot.provenance)
 
 
-def _incomplete(policy_id: PolicyId, mode: Mode, issue: str) -> AnalysisReport:
+def _incomplete(
+    policy_id: PolicyId,
+    mode: Mode,
+    issue: str,
+    *,
+    code: str = "analysis.configuration",
+) -> AnalysisReport:
     return IncompleteReport(
         mode=mode,
         repository_id=RepositoryId("unknown"),
@@ -81,7 +94,7 @@ def _incomplete(policy_id: PolicyId, mode: Mode, issue: str) -> AnalysisReport:
         scope_digest="0" * 64,
         execution_issues=(
             ExecutionIssue(
-                code="analysis.configuration",
+                code=code,
                 phase="configuration",
                 message=issue,
                 retryable=False,

@@ -89,6 +89,31 @@ def test_repository_analysis_api_reports_configuration_failures(tmp_path: Path) 
     assert report.execution_issues[0].code == "analysis.configuration"
 
 
+def test_repository_analysis_api_distinguishes_an_absent_selected_manifest(tmp_path: Path) -> None:
+    subprocess.run(("git", "init", "--quiet"), cwd=tmp_path, check=True)
+    subprocess.run(
+        (
+            "git",
+            "-c",
+            "user.name=Repository Standards",
+            "-c",
+            "user.email=repository-standards@example.invalid",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "test: initialize fixture",
+        ),
+        cwd=tmp_path,
+        check=True,
+    )
+
+    report = analyze_repository(RepositoryAnalysisRequest(root=tmp_path, staged=True))
+
+    assert report.completion == "incomplete"
+    assert report.execution_issues[0].code == "analysis.manifest-absent"
+
+
 def test_repository_analysis_api_selects_committed_or_staged_tree(tmp_path: Path) -> None:
     manifest = tmp_path / ".repo-standards" / "repository.toml"
     manifest.parent.mkdir()
