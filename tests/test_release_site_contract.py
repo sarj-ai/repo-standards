@@ -105,6 +105,30 @@ def test_release_site_rejects_a_non_v7_catalog(tmp_path: Path) -> None:
     assert any("invalid catalog v7" in item for item in violations)
 
 
+def test_release_site_verifies_the_rendered_git_policy_reference(tmp_path: Path) -> None:
+    _site(tmp_path)
+    page = tmp_path / "git-policies" / "index.html"
+    page.parent.mkdir()
+    page.write_text(
+        """<html><head><title>Git policies</title><meta name="description" content="Policy"></head>
+        <body><main><h1>Git policies</h1>
+        <p>They are commands and hooks, so they do not appear in the rule count.</p>
+        <code>[(i/N) ][TICKET] type(scope)!: description</code>
+        <a href="/cli/#commit-message">Commit messages</a>
+        <a href="/cli/#pull-request.commits">Commit history</a>
+        <a href="/git-policies/">Git policies</a>
+        </main></body></html>""",
+        encoding="utf-8",
+    )
+
+    complete = verify_site(tmp_path)
+    assert not any("missing public contract" in violation for violation in complete)
+
+    page.write_text("<html><body><main><h1>Git policies</h1></main></body></html>")
+    incomplete = verify_site(tmp_path)
+    assert sum("missing public contract" in violation for violation in incomplete) == 5
+
+
 @pytest.mark.parametrize(
     ("script", "expected_violation"),
     [

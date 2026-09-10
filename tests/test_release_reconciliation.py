@@ -16,8 +16,8 @@ from release_reconciliation import (
     ReleaseStateError,
     reconciliation_plan,
     render_release_readme,
+    verify_distribution_release_identity,
     verify_installed_distributions,
-    verify_release_documents,
 )
 
 
@@ -135,7 +135,7 @@ def test_built_package_documents_must_embed_the_exact_release_identity(tmp_path:
         info.size = len(content)
         archive.addfile(info, io.BytesIO(content))
 
-    verify_release_documents(tmp_path, source_sha=TAG_SHA, version=VERSION)
+    verify_distribution_release_identity(tmp_path, source_sha=TAG_SHA, version=VERSION)
 
 
 def test_installed_distribution_verifier_checks_both_artifacts_and_writes_checksums(

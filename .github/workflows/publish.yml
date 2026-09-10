@@ -129,7 +129,7 @@ jobs:
           --distributions dist/packages/repo-standards
       - name: Verify exact release identity in package documentation
         run: >-
-          python release_reconciliation.py verify-documents
+          python release_reconciliation.py verify-release-identity
           --directory dist/packages/repo-standards
           --version "${{ needs.detect.outputs.version }}"
           --source-sha "${{ needs.detect.outputs.source_sha }}"

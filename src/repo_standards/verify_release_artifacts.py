@@ -138,6 +138,7 @@ class _SchemaValidator(Protocol):
 
 
 class HTMLTag(StrEnum):
+    A = "a"
     H1 = "h1"
     MAIN = "main"
     META = "meta"
@@ -161,13 +162,17 @@ class PageSemantics(HTMLParser):
         self.rule_id: str | None = None
         self.code_comparisons = 0
         self.example_kinds: list[str] = []
+        self.links: set[str] = set()
+        self.text: list[str] = []
         self._capture_h1 = False
         self._capture_title = False
         self._in_breadcrumb = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = dict(attrs)
-        if tag == HTMLTag.MAIN:
+        if tag == HTMLTag.A and (href := values.get("href")) is not None:
+            self.links.add(href)
+        elif tag == HTMLTag.MAIN:
             self.main_count += 1
         elif tag == HTMLTag.H1:
             self.h1_count += 1
@@ -203,6 +208,7 @@ class PageSemantics(HTMLParser):
             self._in_breadcrumb = False
 
     def handle_data(self, data: str) -> None:
+        self.text.append(data)
         if self._capture_h1:
             self.h1_text.append(data)
         if self._capture_title:
@@ -455,6 +461,8 @@ def _verify_site_semantics(directory: Path) -> list[str]:
         relative = path.relative_to(directory).as_posix()
         parser = PageSemantics()
         parser.feed(path.read_text(encoding="utf-8"))
+        if relative == "git-policies/index.html":
+            violations.extend(_verify_git_policy_reference(parser))
         if parser.main_count != 1:
             violations.append(f"site:{relative}: expected exactly one main landmark")
         if parser.h1_count != 1 or not "".join(parser.h1_text).strip():
@@ -470,6 +478,30 @@ def _verify_site_semantics(directory: Path) -> list[str]:
         violations.extend(verify_rule_page(relative, parser, expected_rules, observed_rules))
     if observed_rules != set(expected_rules):
         violations.append("site: rendered rule routes differ from the catalog")
+    return violations
+
+
+def _verify_git_policy_reference(parser: PageSemantics) -> list[str]:
+    rendered_text = " ".join("".join(parser.text).split())
+    required_text = (
+        "They are commands and hooks, so they do not appear in the rule count.",
+        "[(i/N) ][TICKET] type(scope)!: description",
+    )
+    required_links = (
+        "/cli/#commit-message",
+        "/cli/#pull-request.commits",
+        "/git-policies/",
+    )
+    violations = [
+        f"site:git-policies/index.html: missing public contract text: {text}"
+        for text in required_text
+        if text not in rendered_text
+    ]
+    violations.extend(
+        f"site:git-policies/index.html: missing public contract link: {link}"
+        for link in required_links
+        if link not in parser.links
+    )
     return violations
 
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from repo_standards.core.render import analysis_outcome_schema
+
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -89,33 +91,5 @@ def analysis_schema() -> Mapping[str, object]:
             "diagnostics": {"type": "array", "items": diagnostic},
             "execution_issues": {"type": "array", "items": issue},
         },
-        "oneOf": [
-            {
-                "properties": {
-                    "completion": {"const": "complete"},
-                    "conclusion": {"const": "passed"},
-                    "diagnostics": {"maxItems": 0},
-                    "execution_issues": {"maxItems": 0},
-                },
-                "required": ["completion", "conclusion", "diagnostics", "execution_issues"],
-            },
-            {
-                "properties": {
-                    "completion": {"const": "complete"},
-                    "conclusion": {"const": "findings"},
-                    "diagnostics": {"minItems": 1},
-                    "execution_issues": {"maxItems": 0},
-                },
-                "required": ["completion", "conclusion", "diagnostics", "execution_issues"],
-            },
-            {
-                "properties": {
-                    "completion": {"const": "incomplete"},
-                    "conclusion": {"const": "inconclusive"},
-                    "diagnostics": {"maxItems": 0},
-                    "execution_issues": {"minItems": 1},
-                },
-                "required": ["completion", "conclusion", "diagnostics", "execution_issues"],
-            },
-        ],
+        "oneOf": analysis_outcome_schema(repeat_required_members=True),
     }

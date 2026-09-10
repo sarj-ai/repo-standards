@@ -864,22 +864,12 @@ def _terraform_module_units(blobs: tuple[TrackedBlob, ...]) -> tuple[InventoryUn
 def _read_metadata_batch(root: Path, blobs: tuple[TrackedBlob, ...]) -> _MetadataBatch:
     if not blobs:
         return _MetadataBatch({}, [])
-    git_executable = shutil.which("git")
-    if git_executable is None:
-        ConfigurationError.fail("Git executable is unavailable")
-    unique = {blob.object_id: blob for blob in blobs}
-    ordered = tuple(unique[object_id] for object_id in sorted(unique))
-    object_input = b"".join(f"{blob.object_id}\n".encode() for blob in ordered)
-    try:
-        size_result = _run_git_batch(
-            root,
-            git_executable,
-            "--batch-check=%(objectname) %(objecttype) %(objectsize)",
-            object_input,
-        )
-    except (OSError, subprocess.SubprocessError):
-        ConfigurationError.fail("cannot query tracked metadata sizes")
-    sizes = _parse_batch_sizes(size_result.stdout, ordered)
+    ordered = _ordered_unique_blobs(blobs)
+    sizes = _query_blob_sizes(
+        root,
+        ordered,
+        failure="cannot query tracked metadata sizes",
+    )
     eligible: list[TrackedBlob] = []
     issues: list[str] = []
     total = 0
@@ -895,12 +885,13 @@ def _read_metadata_batch(root: Path, blobs: tuple[TrackedBlob, ...]) -> _Metadat
         ConfigurationError.fail("repository metadata exceeds the 64 MiB aggregate safety limit")
     if not eligible:
         return _MetadataBatch({}, issues)
-    eligible_input = b"".join(f"{blob.object_id}\n".encode() for blob in eligible)
-    try:
-        blob_result = _run_git_batch(root, git_executable, "--batch", eligible_input)
-    except (OSError, subprocess.SubprocessError):
-        ConfigurationError.fail("cannot read tracked metadata batch")
-    return _MetadataBatch(_parse_batch_contents(blob_result.stdout, eligible, sizes), issues)
+    contents = _read_blob_contents(
+        root,
+        tuple(eligible),
+        sizes,
+        failure="cannot read tracked metadata batch",
+    )
+    return _MetadataBatch(contents, issues)
 
 
 def _read_bounded_blob_batch(
@@ -912,31 +903,76 @@ def _read_bounded_blob_batch(
 ) -> dict[str, bytes]:
     if not blobs:
         return {}
-    git_executable = shutil.which("git")
-    if git_executable is None:
-        ConfigurationError.fail("Git executable is unavailable")
-    unique = {blob.object_id: blob for blob in blobs}
-    ordered = tuple(unique[object_id] for object_id in sorted(unique))
-    object_input = b"".join(f"{blob.object_id}\n".encode() for blob in ordered)
-    try:
-        size_result = _run_git_batch(
-            root,
-            git_executable,
-            "--batch-check=%(objectname) %(objecttype) %(objectsize)",
-            object_input,
-        )
-    except (OSError, subprocess.SubprocessError):
-        ConfigurationError.fail("cannot query selected Git blob sizes")
-    sizes = _parse_batch_sizes(size_result.stdout, ordered)
+    ordered = _ordered_unique_blobs(blobs)
+    sizes = _query_blob_sizes(
+        root,
+        ordered,
+        failure="cannot query selected Git blob sizes",
+    )
     if any(size > max_file_bytes for size in sizes.values()):
         ConfigurationError.fail("a selected Git blob exceeds the per-file safety limit")
     if sum(sizes.values()) > max_total_bytes:
         ConfigurationError.fail("selected Git blobs exceed the aggregate safety limit")
+    return _read_blob_contents(
+        root,
+        ordered,
+        sizes,
+        failure="cannot read selected Git blobs",
+    )
+
+
+def _ordered_unique_blobs(blobs: tuple[TrackedBlob, ...]) -> tuple[TrackedBlob, ...]:
+    unique = {blob.object_id: blob for blob in blobs}
+    return tuple(unique[object_id] for object_id in sorted(unique))
+
+
+def _query_blob_sizes(
+    root: Path,
+    blobs: tuple[TrackedBlob, ...],
+    *,
+    failure: str,
+) -> dict[str, int]:
+    git_executable = _required_git_executable()
     try:
-        blob_result = _run_git_batch(root, git_executable, "--batch", object_input)
+        result = _run_git_batch(
+            root,
+            git_executable,
+            "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+            _blob_batch_input(blobs),
+        )
     except (OSError, subprocess.SubprocessError):
-        ConfigurationError.fail("cannot read selected Git blobs")
-    return _parse_batch_contents(blob_result.stdout, list(ordered), sizes)
+        ConfigurationError.fail(failure)
+    return _parse_batch_sizes(result.stdout, blobs)
+
+
+def _read_blob_contents(
+    root: Path,
+    blobs: tuple[TrackedBlob, ...],
+    sizes: dict[str, int],
+    *,
+    failure: str,
+) -> dict[str, bytes]:
+    try:
+        result = _run_git_batch(
+            root,
+            _required_git_executable(),
+            "--batch",
+            _blob_batch_input(blobs),
+        )
+    except (OSError, subprocess.SubprocessError):
+        ConfigurationError.fail(failure)
+    return _parse_batch_contents(result.stdout, list(blobs), sizes)
+
+
+def _required_git_executable() -> str:
+    executable = shutil.which("git")
+    if executable is None:
+        ConfigurationError.fail("Git executable is unavailable")
+    return executable
+
+
+def _blob_batch_input(blobs: tuple[TrackedBlob, ...]) -> bytes:
+    return b"".join(f"{blob.object_id}\n".encode() for blob in blobs)
 
 
 def _run_git_batch(

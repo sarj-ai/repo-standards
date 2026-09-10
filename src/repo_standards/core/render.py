@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 
 
 if TYPE_CHECKING:
@@ -17,7 +17,46 @@ if TYPE_CHECKING:
     )
 
 
+class _OutcomeSchema(TypedDict):
+    properties: dict[str, dict[str, object]]
+    required: NotRequired[list[str]]
+
+
 OUTPUT_SCHEMA_VERSION = 3
+_OUTCOME_MEMBERS = ("completion", "conclusion", "diagnostics", "execution_issues")
+
+
+def analysis_outcome_schema(*, repeat_required_members: bool) -> list[_OutcomeSchema]:
+    outcomes: list[_OutcomeSchema] = [
+        {
+            "properties": {
+                "completion": {"const": "complete"},
+                "conclusion": {"const": "passed"},
+                "diagnostics": {"maxItems": 0},
+                "execution_issues": {"maxItems": 0},
+            }
+        },
+        {
+            "properties": {
+                "completion": {"const": "complete"},
+                "conclusion": {"const": "findings"},
+                "diagnostics": {"minItems": 1},
+                "execution_issues": {"maxItems": 0},
+            }
+        },
+        {
+            "properties": {
+                "completion": {"const": "incomplete"},
+                "conclusion": {"const": "inconclusive"},
+                "diagnostics": {"maxItems": 0},
+                "execution_issues": {"minItems": 1},
+            }
+        },
+    ]
+    if repeat_required_members:
+        for outcome in outcomes:
+            outcome["required"] = list(_OUTCOME_MEMBERS)
+    return outcomes
 
 
 def diagnostic_dict(diagnostic: Diagnostic) -> Mapping[str, object]:
@@ -307,30 +346,5 @@ def output_schema() -> Mapping[str, object]:
             "input_provenance": {"type": "object"},
             "ratchet_comparison": {"type": "object"},
         },
-        "oneOf": [
-            {
-                "properties": {
-                    "completion": {"const": "complete"},
-                    "conclusion": {"const": "passed"},
-                    "diagnostics": {"maxItems": 0},
-                    "execution_issues": {"maxItems": 0},
-                }
-            },
-            {
-                "properties": {
-                    "completion": {"const": "complete"},
-                    "conclusion": {"const": "findings"},
-                    "diagnostics": {"minItems": 1},
-                    "execution_issues": {"maxItems": 0},
-                }
-            },
-            {
-                "properties": {
-                    "completion": {"const": "incomplete"},
-                    "conclusion": {"const": "inconclusive"},
-                    "diagnostics": {"maxItems": 0},
-                    "execution_issues": {"minItems": 1},
-                }
-            },
-        ],
+        "oneOf": analysis_outcome_schema(repeat_required_members=False),
     }
