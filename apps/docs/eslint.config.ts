@@ -5,8 +5,14 @@ import { defineConfig } from 'eslint/config';
 import astro from 'eslint-plugin-astro';
 import tseslint from 'typescript-eslint';
 
+const optInSarjRules = new Set([
+  'no-unlocalized-jsx-attributes',
+  'no-unlocalized-jsx-text',
+  'no-unlocalized-toast',
+]);
 const sarjRules: Record<string, 'error'> = Object.fromEntries(
   Object.keys(sarj.rules)
+    .filter((name) => !optInSarjRules.has(name))
     .sort()
     .map((name) => [`@sarj/${name}`, 'error'] as const),
 );
