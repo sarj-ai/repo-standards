@@ -182,10 +182,63 @@ def test_non_schema_derived_config_example_paths_are_clean(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        pytest.param("index.mjs", id="root"),
+        pytest.param("scripts/generate-catalog.mjs", id="nested"),
+        pytest.param("apps/docs/ASTRO.CONFIG.MJS", id="case-insensitive"),
+        pytest.param("vendor/tool/index.mjs", id="vendor-looking"),
+        pytest.param("generated/client.mjs", id="generated-looking"),
+    ],
+)
+def test_mjs_files_are_rejected_without_path_exclusions(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == [RuleId("repository/artifacts/mjs-files")]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("index.js", id="javascript"),
+        pytest.param("index.cjs", id="commonjs"),
+        pytest.param("index.mts", id="typescript-module"),
+        pytest.param("index.mjs.bak", id="suffix"),
+        pytest.param("legacy.mjs/index.ts", id="directory-segment"),
+    ],
+)
+def test_non_mjs_file_paths_are_clean(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == []
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        pytest.param(
+            "verify-plan.mjs",
+            [
+                RuleId("repository/artifacts/bespoke-iac-verifiers"),
+                RuleId("repository/artifacts/mjs-files"),
+            ],
+            id="verifier",
+        ),
+        pytest.param(
+            "iac/contract.test.mjs",
+            [
+                RuleId("repository/artifacts/mjs-files"),
+                RuleId("repository/artifacts/operational-script-tests"),
+            ],
+            id="operational-test",
+        ),
+    ],
+)
+def test_mjs_diagnostic_is_additive_and_deterministic(path: str, expected: list[RuleId]) -> None:
+    assert _rule_ids(_snapshot(path)) == expected
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
         pytest.param("iac/verify-plan.js", id="javascript"),
         pytest.param("deploy/verify-plan.sh", id="shell"),
         pytest.param("tools/verify-plan.py", id="python"),
-        pytest.param("tools/VERIFY-PLAN.MJS", id="case-insensitive-mjs"),
+        pytest.param("tools/VERIFY-PLAN.CJS", id="case-insensitive-cjs"),
         pytest.param("verify-dev-apply-plan.jq", id="globally-retired-root"),
         pytest.param("iac/bulbul/scripts/verify-dev-apply-plan.jq", id="nested-jq"),
         pytest.param("tools/VERIFY-DEV-APPLY-PLAN.JQ", id="case-insensitive"),
@@ -198,11 +251,11 @@ def test_bespoke_iac_verifier_files_are_rejected(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        pytest.param("preverify.mjs", id="prefix-mjs"),
-        pytest.param("verify-plan.mjs.bak", id="mjs-suffix"),
+        pytest.param("preverify.cjs", id="prefix-cjs"),
+        pytest.param("verify-plan.cjs.bak", id="cjs-suffix"),
         pytest.param("verify-dev-apply-plan.jq.bak", id="suffix"),
         pytest.param("prefix-verify-dev-apply-plan.jq", id="prefix"),
-        pytest.param("verify/plan.mjs", id="different-basename"),
+        pytest.param("verify/plan.cjs", id="different-basename"),
     ],
 )
 def test_non_operational_or_nearby_verifier_names_are_clean(path: str) -> None:
@@ -212,9 +265,9 @@ def test_non_operational_or_nearby_verifier_names_are_clean(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        pytest.param("verify.mjs", id="root-minimal-mjs"),
+        pytest.param("verify.cjs", id="root-minimal-cjs"),
         pytest.param("verify_release_artifacts.py", id="root-release-verifier"),
-        pytest.param("verify-environment-boundary.test.mjs", id="root-test-verifier"),
+        pytest.param("verify-environment-boundary.test.cjs", id="root-test-verifier"),
     ],
 )
 def test_unowned_root_verifier_names_are_rejected(path: str) -> None:
@@ -224,7 +277,7 @@ def test_unowned_root_verifier_names_are_rejected(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        pytest.param("random/src/verify-plan.mjs", id="unowned-src"),
+        pytest.param("random/src/verify-plan.cjs", id="unowned-src"),
         pytest.param("random/tests/verify-plan.py", id="unowned-tests"),
     ],
 )
@@ -243,15 +296,15 @@ def test_root_terraform_module_verifier_is_rejected() -> None:
     "path",
     [
         pytest.param("tools/contract.spec.ts", id="relocated"),
-        pytest.param("iac/bell/PREVIEW.TEST.MJS", id="operational"),
-        pytest.param("ci/contracts/preview.test.mjs", id="ci"),
+        pytest.param("iac/bell/PREVIEW.TEST.CJS", id="operational"),
+        pytest.param("ci/contracts/preview.test.cjs", id="ci"),
         pytest.param("ops/preview.test.tsx", id="tsx-relocation"),
         pytest.param("iac/scripts/health-check.test.sh", id="shell"),
         pytest.param("deploy/policy.spec.jq", id="jq"),
-        pytest.param(".github/actions/release/contract.test.mjs", id="github-action"),
+        pytest.param(".github/actions/release/contract.test.cjs", id="github-action"),
         pytest.param(".github/workflows/release.spec.ts", id="github-workflow"),
-        pytest.param("services/api/deploy/contract.test.mjs", id="nested-deploy"),
-        pytest.param("services/bell/deploy/preview.test.mjs", id="derived-terraform-root"),
+        pytest.param("services/api/deploy/contract.test.cjs", id="nested-deploy"),
+        pytest.param("services/bell/deploy/preview.test.cjs", id="derived-terraform-root"),
     ],
 )
 def test_operational_script_tests_are_rejected(path: str) -> None:
@@ -264,12 +317,12 @@ def test_operational_script_tests_are_rejected(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        pytest.param("plan.test.mjs", id="root"),
+        pytest.param("plan.test.cjs", id="root"),
         pytest.param("checks/test_policy.py", id="python-prefix"),
         pytest.param("checks/contract.test.py", id="python-suffix"),
         pytest.param("checks/policy_test.py", id="python-pytest-suffix"),
-        pytest.param("packages/api/scripts/release.test.mjs", id="package-script"),
-        pytest.param("packages/api/tests/release.test.mjs", id="package-test"),
+        pytest.param("packages/api/scripts/release.test.cjs", id="package-script"),
+        pytest.param("packages/api/tests/release.test.cjs", id="package-test"),
     ],
 )
 def test_non_operational_script_tests_are_clean(path: str) -> None:
@@ -278,11 +331,11 @@ def test_non_operational_script_tests_are_clean(path: str) -> None:
 
 def test_root_project_owns_only_conventional_test_locations() -> None:
     package = _root_package("npm", "package.json", "example", workspace_root=True)
-    assert _rule_ids(_snapshot("tests/plan.test.mjs", packages=(package,))) == []
-    assert _rule_ids(_snapshot("iac/plan.test.mjs", packages=(package,))) == [
+    assert _rule_ids(_snapshot("tests/plan.test.cjs", packages=(package,))) == []
+    assert _rule_ids(_snapshot("iac/plan.test.cjs", packages=(package,))) == [
         RuleId("repository/artifacts/operational-script-tests")
     ]
-    assert _rule_ids(_snapshot("iac/tests/plan.test.mjs", packages=(package,))) == [
+    assert _rule_ids(_snapshot("iac/tests/plan.test.cjs", packages=(package,))) == [
         RuleId("repository/artifacts/operational-script-tests")
     ]
 
@@ -293,7 +346,7 @@ def test_root_project_owns_only_conventional_test_locations() -> None:
         pytest.param(
             "packages/generator/package.json",
             "@example/generator",
-            "packages/generator/scripts/tests/render.test.mjs",
+            "packages/generator/scripts/tests/render.test.cjs",
             id="package-test",
         ),
         pytest.param(
@@ -361,7 +414,7 @@ def test_nested_workspace_does_not_make_non_operational_tests_invalid() -> None:
     assert (
         _rule_ids(
             _snapshot(
-                "vendor/check/tests/contract.test.mjs",
+                "vendor/check/tests/contract.test.cjs",
                 packages=(package,),
                 workspaces=(workspace,),
             )
@@ -483,7 +536,7 @@ def test_nested_workspace_requires_named_included_child(
     )
     snapshot = _snapshot(
         "typescript/packages/app/README.md",
-        "typescript/packages/app/src/verify-plan.mjs",
+        "typescript/packages/app/src/verify-plan.cjs",
         packages=(package,),
         workspaces=(workspace,),
     )
@@ -500,7 +553,7 @@ def test_nested_workspace_requires_named_included_child(
             "examples/demo/package.json",
             "@example/demo",
             "examples/*",
-            "examples/demo/tests/contract.test.mjs",
+            "examples/demo/tests/contract.test.cjs",
             RuleId("repository/artifacts/operational-script-tests"),
             id="examples-tree-is-operational",
         ),
@@ -550,7 +603,7 @@ def test_root_workspace_owned_package_exclusions(
             "shared.release-tool",
             "tools/release",
             "@example/release-tool",
-            "tools/release/tests/render.test.mjs",
+            "tools/release/tests/render.test.cjs",
             [],
             id="tools-root",
         ),
@@ -558,7 +611,7 @@ def test_root_workspace_owned_package_exclusions(
             "shared.release-tool",
             "tools/release",
             "@example/release-tool",
-            "tools/release/src/render.test.mjs",
+            "tools/release/src/render.test.cjs",
             [RuleId("repository/artifacts/operational-script-tests")],
             id="tools-source-is-not-test-ownership",
         ),
@@ -566,7 +619,7 @@ def test_root_workspace_owned_package_exclusions(
             "shared.iac-tool",
             "iac/bell",
             "@example/iac-tool",
-            "iac/bell/tests/plan.test.mjs",
+            "iac/bell/tests/plan.test.cjs",
             [RuleId("repository/artifacts/operational-script-tests")],
             id="iac-root",
         ),
@@ -622,7 +675,7 @@ def test_terraform_module_cannot_use_declared_tool_test_escape() -> None:
     )
     assert _rule_ids(
         _snapshot(
-            "tools/release/tests/render.test.mjs",
+            "tools/release/tests/render.test.cjs",
             components=(component,),
             packages=(package,),
             terraform_modules=("tools/release",),
@@ -640,7 +693,7 @@ def test_terraform_module_precedes_declared_application_ownership() -> None:
     )
     assert _rule_ids(
         _snapshot(
-            "services/release/deploy/plan.test.mjs",
+            "services/release/deploy/plan.test.cjs",
             components=(component,),
             terraform_modules=("services/release/deploy",),
         )
@@ -657,7 +710,7 @@ def test_nested_deploy_precedes_declared_application_ownership() -> None:
     )
     assert _rule_ids(
         _snapshot(
-            "services/api/deploy/contract.test.mjs",
+            "services/api/deploy/contract.test.cjs",
             components=(component,),
         )
     ) == [RuleId("repository/artifacts/operational-script-tests")]
@@ -679,7 +732,7 @@ def test_tools_package_without_declared_component_cannot_own_operational_test() 
     )
     assert _rule_ids(
         _snapshot(
-            "tools/release/tests/render.test.mjs",
+            "tools/release/tests/render.test.cjs",
             packages=(package,),
             workspaces=(workspace,),
         )
@@ -751,8 +804,8 @@ def test_relocated_unowned_verifier_is_rejected() -> None:
 @pytest.mark.parametrize(
     "artifact_path",
     [
-        pytest.param("packages/fake/verify-plan.mjs", id="package-root"),
-        pytest.param("packages/fake/deploy/verify-plan.mjs", id="package-deploy"),
+        pytest.param("packages/fake/verify-plan.cjs", id="package-root"),
+        pytest.param("packages/fake/deploy/verify-plan.cjs", id="package-deploy"),
     ],
 )
 def test_package_manifest_alone_does_not_own_verifier(artifact_path: str) -> None:
@@ -771,9 +824,9 @@ def test_package_manifest_alone_does_not_own_verifier(artifact_path: str) -> Non
 @pytest.mark.parametrize(
     ("artifact_path", "terraform_modules"),
     [
-        pytest.param("iac/tool/src/verify-plan.mjs", (), id="iac-root"),
+        pytest.param("iac/tool/src/verify-plan.cjs", (), id="iac-root"),
         pytest.param(
-            "services/release/src/verify-plan.mjs",
+            "services/release/src/verify-plan.cjs",
             ("services/release",),
             id="terraform-module",
         ),
@@ -783,7 +836,7 @@ def test_operational_precedence_rejects_named_package_source_verifier(
     artifact_path: str,
     terraform_modules: tuple[str, ...],
 ) -> None:
-    root = artifact_path.removesuffix("/src/verify-plan.mjs")
+    root = artifact_path.removesuffix("/src/verify-plan.cjs")
     package = PackageEvidence(
         ecosystem="npm",
         path=f"{root}/package.json",
@@ -875,7 +928,7 @@ def test_operational_path_precedes_declared_component_verifier_ownership(
     "artifact_path",
     [
         pytest.param(".github/actions/release/verify-plan.py", id="github-action"),
-        pytest.param(".github/workflows/verify-plan.mjs", id="github-workflow"),
+        pytest.param(".github/workflows/verify-plan.cjs", id="github-workflow"),
         pytest.param("services/api/deploy/verify-plan.py", id="nested-deploy"),
     ],
 )
@@ -902,7 +955,7 @@ def test_empty_package_identity_does_not_create_test_ownership(name: str | None)
     )
     assert _rule_ids(
         _snapshot(
-            "tools/check/tests/contract.test.mjs",
+            "tools/check/tests/contract.test.cjs",
             packages=(package,),
             workspaces=(workspace,),
         )
@@ -1066,7 +1119,7 @@ def test_named_standalone_package_owns_conventional_artifact(
         pytest.param(
             "npm",
             "packages/fake/package.json",
-            "packages/fake/src/verify-plan.mjs",
+            "packages/fake/src/verify-plan.cjs",
             id="node-manifest-only",
         ),
         pytest.param(
@@ -1099,7 +1152,7 @@ def test_nested_standalone_manifest_alone_does_not_own_verifier_source(
         pytest.param(
             "npm",
             "packages/fake/package.json",
-            "packages/fake/src/verify-plan.mjs",
+            "packages/fake/src/verify-plan.cjs",
             id="node-empty-workspace",
         ),
         pytest.param(
@@ -1138,14 +1191,14 @@ def test_empty_workspace_manifest_does_not_own_verifier_source(
         pytest.param(
             "npm",
             "packages/fake/package.json",
-            "packages/fake/src/verify-plan.mjs",
+            "packages/fake/src/verify-plan.cjs",
             "packages/fake/package-lock.json",
             id="node-empty-lock",
         ),
         pytest.param(
             "npm",
             "packages/fake/package.json",
-            "packages/fake/src/verify-plan.mjs",
+            "packages/fake/src/verify-plan.cjs",
             "packages/fake/index.js",
             id="node-empty-entrypoint",
         ),
@@ -1279,7 +1332,7 @@ def test_named_nonempty_workspace_root_owns_tool_source_verifier(
     assert (
         _rule_ids(
             _snapshot(
-                "tools/platform/src/verify-plan.mjs",
+                "tools/platform/src/verify-plan.cjs",
                 packages=(package,),
                 workspaces=(workspace,),
             )
@@ -1325,7 +1378,7 @@ def test_workspace_globstar_membership(
 
     assert _rule_ids(
         _snapshot(
-            "packages/team/app/src/verify-plan.mjs",
+            "packages/team/app/src/verify-plan.cjs",
             packages=(package,),
             workspaces=(workspace,),
         )

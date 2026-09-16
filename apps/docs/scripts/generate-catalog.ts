@@ -23,7 +23,7 @@ if (result.status !== 0) {
   stderr.write(result.stderr);
   exit(result.status ?? 1);
 }
-const parsed = JSON.parse(result.stdout);
+const parsed: unknown = JSON.parse(result.stdout);
 await mkdir(generatedDirectory, { recursive: true });
 await Promise.all([
   writeFile(resolve(generatedDirectory, 'catalog.json'), result.stdout, 'utf8'),

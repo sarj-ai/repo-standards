@@ -529,7 +529,7 @@ RULES = (
                 example_id="sarj-artifact-no-operational-script-tests",
                 title="Operational source-coupled test",
                 language="text",
-                before="iac/bell/preview-contract.test.mjs",
+                before="iac/bell/preview-contract.test.ts",
                 after="Terraform validation, precondition, or shared policy",
                 expected_severity="warning",
             ),
@@ -561,6 +561,32 @@ RULES = (
                 language="text",
                 before="iac/tests/routing.tftest.hcl",
                 after="shared rendered-plan validation",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=RuleId("repository/artifacts/mjs-files"),
+        version=1,
+        default_severity="error",
+        title="Do not commit .mjs source files",
+        description="Tracked paths ending in .mjs are prohibited, case-insensitively.",
+        why=(
+            "Typed TypeScript source keeps executable tooling inside the repository's "
+            "type-checking contract instead of maintaining untyped module islands."
+        ),
+        fix=(
+            "Replace authored .mjs source with typed .ts. Use tool-native TypeScript loading "
+            "or Node.js type stripping for local tooling, and emit untracked JavaScript only "
+            "when a distribution target requires it."
+        ),
+        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
+        examples=(
+            _example(
+                example_id="sarj-artifact-no-mjs-files",
+                title="JavaScript module source",
+                language="text",
+                before="scripts/generate-catalog.mjs",
+                after="scripts/generate-catalog.ts",
             ),
         ),
     ),
@@ -635,6 +661,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/operational-script-tests"): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/terraform-test-files"): RuleClassification.OBJECTIVE,
+        RuleId("repository/artifacts/mjs-files"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/reachability"): RuleClassification.JUDGMENT,
         RuleId("architecture/delivery/authority"): RuleClassification.OPERATIONAL,
@@ -650,6 +677,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
         RuleId("repository/artifacts/operational-script-tests"): 46,
         RuleId("repository/artifacts/terraform-test-files"): 47,
+        RuleId("repository/artifacts/mjs-files"): 48,
         RuleId("repository/documentation/placement"): 50,
         RuleId("repository/documentation/reachability"): 60,
         RuleId("architecture/delivery/authority"): 70,
@@ -695,7 +723,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=14,
+    policy_version=15,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -944,6 +972,29 @@ def _repository_artifact_diagnostics(
                             (
                                 "Validate the behavior through a rendered plan, provider, or "
                                 "runtime contract."
+                            ),
+                        ),
+                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    ),
+                )
+            )
+        if path.casefold().endswith(".mjs"):
+            diagnostics.append(
+                _repository_diagnostic(
+                    rule_id=RuleId("repository/artifacts/mjs-files"),
+                    component=component,
+                    subject_kind="tracked-mjs-file",
+                    observed=path,
+                    expected="no tracked .mjs filename",
+                    message="tracked .mjs source is prohibited by repository policy",
+                    path=path,
+                    remediation=Remediation(
+                        summary="Replace the JavaScript module with typed TypeScript source.",
+                        steps=(
+                            "Rename authored .mjs source to .ts and add explicit types.",
+                            (
+                                "Use tool-native TypeScript loading or Node.js type stripping; "
+                                "emit untracked JavaScript only for distribution targets."
                             ),
                         ),
                         validation=("Inspect the selected Git tree and rerun repo-standards.",),

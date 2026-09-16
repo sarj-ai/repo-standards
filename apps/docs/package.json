@@ -4,15 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "catalog": "node ./scripts/generate-catalog.mjs",
-    "build": "npm run catalog && astro check && astro build && node --experimental-strip-types ./scripts/finalize-cloudflare-artifacts.ts",
-    "check": "npm run catalog && astro check",
+    "catalog": "node ./scripts/generate-catalog.ts",
+    "build": "npm run catalog && npm run typecheck && astro build && node ./scripts/finalize-cloudflare-artifacts.ts",
+    "check": "npm run catalog && npm run typecheck",
     "deploy": "wrangler deploy",
     "dev": "npm run catalog && astro dev",
     "lint": "npm run catalog && eslint . --max-warnings 0",
     "preview": "astro preview",
-    "test": "node --test ./scripts/*.test.mjs",
-    "verify:deployment": "node ./scripts/verify-deployment.mjs"
+    "test": "node --test ./scripts/verify-deployment.test.ts",
+    "typecheck": "astro check && tsc --project tsconfig.node.json",
+    "verify:deployment": "node ./scripts/verify-deployment.ts"
   },
   "dependencies": {
     "@astrojs/starlight": "0.41.10",
@@ -24,14 +25,16 @@
     "@astrojs/sitemap": "3.7.4",
     "@eslint/js": "10.0.1",
     "@sarj/eslint-plugin": "15.17.11",
+    "@types/node": "24.13.3",
     "eslint": "10.10.0",
     "eslint-plugin-astro": "3.1.0",
+    "jiti": "2.7.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.70.0",
     "wrangler": "4.130.0"
   },
   "engines": {
-    "node": ">=22.14.0"
+    "node": ">=24.12.0"
   },
   "overrides": {
     "@astrojs/markdown-satteri": "0.3.6",
