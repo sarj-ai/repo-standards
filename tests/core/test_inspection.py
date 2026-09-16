@@ -247,7 +247,7 @@ def test_committed_tree_rejects_symlinks(tmp_path: Path) -> None:
     [
         pytest.param("package-lock.json", "\n", id="newline-lock"),
         pytest.param("index.js", "// ownership decoy\n", id="line-comment-entrypoint"),
-        pytest.param("index.mjs", "/* ownership decoy */\n", id="block-comment-entrypoint"),
+        pytest.param("index.cjs", "/* ownership decoy */\n", id="block-comment-entrypoint"),
         pytest.param("uv.lock", "# ownership decoy\n", id="hash-comment-lock"),
         pytest.param("main.py", "# ownership decoy\n", id="python-comment-entrypoint"),
     ],
@@ -259,13 +259,13 @@ def test_exact_tree_marks_comment_only_ownership_evidence_insubstantial(
     (repository / "package.json").write_text('{"private":true}', encoding="utf-8")
     package = repository / "packages" / "fake"
     package.mkdir()
-    manifest = "package.json" if evidence.endswith((".js", ".mjs", ".json")) else "pyproject.toml"
+    manifest = "package.json" if evidence.endswith((".js", ".cjs", ".json")) else "pyproject.toml"
     manifest_content = (
         '{"name":"fake"}' if manifest == "package.json" else '[project]\nname="fake"\n'
     )
     (package / manifest).write_text(manifest_content, encoding="utf-8")
     (package / evidence).write_text(content, encoding="utf-8")
-    verifier = "src/verify-plan.mjs" if manifest == "package.json" else "src/verify_plan.py"
+    verifier = "src/verify-plan.cjs" if manifest == "package.json" else "src/verify_plan.py"
     (package / "src").mkdir()
     (package / verifier).write_text("export {}\n", encoding="utf-8")
     _git(repository, "add", ".")
@@ -300,7 +300,7 @@ def test_exact_tree_marks_comment_only_ownership_evidence_insubstantial(
         pytest.param("committed", "package-lock.json", " " * 1_048_577, id="committed-lock"),
         pytest.param(
             "staged",
-            "index.mjs",
+            "index.cjs",
             f"/*{' ' * 1_048_573}*/",
             id="staged-entrypoint",
         ),
@@ -319,7 +319,7 @@ def test_oversized_ownership_decoys_fail_closed_in_the_exact_tree(
     (package / "package.json").write_text('{"name":"fake"}', encoding="utf-8")
     (package / evidence).write_text(content, encoding="utf-8")
     (package / "src").mkdir()
-    verifier = package / "src" / "verify-plan.mjs"
+    verifier = package / "src" / "verify-plan.cjs"
     verifier.write_text("export {}\n", encoding="utf-8")
     _git(repository, "add", ".")
     identity = git_index_identity(repository) if tree_mode == "staged" else None
@@ -348,7 +348,7 @@ def test_oversized_ownership_decoys_fail_closed_in_the_exact_tree(
     assert [
         item.rule_id
         for item in SarjPolicy.evaluate_repository(snapshot)
-        if item.path == "packages/fake/src/verify-plan.mjs"
+        if item.path == "packages/fake/src/verify-plan.cjs"
     ] == [RuleId("repository/artifacts/bespoke-iac-verifiers")]
 
 
@@ -366,9 +366,9 @@ def test_oversized_lock_does_not_brick_independently_owned_package(
     oversized_lock = package_root / "package-lock.json"
     oversized_lock.write_text(" " * 1_048_577, encoding="utf-8")
     if ownership == "entrypoint":
-        (package_root / "index.mjs").write_text("export {}\n", encoding="utf-8")
+        (package_root / "index.cjs").write_text("export {}\n", encoding="utf-8")
     (package_root / "src").mkdir()
-    verifier = package_root / "src" / "verify-plan.mjs"
+    verifier = package_root / "src" / "verify-plan.cjs"
     verifier.write_text("export {}\n", encoding="utf-8")
     _git(repository, "add", ".")
     _git(
