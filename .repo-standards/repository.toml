@@ -5,4 +5,3 @@ enabled_rules = ["repository/artifacts/mjs-files"]
 
 [documentation]
 entrypoints = ["README.md"]
-maximum_added_pages = 1
