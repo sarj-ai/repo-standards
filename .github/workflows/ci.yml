@@ -58,6 +58,9 @@ jobs:
       - name: Self-test pull-request commit action
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         uses: ./pull-request-commits
+      - name: Self-test documentation budget action
+        if: github.event_name == 'pull_request'
+        uses: ./documentation
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -89,6 +92,7 @@ jobs:
           "$SMOKE_ENV/bin/repo-standards" --version
           "$SMOKE_ENV/bin/repo-standards" capabilities
           "$SMOKE_ENV/bin/repo-standards" pull-request commits --help
+          "$SMOKE_ENV/bin/repo-standards" pull-request documentation --help
           "$SMOKE_ENV/bin/repo-standards" pull-request size --help
           "$SMOKE_ENV/bin/repo-standards" schema
           "$SMOKE_ENV/bin/repo-standards" schema openapi-analysis

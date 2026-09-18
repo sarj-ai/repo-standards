@@ -152,6 +152,7 @@ def test_catalog_graph_is_complete() -> None:
         "explain",
         "inspect",
         "pull-request.commits",
+        "pull-request.documentation",
         "pull-request.size",
         "report",
         "rest.check",

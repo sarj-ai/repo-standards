@@ -106,6 +106,8 @@ class DeliveryConfig:
 @dataclass(frozen=True, slots=True)
 class DocumentationConfig:
     entrypoints: tuple[str, ...]
+    maximum_added_pages: int = 1
+    addition_exemptions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

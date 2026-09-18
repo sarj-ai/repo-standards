@@ -135,7 +135,11 @@ def scope_digest(manifest: Manifest) -> str:
             ]
         }
     if manifest.documentation is not None:
-        payload["documentation"] = {"entrypoints": list(manifest.documentation.entrypoints)}
+        payload["documentation"] = {
+            "entrypoints": list(manifest.documentation.entrypoints),
+            "maximum_added_pages": manifest.documentation.maximum_added_pages,
+            "addition_exemptions": list(manifest.documentation.addition_exemptions),
+        }
     if manifest.active_configuration:
         payload["active_configuration"] = [
             {"component_id": item.component_id, "path": item.path, "format": item.format}

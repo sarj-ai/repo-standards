@@ -56,6 +56,10 @@ from repo_standards.core.pull_request_commits import (
     TransitionExemptionId,
     analyze_pull_request_commits,
 )
+from repo_standards.core.pull_request_documentation import (
+    PullRequestDocumentation,
+    analyze_pull_request_documentation,
+)
 from repo_standards.core.pull_request_size import PullRequestSize, analyze_pull_request_size
 from repo_standards.core.render import render_text, report_dict
 from repo_standards.core.rule_reviews import (
@@ -454,6 +458,77 @@ def _render_pull_request_size(result: PullRequestSize, *, top_files: int) -> str
     if largest:
         lines.append("Largest counted files:")
         lines.extend(f"  {item.lines:>6}  {item.path}" for item in largest)
+    return "\n".join(lines) + "\n"
+
+
+@pull_request_app.command("documentation")
+def pull_request_documentation_command(
+    root: Annotated[Path, typer.Argument()] = Path(),
+    base: Annotated[str, typer.Option(help="Trusted base revision used for policy.")] = "",
+    head: Annotated[str, typer.Option(help="Head revision to compare with the base.")] = "HEAD",
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
+) -> None:
+    """Limit newly added Markdown pages using policy from the trusted base tree."""
+    if not base:
+        _emit_command_error(
+            "pull-request documentation",
+            "request.invalid",
+            "--base is required",
+            phase="request",
+            remediation="Pass --base with the trusted pull-request base revision.",
+        )
+    try:
+        result = analyze_pull_request_documentation(root, base=base, head=head)
+    except (ConfigurationError, OSError) as error:
+        _emit_command_error(
+            "pull-request documentation",
+            "analysis.incomplete",
+            str(error),
+            phase="analysis",
+            remediation="Fetch and verify the base and head revisions, then retry.",
+        )
+    payload = _pull_request_documentation_payload(result)
+    if output_format is OutputFormat.TEXT:
+        typer.echo(_render_pull_request_documentation(result), nl=False)
+    elif output_format is OutputFormat.PRETTY_JSON:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True) + "\n", nl=False)
+    else:
+        typer.echo(canonical_json(payload) + "\n", nl=False)
+    if not result.satisfied:
+        raise typer.Exit(1)
+
+
+def _pull_request_documentation_payload(
+    result: PullRequestDocumentation,
+) -> Mapping[str, object]:
+    return {
+        **_envelope(
+            "pull-request documentation",
+            provenance={"kind": "git-revisions", "base": result.base, "head": result.head},
+        ),
+        "policy": {"maximum_added_pages": result.maximum_added_pages, "source": result.base},
+        "summary": {
+            "satisfied": result.satisfied,
+            "added_pages": len(result.added_pages),
+            "exempt_pages": len(result.exempt_pages),
+        },
+        "findings": list(result.added_pages),
+        "exemptions": list(result.exempt_pages),
+    }
+
+
+def _render_pull_request_documentation(result: PullRequestDocumentation) -> str:
+    lines = [
+        f"Added Markdown pages: {len(result.added_pages)}/{result.maximum_added_pages}",
+    ]
+    lines.extend(f"  {path}" for path in result.added_pages)
+    if result.exempt_pages:
+        lines.append(f"Explicitly exempt pages: {len(result.exempt_pages)}")
+        lines.extend(f"  {path}" for path in result.exempt_pages)
+    if not result.satisfied:
+        lines.append(
+            "Remove or consolidate new pages; durable documentation belongs in the existing graph."
+        )
     return "\n".join(lines) + "\n"
 
 
