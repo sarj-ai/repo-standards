@@ -339,7 +339,12 @@ def parse_delivery(value: object) -> DeliveryConfig:
 
 def parse_documentation(value: object) -> DocumentationConfig:
     data = _mapping(value, "documentation")
-    _strict_keys(data, {"entrypoints"}, {"entrypoints"}, "documentation")
+    _strict_keys(
+        data,
+        {"entrypoints", "maximum_added_pages", "addition_exemptions"},
+        {"entrypoints"},
+        "documentation",
+    )
     entrypoints = tuple(
         canonical_path(item)
         for item in _string_list(data["entrypoints"], "documentation.entrypoints")
@@ -348,7 +353,26 @@ def parse_documentation(value: object) -> DocumentationConfig:
         ConfigurationError.fail("documentation.entrypoints must be non-empty and unique")
     if any(not path.casefold().endswith(".md") for path in entrypoints):
         ConfigurationError.fail("documentation.entrypoints must be Markdown paths")
-    return DocumentationConfig(entrypoints=entrypoints)
+    maximum_added_pages = _integer(
+        data, "maximum_added_pages", "documentation", default=1
+    )
+    if maximum_added_pages < 0:
+        ConfigurationError.fail("documentation.maximum_added_pages must be non-negative")
+    addition_exemptions = tuple(
+        canonical_path(item)
+        for item in _string_list(
+            data.get("addition_exemptions", []), "documentation.addition_exemptions"
+        )
+    )
+    if len(addition_exemptions) != len(set(addition_exemptions)):
+        ConfigurationError.fail("documentation.addition_exemptions must be unique")
+    if any(not path.casefold().endswith((".md", ".mdx")) for path in addition_exemptions):
+        ConfigurationError.fail("documentation.addition_exemptions must be Markdown paths")
+    return DocumentationConfig(
+        entrypoints=entrypoints,
+        maximum_added_pages=maximum_added_pages,
+        addition_exemptions=addition_exemptions,
+    )
 
 
 def parse_active_configuration(value: object, index: int) -> ActiveConfiguration:
