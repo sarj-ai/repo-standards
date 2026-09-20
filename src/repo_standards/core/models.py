@@ -106,7 +106,7 @@ class DeliveryConfig:
 @dataclass(frozen=True, slots=True)
 class DocumentationConfig:
     entrypoints: tuple[str, ...]
-    maximum_added_pages: int = 1
+    maximum_added_pages: int = 0
     addition_exemptions: tuple[str, ...] = ()
 
 
@@ -134,8 +134,21 @@ class PullRequestCommitHistoryConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PullRequestReviewPolicyConfig:
+    zero_review_below_counted_lines: int
+    two_reviews_above_counted_lines: int
+    migration_roots: tuple[str, ...]
+    required_checks: tuple[str, ...]
+    required_body_sections: tuple[str, ...]
+    transition_exemptions: tuple[str, ...] = ()
+    transition_actors: tuple[str, ...] = ()
+    accepted_check_conclusions: tuple[str, ...] = ("success",)
+
+
+@dataclass(frozen=True, slots=True)
 class PullRequestConfig:
     commit_history: PullRequestCommitHistoryConfig
+    review_policy: PullRequestReviewPolicyConfig | None = None
 
 
 class CommitMessageEnforcement(StrEnum):

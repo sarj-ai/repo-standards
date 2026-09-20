@@ -222,3 +222,176 @@ exempt_all_automation = true
 
     with pytest.raises(ValueError, match="unknown fields: exempt_all_automation"):
         parse_manifest_bytes(content)
+
+
+_REVIEW_POLICY = b"""
+[pull_request.review_policy]
+zero_review_below_counted_lines = 200
+two_reviews_above_counted_lines = 800
+migration_roots = ["db/migrations", "services/api/migrations"]
+required_checks = ["lint", "test"]
+required_body_sections = ["QA impact / blast radius", "Manual tests"]
+transition_exemptions = ["dev-preview"]
+transition_actors = ["release-automation[bot]"]
+accepted_check_conclusions = ["success"]
+"""
+
+
+def _schema_seven_review_policy(*, review_policy: bytes = _REVIEW_POLICY) -> bytes:
+    return (
+        b"""
+schema_version = 7
+repository_id = "example"
+components = []
+
+[pull_request.commit_history]
+advisory_base_ref = "dev"
+
+[[pull_request.commit_history.transitions]]
+id = "dev-preview"
+source_ref = "dev"
+base_ref = "preview"
+head_prefix = "automation/promote-dev-"
+"""
+        + review_policy
+    )
+
+
+def test_schema_seven_parses_review_policy() -> None:
+    manifest = parse_manifest_bytes(_schema_seven_review_policy())
+
+    assert manifest.pull_request is not None
+    policy = manifest.pull_request.review_policy
+    assert policy is not None
+    assert policy.zero_review_below_counted_lines == 200
+    assert policy.two_reviews_above_counted_lines == 800
+    assert policy.migration_roots == ("db/migrations", "services/api/migrations")
+    assert policy.required_checks == ("lint", "test")
+    assert policy.required_body_sections == ("QA impact / blast radius", "Manual tests")
+    assert policy.transition_exemptions == ("dev-preview",)
+    assert policy.transition_actors == ("release-automation[bot]",)
+    assert policy.accepted_check_conclusions == ("success",)
+
+
+def test_schema_seven_review_policy_defaults_to_successful_checks() -> None:
+    manifest = parse_manifest_bytes(
+        _schema_seven_review_policy(
+            review_policy=_REVIEW_POLICY.replace(b'accepted_check_conclusions = ["success"]\n', b"")
+        )
+    )
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.review_policy is not None
+    assert manifest.pull_request.review_policy.accepted_check_conclusions == ("success",)
+
+
+def test_schema_six_keeps_pull_request_behavior_without_review_policy() -> None:
+    manifest = parse_manifest_bytes(
+        b"""
+schema_version = 6
+repository_id = "example"
+components = []
+[pull_request.commit_history]
+advisory_base_ref = "dev"
+"""
+    )
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.review_policy is None
+    assert manifest.commit_message is not None
+
+
+def test_review_policy_requires_schema_seven() -> None:
+    content = _schema_seven_review_policy().replace(b"schema_version = 7", b"schema_version = 6")
+
+    with pytest.raises(ValueError, match="schema version 7 is required for review_policy"):
+        parse_manifest_bytes(content)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        (
+            b"zero_review_below_counted_lines = 200",
+            b"zero_review_below_counted_lines = true",
+            "zero_review_below_counted_lines must be an integer",
+        ),
+        (
+            b"zero_review_below_counted_lines = 200",
+            b"zero_review_below_counted_lines = 0",
+            "zero_review_below_counted_lines must be between",
+        ),
+        (
+            b"two_reviews_above_counted_lines = 800",
+            b"two_reviews_above_counted_lines = 199",
+            "two_reviews_above_counted_lines must be between",
+        ),
+        (
+            b'migration_roots = ["db/migrations", "services/api/migrations"]',
+            b'migration_roots = ["db/migrations", "db/migrations/archive"]',
+            "migration_roots must not overlap",
+        ),
+        (
+            b'migration_roots = ["db/migrations", "services/api/migrations"]',
+            b'migration_roots = ["db/*"]',
+            "migration_roots must be exact repository paths",
+        ),
+        (
+            b'required_checks = ["lint", "test"]',
+            b"required_checks = []",
+            "required_checks must not be empty",
+        ),
+        (
+            b'transition_exemptions = ["dev-preview"]',
+            b'transition_exemptions = ["unknown"]',
+            "references unknown transitions: unknown",
+        ),
+        (
+            b'transition_actors = ["release-automation[bot]"]',
+            b'transition_actors = ["release-automation[bot]", "RELEASE-AUTOMATION[bot]"]',
+            "transition_actors must contain unique GitHub logins",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            b'accepted_check_conclusions = ["success", "neutral"]',
+            "currently supports only success",
+        ),
+    ],
+)
+def test_review_policy_rejects_unsafe_configuration(
+    old: bytes,
+    new: bytes,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        parse_manifest_bytes(_schema_seven_review_policy().replace(old, new))
+
+
+def test_review_policy_rejects_unknown_fields() -> None:
+    content = _schema_seven_review_policy().replace(
+        b"[pull_request.review_policy]\n",
+        b"[pull_request.review_policy]\nallow_self_approval = true\n",
+    )
+
+    with pytest.raises(ValueError, match="unknown fields: allow_self_approval"):
+        parse_manifest_bytes(content)
+
+
+def test_review_policy_requires_transition_actors_for_exemptions() -> None:
+    content = _schema_seven_review_policy().replace(
+        b'transition_actors = ["release-automation[bot]"]\n',
+        b"",
+    )
+
+    with pytest.raises(ValueError, match="transition_actors must not be empty"):
+        parse_manifest_bytes(content)
+
+
+def test_review_policy_rejects_transition_actors_without_exemptions() -> None:
+    content = _schema_seven_review_policy().replace(
+        b'transition_exemptions = ["dev-preview"]',
+        b"transition_exemptions = []",
+    )
+
+    with pytest.raises(ValueError, match="transition_actors requires transition_exemptions"):
+        parse_manifest_bytes(content)

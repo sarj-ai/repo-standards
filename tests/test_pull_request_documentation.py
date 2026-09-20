@@ -44,7 +44,7 @@ def _commit(repository: Path) -> str:
     return _git(repository, "rev-parse", "HEAD")
 
 
-def _repository(tmp_path: Path, *, maximum: int = 1, exemptions: tuple[str, ...] = ()) -> str:
+def _repository(tmp_path: Path, *, maximum: int = 0, exemptions: tuple[str, ...] = ()) -> str:
     _git(tmp_path, "init", "--quiet")
     manifest = tmp_path / ".repo-standards" / "repository.toml"
     manifest.parent.mkdir()
@@ -63,12 +63,11 @@ def _repository(tmp_path: Path, *, maximum: int = 1, exemptions: tuple[str, ...]
     return _commit(tmp_path)
 
 
-def test_documentation_budget_rejects_multiple_new_pages(tmp_path: Path) -> None:
+def test_documentation_budget_rejects_any_new_page_by_default(tmp_path: Path) -> None:
     base = _repository(tmp_path)
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "one.md").write_text("# One\n", encoding="utf-8")
-    (docs / "two.mdx").write_text("# Two\n", encoding="utf-8")
     _commit(tmp_path)
 
     result = runner.invoke(
@@ -77,9 +76,8 @@ def test_documentation_budget_rejects_multiple_new_pages(tmp_path: Path) -> None
     )
 
     assert result.exit_code == 1
-    assert '"added_pages":2' in result.stdout
+    assert '"added_pages":1' in result.stdout
     assert '"docs/one.md"' in result.stdout
-    assert '"docs/two.mdx"' in result.stdout
 
 
 def test_documentation_budget_uses_trusted_base_policy_and_exact_exemptions(

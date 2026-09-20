@@ -26,6 +26,14 @@ def test_public_action_is_pull_request_size_only() -> None:
     assert "Validate compatibility inputs" not in source
     assert "github.event.pull_request.base.sha" in source
     assert "github.event.pull_request.head.sha" in source
+    assert "report-path" in source
+
+
+def test_action_keeps_complete_report_out_of_github_output() -> None:
+    source = _action_source()
+    assert '--report-path "$report_path"' in source
+    assert 'key not in {"categories", "directories", "files"}' in source
+    assert 'echo "report-path=$report_path" >> "$GITHUB_OUTPUT"' in source
 
 
 def test_action_uses_locked_non_mutating_environment() -> None:

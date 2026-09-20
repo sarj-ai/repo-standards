@@ -95,6 +95,35 @@ def test_analysis_reports_counted_and_excluded_churn(tmp_path: Path) -> None:
     assert result.counted_lines == 3
     assert result.excluded_lines == 90
     assert result.category_lines() == {"generated": 40, "production": 3, "test": 50}
+    assert result.summary.changed_files == 3
+    assert result.summary.counted_files == 1
+    assert result.summary.excluded_files == 2
+    assert result.summary.binary_files == 0
+    assert result.summary.additions == 92
+    assert result.summary.deletions == 1
+    assert result.summary.counted_additions == 2
+    assert result.summary.counted_deletions == 1
+    assert result.summary.excluded_additions == 90
+    assert result.summary.excluded_deletions == 0
+    assert [category.category for category in result.category_sizes()] == [
+        "production",
+        "test",
+        "generated",
+        "binary",
+    ]
+    assert [category.lines for category in result.category_sizes()] == [3, 50, 40, 0]
+    assert [directory.path for directory in result.directory_sizes()] == [
+        "generated",
+        "src",
+        "tests",
+    ]
+    assert result.directory_sizes()[1].counted_lines == 3
+    assert result.directory_sizes()[2].excluded_lines == 50
+    assert [item.path for item in result.files] == [
+        "generated/client.py",
+        "src/app.py",
+        "tests/test_app.py",
+    ]
 
 
 def test_policy_is_loaded_from_base_not_head(tmp_path: Path) -> None:
@@ -110,6 +139,7 @@ def test_policy_is_loaded_from_base_not_head(tmp_path: Path) -> None:
         ".gitattributes",
         "src/new.py",
     }
+    assert [directory.path for directory in result.directory_sizes()] == [".", "src"]
 
 
 def test_production_to_test_move_counts_the_deleted_source(tmp_path: Path) -> None:
@@ -133,6 +163,8 @@ def test_binary_changes_are_reported_but_count_zero(tmp_path: Path) -> None:
 
     assert any(item.category == "binary" for item in result.files)
     assert result.total_lines == 0
+    assert result.summary.binary_files == 1
+    assert result.summary.excluded_files == 1
 
 
 def test_invalid_revision_is_incomplete(tmp_path: Path) -> None:

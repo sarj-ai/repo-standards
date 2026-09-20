@@ -89,8 +89,89 @@ def test_pull_request_size_command_returns_stable_json(tmp_path: Path) -> None:
     assert result.exit_code == 0
     payload = _json_object(result.stdout)
     assert payload["command"] == "pull-request size"
-    assert _object(payload["summary"])["counted_lines"] == 3
-    assert _object(payload["summary"])["excluded_lines"] == 20
+    summary = _object(payload["summary"])
+    assert summary["counted_lines"] == 3
+    assert summary["excluded_lines"] == 20
+    assert summary["additions"] == 22
+    assert summary["deletions"] == 1
+    assert summary["counted_files"] == 1
+    assert summary["excluded_files"] == 1
+    categories = _object_list(payload["categories"])
+    assert [(item["category"], item["lines"]) for item in categories] == [
+        ("production", 3),
+        ("test", 20),
+        ("generated", 0),
+        ("binary", 0),
+    ]
+    directories = _object_list(payload["directories"])
+    assert [(item["path"], item["total_lines"]) for item in directories] == [
+        ("src", 3),
+        ("tests", 20),
+    ]
+    files = _object_list(payload["files"])
+    assert [(item["path"], item["category"], item["lines"]) for item in files] == [
+        ("src/app.py", "production", 3),
+        ("tests/test_app.py", "test", 20),
+    ]
+
+
+def test_pull_request_size_command_writes_full_canonical_report(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    (tmp_path / "app.py").write_text("value = 1\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    (tmp_path / "app.py").write_text("value = 2\nextra = 3\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    report_path = tmp_path / "artifacts" / "pr-size.json"
+    report_path.parent.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "size",
+            str(tmp_path),
+            "--base",
+            base,
+            "--report-path",
+            str(report_path),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert report_path.read_text(encoding="utf-8") == result.stdout
+    payload = _json_object(report_path.read_text(encoding="utf-8"))
+    assert _object_list(payload["files"])[0]["path"] == "app.py"
+    assert _object_list(payload["directories"])[0]["path"] == "."
+
+
+def test_pull_request_size_report_path_does_not_change_text_stdout(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    (tmp_path / "app.py").write_text("value = 1\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    (tmp_path / "app.py").write_text("value = 2\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    report_path = tmp_path / "pr-size.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "size",
+            str(tmp_path),
+            "--base",
+            base,
+            "--report-path",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout.startswith("Counted review size:")
+    assert _json_object(report_path.read_text(encoding="utf-8"))["command"] == ("pull-request size")
 
 
 def test_pull_request_size_errors_have_command_specific_remediation(tmp_path: Path) -> None:
@@ -107,6 +188,393 @@ def test_pull_request_size_errors_have_command_specific_remediation(tmp_path: Pa
     )
     invalid_issue = _object_list(_json_object(invalid.stdout)["execution_issues"])[0]
     assert "Fetch and verify" in str(invalid_issue["remediation"])
+
+
+def _review_policy_fixture(repository: Path) -> str:
+    _git(repository, "init", "--quiet")
+    policy = repository / ".repo-standards"
+    policy.mkdir()
+    (policy / "repository.toml").write_text(
+        """
+schema_version = 7
+repository_id = "example"
+components = []
+
+[pull_request.commit_history]
+advisory_base_ref = "dev"
+
+[[pull_request.commit_history.transitions]]
+id = "promote"
+source_ref = "dev"
+base_ref = "preview"
+head_prefix = "automation/promote-dev-"
+
+[pull_request.review_policy]
+zero_review_below_counted_lines = 200
+two_reviews_above_counted_lines = 800
+migration_roots = ["db/migrations"]
+required_checks = ["ci"]
+required_body_sections = ["What & why", "QA impact / blast radius"]
+accepted_check_conclusions = ["success"]
+transition_exemptions = ["promote"]
+transition_actors = ["release-automation[bot]"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (repository / "README.md").write_text("base\n", encoding="utf-8")
+    _commit_changes(repository)
+    return _git(repository, "rev-parse", "HEAD")
+
+
+def _review_policy_evidence(  # ruff: ignore[too-many-arguments] - focused fixture controls independent evidence
+    repository: Path,
+    *,
+    head: str,
+    reviews: list[dict[str, object]] | None = None,
+    body: str = "## What & why\nSmall change.\n\n## QA impact / blast radius\nN/A\n",
+    checks_complete: bool = True,
+    base_ref: str = "dev",
+    head_ref: str = "feature/review-policy",
+    author_is_bot: bool = False,
+    author_login: str = "developer",
+    current_head: str | None = None,
+    head_repository_id: int = 123,
+    check_head: str | None = None,
+) -> Path:
+    evidence = repository / "evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "evaluated_head_sha": head,
+                "current_head_sha": current_head or head,
+                "base_ref": base_ref,
+                "head_ref": head_ref,
+                "base_repository_id": 123,
+                "head_repository_id": head_repository_id,
+                "is_draft": False,
+                "author_login": author_login,
+                "author_is_bot": author_is_bot,
+                "required_checks_complete": checks_complete,
+                "required_checks": [
+                    {
+                        "name": "ci",
+                        "conclusion": "success",
+                        "head_sha": check_head or head,
+                    }
+                ],
+                "reviews_complete": True,
+                "latest_human_reviews": reviews or [],
+                "threads_complete": True,
+                "threads_resolved": True,
+                "body": body,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return evidence
+
+
+def test_pull_request_review_policy_emits_ready_tier_zero_receipt(tmp_path: Path) -> None:
+    base = _review_policy_fixture(tmp_path)
+    (tmp_path / "README.md").write_text("base\nsmall correction\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_large.py").write_text("assert True\n" * 300, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(tmp_path, head=head)
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = _json_object(result.stdout)
+    assert payload["command"] == "pull-request review-policy"
+    assert payload["conclusion"] == "passed"
+    summary = _object(payload["summary"])
+    assert summary["tier"] == 0
+    assert summary["merge_ready"] is True
+    size = _object(payload["size"])
+    assert size["counted_lines"] == 1
+    assert size["excluded_lines"] == 300
+    assert [item["path"] for item in _object_list(payload["files"])] == [
+        "README.md",
+        "tests/test_large.py",
+    ]
+
+
+def test_pull_request_review_policy_migration_floor_blocks_without_approval(
+    tmp_path: Path,
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    migration = tmp_path / "db" / "migrations"
+    migration.mkdir(parents=True)
+    (migration / "001.sql").write_text("SELECT 1;\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(tmp_path, head=head)
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 1
+    summary = _object(_json_object(result.stdout)["summary"])
+    assert summary["tier"] == 1
+    assert summary["touches_migration"] is True
+    assert summary["reasons"] == [
+        "zero_review_threshold",
+        "migration_review_floor",
+        "approvals_missing",
+    ]
+
+
+def test_pull_request_review_policy_requires_two_reviews_above_800_lines(
+    tmp_path: Path,
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    (tmp_path / "large.py").write_text("value = 1\n" * 801, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(tmp_path, head=head)
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = _json_object(result.stdout)
+    summary = _object(payload["summary"])
+    assert summary["tier"] == 2
+    assert summary["current_human_approvals"] == 0
+    assert summary["reasons"] == ["two_review_threshold", "approvals_missing"]
+
+
+def test_pull_request_review_policy_transition_requires_one_review_and_skips_size_body(
+    tmp_path: Path,
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    (tmp_path / "large.py").write_text("value = 1\n" * 900, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        reviews=[{"reviewer": "human", "state": "approved", "commit_sha": head}],
+        body="",
+        base_ref="preview",
+        head_ref=f"automation/promote-dev-{head[:12]}",
+        author_is_bot=True,
+        author_login="release-automation[bot]",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = _json_object(result.stdout)
+    summary = _object(payload["summary"])
+    assert summary["tier"] == 1
+    assert summary["transition_exemption"] == "promote"
+    assert summary["missing_body_sections"] == []
+    assert "transition_exemption" in summary["reasons"]  # type: ignore[operator]
+    assert _object(payload["size"])["classification"] == "transition-exempt"
+    assert payload["files"] == []
+
+
+@pytest.mark.parametrize(
+    ("author_login", "current_head", "head_repository_id"),
+    [
+        ("untrusted-automation[bot]", None, 123),
+        ("release-automation[bot]", "b" * 40, 123),
+        ("release-automation[bot]", None, 456),
+    ],
+)
+def test_pull_request_review_policy_transition_requires_exact_trusted_identity(
+    tmp_path: Path,
+    author_login: str,
+    current_head: str | None,
+    head_repository_id: int,
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    (tmp_path / "large.py").write_text("value = 1\n" * 900, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        reviews=[{"reviewer": "human", "state": "approved", "commit_sha": head}],
+        body="",
+        base_ref="preview",
+        head_ref=f"automation/promote-dev-{head[:12]}",
+        author_is_bot=True,
+        author_login=author_login,
+        current_head=current_head,
+        head_repository_id=head_repository_id,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = _json_object(result.stdout)
+    summary = _object(payload["summary"])
+    assert summary["transition_exemption"] is None
+    assert summary["tier"] == 2
+    assert "bot_authored_pull_request" in summary["reasons"]  # type: ignore[operator]
+    assert _object(payload["size"])["classification"] == "measured"
+
+
+def test_pull_request_review_policy_reports_missing_body_sections(tmp_path: Path) -> None:
+    base = _review_policy_fixture(tmp_path)
+    (tmp_path / "README.md").write_text("changed\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        body="## What & why\n<!-- not filled -->\n",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 1
+    summary = _object(_json_object(result.stdout)["summary"])
+    assert summary["missing_body_sections"] == [
+        "What & why",
+        "QA impact / blast radius",
+    ]
+    reasons = summary["reasons"]
+    assert isinstance(reasons, list)
+    assert "body_sections_incomplete" in reasons
+
+
+def test_pull_request_review_policy_rejects_incomplete_provider_evidence(
+    tmp_path: Path,
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    (tmp_path / "README.md").write_text("changed\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(tmp_path, head=head, checks_complete=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 2
+    payload = _json_object(result.stdout)
+    assert payload["completion"] == "incomplete"
+    assert "required checks" in str(_object_list(payload["execution_issues"])[0]["message"])
+
+
+def test_pull_request_review_policy_blocks_check_from_a_stale_head(tmp_path: Path) -> None:
+    base = _review_policy_fixture(tmp_path)
+    (tmp_path / "README.md").write_text("changed\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(tmp_path, head=head, check_head="b" * 40)
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 1
+    summary = _object(_json_object(result.stdout)["summary"])
+    assert "check_head_mismatch" in summary["reasons"]  # type: ignore[operator]
 
 
 def test_pull_request_commits_command_enforces_default_limit(tmp_path: Path) -> None:
@@ -407,10 +875,7 @@ def test_manifest_enabled_rules_are_the_single_activation_source(tmp_path: Path)
     )
 
     assert configured.exit_code == 1
-    paths = [
-        item["path"]
-        for item in _object_list(_json_object(configured.stdout)["diagnostics"])
-    ]
+    paths = [item["path"] for item in _object_list(_json_object(configured.stdout)["diagnostics"])]
     assert paths == ["verify.mjs"]
     assert conflicting.exit_code == 2
     assert "cannot be combined" in conflicting.stdout

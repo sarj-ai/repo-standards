@@ -1,0 +1,99 @@
+name: Sarj pull-request review policy
+description: Reconcile exact-head GitHub evidence against the trusted review policy
+
+inputs:
+  root:
+    description: Checked-out repository root to inspect
+    required: false
+    default: .
+  manifest-path:
+    description: Trusted base-tree schema 7 manifest containing pull_request.review_policy
+    required: false
+    default: .repo-standards/repository.toml
+  pr-number:
+    description: Pull request number to reconcile
+    required: false
+    default: ''
+  merge-group-head-sha:
+    description: Merge-group SHA whose constituent PR receipts must all pass
+    required: false
+    default: ''
+  github-token:
+    description: Token with contents read, pull requests write, and statuses write
+    required: true
+  approval-token:
+    description: Narrow GitHub App token with pull requests read/write for tier-zero approval
+    required: false
+    default: ''
+  review-optional-enabled:
+    description: Kill switch for tier-zero mechanical approval
+    required: false
+    default: 'false'
+  required-check-app-id:
+    description: GitHub App ID that must produce every configured required check
+    required: false
+    default: '15368'
+  policy-workflow-path:
+    description: Trusted workflow path that may originate merge-group constituent receipts
+    required: false
+    default: .github/workflows/review-policy.yml
+
+outputs:
+  receipt-path:
+    description: Path to the complete review-policy receipt
+    value: ${{ steps.reconcile.outputs.receipt-path }}
+  tier:
+    description: Required human review tier
+    value: ${{ steps.reconcile.outputs.tier }}
+  merge-ready:
+    description: Whether the exact head passed review policy
+    value: ${{ steps.reconcile.outputs.merge-ready }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      with:
+        version: '0.12.12'
+        enable-cache: true
+        cache-dependency-glob: ${{ github.action_path }}/../uv.lock
+    - name: Install locked review-policy environment
+      shell: bash
+      run: uv sync --project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.14
+    - name: Reconcile pull-request review policy
+      id: reconcile
+      shell: bash
+      env:
+        APPROVAL_TOKEN: ${{ inputs.approval-token }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        INPUT_MERGE_GROUP_HEAD_SHA: ${{ inputs.merge-group-head-sha }}
+        INPUT_REQUIRED_CHECK_APP_ID: ${{ inputs.required-check-app-id }}
+        INPUT_REVIEW_OPTIONAL_ENABLED: ${{ inputs.review-optional-enabled }}
+        INPUT_POLICY_WORKFLOW_PATH: ${{ inputs.policy-workflow-path }}
+        INPUT_ROOT: ${{ inputs.root }}
+      run: |
+        arguments=(
+          --root "$INPUT_ROOT"
+          --manifest-path "$INPUT_MANIFEST_PATH"
+          --required-check-app-id "$INPUT_REQUIRED_CHECK_APP_ID"
+          --policy-workflow-path "$INPUT_POLICY_WORKFLOW_PATH"
+        )
+        if [[ -n "$INPUT_MERGE_GROUP_HEAD_SHA" ]]; then
+          arguments+=(--merge-group-head-sha "$INPUT_MERGE_GROUP_HEAD_SHA")
+        elif [[ -n "$INPUT_PR_NUMBER" ]]; then
+          arguments+=(--pr-number "$INPUT_PR_NUMBER")
+        else
+          echo "pr-number or merge-group-head-sha is required" >&2
+          exit 2
+        fi
+        if [[ "$INPUT_REVIEW_OPTIONAL_ENABLED" == "true" ]]; then
+          arguments+=(--review-optional-enabled)
+        elif [[ "$INPUT_REVIEW_OPTIONAL_ENABLED" != "false" ]]; then
+          echo "review-optional-enabled must be true or false" >&2
+          exit 2
+        fi
+        uv run --project "$GITHUB_ACTION_PATH/.." --no-sync \
+          python -m repo_standards.github_review_policy "${arguments[@]}"
