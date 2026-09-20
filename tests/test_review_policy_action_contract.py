@@ -14,6 +14,7 @@ from repo_standards.github_review_policy import (
     check_conclusion,
     collect_required_checks,
     eligible_reviewer_ids,
+    final_policy_decision,
     latest_human_reviews,
     require_unchanged_evidence,
     required_check_names,
@@ -36,15 +37,66 @@ def test_review_policy_action_contract() -> None:
         "pr-number",
         "merge-group-head-sha",
         "github-token",
-        "approval-token",
         "review-optional-enabled",
         "required-check-app-id",
         "policy-workflow-path",
     }
     assert "default: '15368'" in inputs
     assert "repo_standards.github_review_policy" in source
-    assert "APPROVAL_TOKEN" in source
+    assert "APPROVAL_TOKEN" not in source
     assert "GITHUB_TOKEN" in source
+
+
+@pytest.mark.parametrize(
+    ("lane_enabled", "same_repository", "author_is_bot", "draft", "expected"),
+    [
+        (True, True, False, False, (True, None)),
+        (False, True, False, False, (False, "review_optional_lane_disabled")),
+        (True, False, False, False, (False, "review_optional_fork_blocked")),
+        (True, True, True, False, (False, "review_optional_bot_author_blocked")),
+        (True, True, False, True, (False, "review_optional_draft_blocked")),
+    ],
+)
+def test_tier_zero_runtime_gate(
+    lane_enabled: bool,
+    same_repository: bool,
+    author_is_bot: bool,
+    draft: bool,
+    expected: tuple[bool, str | None],
+) -> None:
+    assert (
+        final_policy_decision(
+            policy_passed=True,
+            tier=0,
+            lane_enabled=lane_enabled,
+            same_repository=same_repository,
+            author_is_bot=author_is_bot,
+            draft=draft,
+        )
+        == expected
+    )
+
+
+def test_non_tier_zero_runtime_gate_ignores_optional_lane() -> None:
+    assert final_policy_decision(
+        policy_passed=True,
+        tier=1,
+        lane_enabled=False,
+        same_repository=False,
+        author_is_bot=True,
+        draft=True,
+    ) == (True, None)
+
+
+def test_failed_policy_stays_blocked_when_optional_lane_is_enabled() -> None:
+    assert final_policy_decision(
+        policy_passed=False,
+        tier=0,
+        lane_enabled=True,
+        same_repository=True,
+        author_is_bot=False,
+        draft=False,
+    ) == (False, None)
 
 
 @pytest.mark.parametrize("manifest_path", ["", "/absolute.toml", "../escape.toml", "a/../b.toml"])

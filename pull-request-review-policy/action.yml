@@ -19,14 +19,10 @@ inputs:
     required: false
     default: ''
   github-token:
-    description: Token with contents read, pull requests write, and statuses write
+    description: Token with contents read, pull requests write, and statuses write for reconciliation
     required: true
-  approval-token:
-    description: Narrow GitHub App token with pull requests read/write for tier-zero approval
-    required: false
-    default: ''
   review-optional-enabled:
-    description: Kill switch for tier-zero mechanical approval
+    description: Kill switch for the tier-zero zero-review lane
     required: false
     default: 'false'
   required-check-app-id:
@@ -65,7 +61,6 @@ runs:
       id: reconcile
       shell: bash
       env:
-        APPROVAL_TOKEN: ${{ inputs.approval-token }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}

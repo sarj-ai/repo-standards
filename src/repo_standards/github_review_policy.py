@@ -20,7 +20,6 @@ from urllib.request import Request, urlopen
 
 
 _COMMENT_MARKER: Final = "<!-- repo-standards-review-policy -->"
-_APPROVAL_MARKER: Final = "<!-- repo-standards-tier-zero-approval -->"
 _STATUS_CONTEXT: Final = "Review Policy"
 _MAX_PAGES: Final = 100
 _MAX_ITEMS: Final = 10_000
@@ -642,28 +641,33 @@ def _summary(receipt: Mapping[str, Any]) -> Mapping[str, Any]:
     return _mapping(receipt.get("summary"), "review policy receipt summary")
 
 
-def render_comment(receipt: Mapping[str, Any], *, lane_enabled: bool, approved: bool) -> str:
+def render_comment(
+    receipt: Mapping[str, Any],
+    *,
+    final_passed: bool,
+    lane_enabled: bool,
+    operational_reason: str | None,
+) -> str:
     summary = _summary(receipt)
     size = _mapping(receipt.get("size"), "review policy receipt size")
     tier = summary.get("tier", "?")
-    ready = summary.get("merge_ready") is True
     reasons = summary.get("reasons")
-    reason_text = (
-        ", ".join(str(item) for item in reasons) if isinstance(reasons, list) else "unknown"
-    )
+    reason_items = [str(item) for item in reasons] if isinstance(reasons, list) else ["unknown"]
+    if operational_reason is not None:
+        reason_items.append(operational_reason)
+    reason_text = ", ".join(reason_items)
     lane = "enabled" if lane_enabled else "disabled"
-    approval = "; mechanical approval recorded" if approved else ""
     return (
         f"{_COMMENT_MARKER}\n"
         "### Review policy\n\n"
-        f"- Decision: **{'pass' if ready else 'blocked'}**\n"
+        f"- Decision: **{'pass' if final_passed else 'blocked'}**\n"
         f"- Tier: **{tier}** human review(s) required\n"
         f"- Approvals: **{summary.get('current_human_approvals', '?')}** "
         "current human approval(s)\n"
         f"- Counted size: **{size.get('counted_lines', '?')}** lines "
         f"({size.get('excluded_lines', '?')} excluded)\n"
         f"- Migration: **{'yes' if summary.get('touches_migration') else 'no'}**\n"
-        f"- Review-optional lane: **{lane}**{approval}\n"
+        f"- Review-optional lane: **{lane}**\n"
         f"- Reasons: `{reason_text}`\n\n"
         f"Evaluated head `{receipt.get('provenance', {}).get('evaluated_head', 'unknown')}`.\n"
     )
@@ -706,20 +710,6 @@ def upsert_comment(client: GitHubClient, number: int, body: str) -> None:
             f"/repos/{client.repository}/issues/{number}/comments",
             payload={"body": body},
         )
-
-
-def has_mechanical_approval(reviews: Sequence[Any], *, head_sha: str) -> bool:
-    for raw in reviews:
-        if not isinstance(raw, dict):
-            continue
-        if (
-            raw.get("state") == "APPROVED"
-            and raw.get("commit_id") == head_sha
-            and isinstance(raw.get("body"), str)
-            and _APPROVAL_MARKER in raw["body"]
-        ):
-            return True
-    return False
 
 
 def post_status(
@@ -883,12 +873,33 @@ def _workflow_url() -> str | None:
     return None
 
 
-def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-branches,too-many-statements] - orchestration stays linear and auditable
+def final_policy_decision(
+    *,
+    policy_passed: bool,
+    tier: object,
+    lane_enabled: bool,
+    same_repository: bool,
+    author_is_bot: bool,
+    draft: bool,
+) -> tuple[bool, str | None]:
+    if not policy_passed or tier != 0:
+        return policy_passed, None
+    if not lane_enabled:
+        return False, "review_optional_lane_disabled"
+    if not same_repository:
+        return False, "review_optional_fork_blocked"
+    if author_is_bot:
+        return False, "review_optional_bot_author_blocked"
+    if draft:
+        return False, "review_optional_draft_blocked"
+    return True, None
+
+
+def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-statements] - orchestration stays linear and auditable
     root = Path(args.root).resolve(strict=True)
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
     github_token = os.environ.get("GITHUB_TOKEN", "")
-    approval_token = os.environ.get("APPROVAL_TOKEN", "")
     client = GitHubClient(token=github_token, repository=repository, api_url=api_url)
     if args.merge_group_head_sha:
         if args.pr_number is not None:
@@ -1000,57 +1011,19 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-branche
     tier = summary.get("tier")
     policy_passed = command.returncode == 0 and summary.get("merge_ready") is True
     same_repository = snapshot.head_repository_id == snapshot.base_repository_id
-    lane_eligible = (
-        tier == 0
-        and args.review_optional_enabled
-        and policy_passed
-        and same_repository
-        and not author_is_bot
-        and not snapshot.draft
+    final_passed, operational_reason = final_policy_decision(
+        policy_passed=policy_passed,
+        tier=tier,
+        lane_enabled=args.review_optional_enabled,
+        same_repository=same_repository,
+        author_is_bot=author_is_bot,
+        draft=snapshot.draft,
     )
-    approved = False
-    if lane_eligible:
-        if not approval_token:
-            raise ReconciliationError("approval-token is required for an eligible tier-zero PR")
-        before_approval = collect_evidence(
-            client,
-            number=args.pr_number,
-            check_names=check_names,
-            required_check_app_id=args.required_check_app_id,
-        )
-        require_unchanged_evidence(
-            collected,
-            before_approval,
-            phase="before mechanical approval",
-        )
-        if not has_mechanical_approval(
-            before_approval.raw_reviews,
-            head_sha=snapshot.head_sha,
-        ):
-            approval_client = GitHubClient(
-                token=approval_token,
-                repository=repository,
-                api_url=api_url,
-            )
-            approval_client.request(
-                "POST",
-                f"/repos/{repository}/pulls/{args.pr_number}/reviews",
-                payload={
-                    "event": "APPROVE",
-                    "commit_id": snapshot.head_sha,
-                    "body": (
-                        f"{_APPROVAL_MARKER}\nMechanical approval for a passing "
-                        "tier-zero review-policy decision."
-                    ),
-                },
-            )
-        approved = True
-
-    final_passed = policy_passed
     comment = render_comment(
         receipt,
+        final_passed=final_passed,
         lane_enabled=args.review_optional_enabled,
-        approved=approved,
+        operational_reason=operational_reason,
     )
     upsert_comment(client, args.pr_number, comment)
     _write_step_summary(comment)
