@@ -31,6 +31,7 @@ from .models import (
     PullRequestCommitHistoryConfig,
     PullRequestCommitHistoryTransition,
     PullRequestConfig,
+    PullRequestReviewPolicyConfig,
     RepositoryId,
     RuleId,
 )
@@ -44,14 +45,16 @@ _ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SCHEMA_VERSION_LINE = re.compile(
     rb"(?m)^schema_version(?P<spacing>[ \t]*=[ \t]*)"
-    rb"(?P<version>[23456])(?P<tail>[ \t]*(?:#.*)?\r?)$"
+    rb"(?P<version>[234567])(?P<tail>[ \t]*(?:#.*)?\r?)$"
 )
 _MAX_EXCEPTION_DURATION = timedelta(days=90)
 _MAX_INPUT_BYTES = 1_048_576
 _MAX_COMPONENTS = 10_000
 _MAX_MIGRATIONS = 10_000
 _MAX_EXCEPTIONS = 1_000
-_MANIFEST_SCHEMA_VERSION = 6
+_MANIFEST_SCHEMA_VERSION = 7
+_REVIEW_POLICY_SCHEMA_VERSION = 7
+_COMMIT_MESSAGE_SCHEMA_VERSION = 6
 _PULL_REQUEST_SCHEMA_VERSION = 5
 _RULE_ACTIVATION_SCHEMA_VERSION = 4
 _REPOSITORY_EVIDENCE_SCHEMA_VERSION = 3
@@ -60,6 +63,9 @@ _BASELINE_SCHEMA_VERSION = 2
 _DEFAULT_MAXIMUM_COMMITS = 5
 _MAXIMUM_COMMITS = 9_999
 _MAXIMUM_TRANSITIONS = 64
+_MAXIMUM_REVIEW_POLICY_ITEMS = 256
+_MAXIMUM_COUNTED_LINES = 100_000_000
+_MAXIMUM_GITHUB_LOGIN_LENGTH = 256
 _MINIMUM_SHA_PREFIX_LENGTH = 12
 _MAXIMUM_SHA_PREFIX_LENGTH = 40
 _MAXIMUM_LOGICAL_REF_BYTES = 1_024
@@ -354,7 +360,7 @@ def parse_documentation(value: object) -> DocumentationConfig:
     if any(not path.casefold().endswith(".md") for path in entrypoints):
         ConfigurationError.fail("documentation.entrypoints must be Markdown paths")
     maximum_added_pages = _integer(
-        data, "maximum_added_pages", "documentation", default=1
+        data, "maximum_added_pages", "documentation", default=0
     )
     if maximum_added_pages < 0:
         ConfigurationError.fail("documentation.maximum_added_pages must be non-negative")
@@ -476,11 +482,166 @@ def parse_pull_request_commit_history(value: object) -> PullRequestCommitHistory
     )
 
 
+def parse_pull_request_review_policy(
+    value: object,
+    *,
+    transitions: tuple[PullRequestCommitHistoryTransition, ...],
+) -> PullRequestReviewPolicyConfig:
+    context = "pull_request.review_policy"
+    data = _mapping(value, context)
+    fields = {
+        "zero_review_below_counted_lines",
+        "two_reviews_above_counted_lines",
+        "migration_roots",
+        "required_checks",
+        "required_body_sections",
+        "transition_exemptions",
+        "transition_actors",
+        "accepted_check_conclusions",
+    }
+    required = {
+        "zero_review_below_counted_lines",
+        "two_reviews_above_counted_lines",
+        "migration_roots",
+        "required_checks",
+        "required_body_sections",
+    }
+    _strict_keys(data, fields, required, context)
+    zero_review_below = _integer(
+        data,
+        "zero_review_below_counted_lines",
+        context,
+        default=0,
+    )
+    two_reviews_above = _integer(
+        data,
+        "two_reviews_above_counted_lines",
+        context,
+        default=0,
+    )
+    if not 1 <= zero_review_below <= _MAXIMUM_COUNTED_LINES:
+        ConfigurationError.fail(
+            f"{context}.zero_review_below_counted_lines must be between "
+            f"1 and {_MAXIMUM_COUNTED_LINES}"
+        )
+    if not zero_review_below <= two_reviews_above <= _MAXIMUM_COUNTED_LINES:
+        ConfigurationError.fail(
+            f"{context}.two_reviews_above_counted_lines must be between "
+            "zero_review_below_counted_lines and "
+            f"{_MAXIMUM_COUNTED_LINES}"
+        )
+
+    def policy_strings(key: str, *, default: object | None = None) -> tuple[str, ...]:
+        fallback: object = [] if default is None else default
+        items = tuple(_string_list(data.get(key, fallback), f"{context}.{key}"))
+        if len(items) > _MAXIMUM_REVIEW_POLICY_ITEMS:
+            ConfigurationError.fail(
+                f"{context}.{key} may contain at most {_MAXIMUM_REVIEW_POLICY_ITEMS} items"
+            )
+        if len(items) != len(set(items)):
+            ConfigurationError.fail(f"{context}.{key} must contain unique values")
+        return items
+
+    raw_migration_roots = policy_strings("migration_roots")
+    migration_roots = tuple(canonical_path(path) for path in raw_migration_roots)
+    folded_roots = tuple(path.casefold() for path in migration_roots)
+    if len(folded_roots) != len(set(folded_roots)):
+        ConfigurationError.fail(f"{context}.migration_roots must contain unique paths")
+    if any(any(character in root for character in "*?[") for root in migration_roots):
+        ConfigurationError.fail(f"{context}.migration_roots must be exact repository paths")
+    for index, root in enumerate(folded_roots):
+        if any(
+            root.startswith(f"{previous}/") or previous.startswith(f"{root}/")
+            for previous in folded_roots[:index]
+        ):
+            ConfigurationError.fail(f"{context}.migration_roots must not overlap")
+
+    required_checks = policy_strings("required_checks")
+    if not required_checks:
+        ConfigurationError.fail(f"{context}.required_checks must not be empty")
+    required_body_sections = policy_strings("required_body_sections")
+    if not required_body_sections:
+        ConfigurationError.fail(f"{context}.required_body_sections must not be empty")
+    transition_exemptions = policy_strings("transition_exemptions")
+    known_transition_ids = {transition.transition_id for transition in transitions}
+    unknown_exemptions = sorted(set(transition_exemptions) - known_transition_ids)
+    if unknown_exemptions:
+        ConfigurationError.fail(
+            f"{context}.transition_exemptions references unknown transitions: "
+            f"{', '.join(unknown_exemptions)}"
+        )
+    accepted_check_conclusions = policy_strings(
+        "accepted_check_conclusions",
+        default=["success"],
+    )
+    if accepted_check_conclusions != ("success",):
+        ConfigurationError.fail(
+            f"{context}.accepted_check_conclusions currently supports only success"
+        )
+    return PullRequestReviewPolicyConfig(
+        zero_review_below_counted_lines=zero_review_below,
+        two_reviews_above_counted_lines=two_reviews_above,
+        migration_roots=migration_roots,
+        required_checks=required_checks,
+        required_body_sections=required_body_sections,
+        transition_exemptions=transition_exemptions,
+        transition_actors=_review_policy_transition_actors(
+            data,
+            context=context,
+            transition_exemptions=transition_exemptions,
+        ),
+        accepted_check_conclusions=accepted_check_conclusions,
+    )
+
+
+def _review_policy_transition_actors(
+    data: dict[str, object],
+    *,
+    context: str,
+    transition_exemptions: tuple[str, ...],
+) -> tuple[str, ...]:
+    actors = tuple(_string_list(data.get("transition_actors", []), f"{context}.transition_actors"))
+    if len(actors) > _MAXIMUM_REVIEW_POLICY_ITEMS:
+        ConfigurationError.fail(
+            f"{context}.transition_actors may contain at most {_MAXIMUM_REVIEW_POLICY_ITEMS} items"
+        )
+    folded_actors = tuple(actor.casefold() for actor in actors)
+    if len(folded_actors) != len(set(folded_actors)):
+        ConfigurationError.fail(f"{context}.transition_actors must contain unique GitHub logins")
+    if any(
+        len(actor) > _MAXIMUM_GITHUB_LOGIN_LENGTH
+        or actor != actor.strip()
+        or any(character.isspace() or ord(character) < _ASCII_CONTROL_LIMIT for character in actor)
+        for actor in actors
+    ):
+        ConfigurationError.fail(f"{context}.transition_actors must contain exact GitHub logins")
+    if transition_exemptions and not actors:
+        ConfigurationError.fail(
+            f"{context}.transition_actors must not be empty when "
+            "transition_exemptions are configured"
+        )
+    if actors and not transition_exemptions:
+        ConfigurationError.fail(f"{context}.transition_actors requires transition_exemptions")
+    return actors
+
+
 def parse_pull_request(value: object) -> PullRequestConfig:
     data = _mapping(value, "pull_request")
-    _strict_keys(data, {"commit_history"}, {"commit_history"}, "pull_request")
+    _strict_keys(
+        data,
+        {"commit_history", "review_policy"},
+        {"commit_history"},
+        "pull_request",
+    )
+    commit_history = parse_pull_request_commit_history(data["commit_history"])
     return PullRequestConfig(
-        commit_history=parse_pull_request_commit_history(data["commit_history"])
+        commit_history=commit_history,
+        review_policy=parse_pull_request_review_policy(
+            data["review_policy"],
+            transitions=commit_history.transitions,
+        )
+        if "review_policy" in data
+        else None,
     )
 
 
@@ -504,7 +665,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
             _bounded_content(content, "manifest").decode("utf-8")
         )
         data = _mapping(parsed_manifest, "manifest")
-    except (OSError, RecursionError, UnicodeError, ValueError, tomllib.TOMLDecodeError):
+    except OSError, RecursionError, UnicodeError, ValueError, tomllib.TOMLDecodeError:
         ConfigurationError.fail("cannot read manifest")
     fields = {
         "schema_version",
@@ -521,7 +682,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
     }
     required = {"schema_version", "repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
-    _validate_manifest_schema(data)
+    schema_version = _validate_manifest_schema(data)
     raw_components = _list(data["components"], "manifest.components")
     if len(raw_components) > _MAX_COMPONENTS:
         ConfigurationError.fail(f"manifest may contain at most {_MAX_COMPONENTS} components")
@@ -575,23 +736,28 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
             parse_commit_message(data["commit_message"])
             if "commit_message" in data
             else CommitMessageConfig()
-            if data["schema_version"] == _MANIFEST_SCHEMA_VERSION
+            if schema_version >= _COMMIT_MESSAGE_SCHEMA_VERSION
             else None
         ),
     )
 
 
-def _validate_manifest_schema(data: dict[str, object]) -> None:
+def _validate_manifest_schema(data: dict[str, object]) -> int:
     schema_version = data["schema_version"]
     supported_versions = {
         _LEGACY_MANIFEST_SCHEMA_VERSION,
         _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
         _RULE_ACTIVATION_SCHEMA_VERSION,
         _PULL_REQUEST_SCHEMA_VERSION,
+        _COMMIT_MESSAGE_SCHEMA_VERSION,
         _MANIFEST_SCHEMA_VERSION,
     }
-    if schema_version not in supported_versions:
-        ConfigurationError.fail("manifest.schema_version must be 2, 3, 4, 5, or 6")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version not in supported_versions
+    ):
+        ConfigurationError.fail("manifest.schema_version must be 2, 3, 4, 5, 6, or 7")
     if schema_version == _LEGACY_MANIFEST_SCHEMA_VERSION and not data.keys().isdisjoint(
         {"documentation", "active_configuration", "delivery"}
     ):
@@ -615,8 +781,16 @@ def _validate_manifest_schema(data: dict[str, object]) -> None:
         and "pull_request" in data
     ):
         ConfigurationError.fail("manifest schema version 5 is required for pull_request")
-    if schema_version != _MANIFEST_SCHEMA_VERSION and "commit_message" in data:
+    if schema_version < _COMMIT_MESSAGE_SCHEMA_VERSION and "commit_message" in data:
         ConfigurationError.fail("manifest schema version 6 is required for commit_message")
+    pull_request = data.get("pull_request")
+    if (
+        schema_version < _REVIEW_POLICY_SCHEMA_VERSION
+        and isinstance(pull_request, dict)
+        and "review_policy" in pull_request
+    ):
+        ConfigurationError.fail("manifest schema version 7 is required for review_policy")
+    return schema_version
 
 
 def load_manifest(path: Path) -> Manifest:
@@ -629,7 +803,7 @@ def enable_commit_message_policy_bytes(content: bytes) -> bytes:
     if len(matches) != 1:
         ConfigurationError.fail("manifest must contain one canonical schema_version assignment")
     match = matches[0]
-    if match.group("version") == b"6":
+    if match.group("version") in {b"6", b"7"}:
         return content
     migrated = content[: match.start("version")] + b"6" + content[match.end("version") :]
     parse_manifest_bytes(migrated)
@@ -637,9 +811,7 @@ def enable_commit_message_policy_bytes(content: bytes) -> bytes:
 
 
 def create_commit_message_policy_manifest(repository_id: str) -> bytes:
-    content = (
-        f'schema_version = 6\nrepository_id = "{repository_id}"\ncomponents = []\n'.encode()
-    )
+    content = f'schema_version = 6\nrepository_id = "{repository_id}"\ncomponents = []\n'.encode()
     parsed = parse_manifest_bytes(content)
     if str(parsed.repository_id) != repository_id:
         ConfigurationError.fail("repository_id did not round-trip through the canonical manifest")
@@ -649,7 +821,7 @@ def create_commit_message_policy_manifest(repository_id: str) -> bytes:
 def parse_baseline_bytes(content: bytes) -> Baseline:
     try:
         data = _OBJECT_MAPPING.validate_json(_bounded_content(content, "baseline"), strict=True)
-    except (OSError, RecursionError, UnicodeError, ValueError):
+    except OSError, RecursionError, UnicodeError, ValueError:
         ConfigurationError.fail("cannot read baseline")
     fields = {
         "schema_version",

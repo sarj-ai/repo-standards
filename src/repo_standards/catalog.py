@@ -835,6 +835,16 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
             input_kinds=("git-diff", "git-attributes"),
         ),
         CapabilityDescriptor(
+            capability_id=CapabilityId("pull-request-review-policy"),
+            title="Pull-request review policy",
+            summary=(
+                "Evaluate exact-head checks, reviews, conversations, migrations, and size tiers."
+            ),
+            status="preview",
+            command_ids=(CommandId("pull-request.review-policy"),),
+            input_kinds=("git-diff", "repository-manifest", "provider-evidence"),
+        ),
+        CapabilityDescriptor(
             capability_id=CapabilityId("rest"),
             title="REST and OpenAPI",
             summary="Analyze committed API contracts without executing application code.",

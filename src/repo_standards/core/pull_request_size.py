@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git queries
 from types import MappingProxyType
+from typing import Literal
 
 from .errors import ConfigurationError
 
@@ -30,7 +31,14 @@ _JVM_TEST = re.compile(r".+(?:test|tests)\.(?:java|kt|kts|groovy|scala)\Z")
 _DOTNET_TEST = re.compile(r".+(?:test|tests)\.cs\Z")
 _RUBY_TEST = re.compile(r".+_(?:spec|test)\.rb\Z")
 _XCODE_TEST_COMPONENT = re.compile(r".+(?:ui)?tests\Z")
+PullRequestSizeCategory = Literal["production", "test", "generated", "binary"]
 _NUMSTAT_FIELDS = 3
+_CATEGORIES: tuple[PullRequestSizeCategory, ...] = (
+    "production",
+    "test",
+    "generated",
+    "binary",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +55,64 @@ class PullRequestFileSize:
 
 
 @dataclass(frozen=True, slots=True)
+class PullRequestCategorySize:
+    category: PullRequestSizeCategory
+    changed_files: int
+    additions: int
+    deletions: int
+
+    @property
+    def lines(self) -> int:
+        """Return total textual churn for this category."""
+        return self.additions + self.deletions
+
+
+@dataclass(frozen=True, slots=True)
+class PullRequestDirectorySize:
+    path: str
+    changed_files: int
+    additions: int
+    deletions: int
+    counted_lines: int
+    excluded_lines: int
+    categories: tuple[PullRequestCategorySize, ...]
+
+    @property
+    def total_lines(self) -> int:
+        """Return all textual churn in this directory."""
+        return self.additions + self.deletions
+
+
+@dataclass(frozen=True, slots=True)
+class PullRequestSizeSummary:
+    changed_files: int
+    counted_files: int
+    excluded_files: int
+    binary_files: int
+    additions: int
+    deletions: int
+    counted_additions: int
+    counted_deletions: int
+    excluded_additions: int
+    excluded_deletions: int
+
+    @property
+    def counted_lines(self) -> int:
+        """Return lines that contribute to review size."""
+        return self.counted_additions + self.counted_deletions
+
+    @property
+    def excluded_lines(self) -> int:
+        """Return textual churn excluded by policy."""
+        return self.excluded_additions + self.excluded_deletions
+
+    @property
+    def total_lines(self) -> int:
+        """Return all textual churn before classification."""
+        return self.additions + self.deletions
+
+
+@dataclass(frozen=True, slots=True)
 class PullRequestSize:
     base: str
     head: str
@@ -54,19 +120,37 @@ class PullRequestSize:
     files: tuple[PullRequestFileSize, ...]
 
     @property
+    def summary(self) -> PullRequestSizeSummary:
+        """Return aggregate file and churn counts."""
+        counted = tuple(item for item in self.files if item.category == "production")
+        excluded = tuple(item for item in self.files if item.category != "production")
+        return PullRequestSizeSummary(
+            changed_files=len(self.files),
+            counted_files=len(counted),
+            excluded_files=len(excluded),
+            binary_files=sum(item.category == "binary" for item in self.files),
+            additions=sum(item.additions for item in self.files),
+            deletions=sum(item.deletions for item in self.files),
+            counted_additions=sum(item.additions for item in counted),
+            counted_deletions=sum(item.deletions for item in counted),
+            excluded_additions=sum(item.additions for item in excluded),
+            excluded_deletions=sum(item.deletions for item in excluded),
+        )
+
+    @property
     def counted_lines(self) -> int:
         """Return lines that contribute to review size."""
-        return sum(item.lines for item in self.files if item.category == "production")
+        return self.summary.counted_lines
 
     @property
     def excluded_lines(self) -> int:
         """Return textual churn excluded by policy."""
-        return sum(item.lines for item in self.files if item.category != "production")
+        return self.summary.excluded_lines
 
     @property
     def total_lines(self) -> int:
         """Return all textual churn before classification."""
-        return sum(item.lines for item in self.files)
+        return self.summary.total_lines
 
     def category_lines(self) -> dict[str, int]:
         categories = {item.category for item in self.files} | {"production"}
@@ -74,6 +158,48 @@ class PullRequestSize:
             category: sum(item.lines for item in self.files if item.category == category)
             for category in sorted(categories)
         }
+
+    def category_sizes(self) -> tuple[PullRequestCategorySize, ...]:
+        return tuple(_category_size(category, self.files) for category in _CATEGORIES)
+
+    def directory_sizes(self) -> tuple[PullRequestDirectorySize, ...]:
+        grouped: dict[str, list[PullRequestFileSize]] = {}
+        for item in self.files:
+            directory = PurePosixPath(item.path).parent.as_posix()
+            grouped.setdefault(directory, []).append(item)
+        return tuple(
+            _directory_size(directory, tuple(grouped[directory])) for directory in sorted(grouped)
+        )
+
+
+def _category_size(
+    category: PullRequestSizeCategory,
+    files: tuple[PullRequestFileSize, ...],
+) -> PullRequestCategorySize:
+    matching = tuple(item for item in files if item.category == category)
+    return PullRequestCategorySize(
+        category=category,
+        changed_files=len(matching),
+        additions=sum(item.additions for item in matching),
+        deletions=sum(item.deletions for item in matching),
+    )
+
+
+def _directory_size(
+    path: str,
+    files: tuple[PullRequestFileSize, ...],
+) -> PullRequestDirectorySize:
+    categories = tuple(_category_size(category, files) for category in _CATEGORIES)
+    production = next(item for item in categories if item.category == "production")
+    return PullRequestDirectorySize(
+        path=path,
+        changed_files=len(files),
+        additions=sum(item.additions for item in files),
+        deletions=sum(item.deletions for item in files),
+        counted_lines=production.lines,
+        excluded_lines=sum(item.lines for item in categories if item.category != "production"),
+        categories=categories,
+    )
 
 
 def is_test_path(path: str) -> bool:
@@ -118,21 +244,26 @@ def analyze_pull_request_size(
         attribute=generated_attribute,
     )
     files = tuple(
-        PullRequestFileSize(
-            path=path,
-            additions=additions,
-            deletions=deletions,
-            category=(
-                "test"
-                if is_test_path(path)
-                else "generated"
-                if path in generated
-                else "binary"
-                if additions == deletions == 0 and binary
-                else "production"
+        sorted(
+            (
+                PullRequestFileSize(
+                    path=path,
+                    additions=additions,
+                    deletions=deletions,
+                    category=(
+                        "test"
+                        if is_test_path(path)
+                        else "generated"
+                        if path in generated
+                        else "binary"
+                        if additions == deletions == 0 and binary
+                        else "production"
+                    ),
+                )
+                for additions, deletions, path, binary in records
             ),
+            key=lambda item: item.path,
         )
-        for additions, deletions, path, binary in records
     )
     return PullRequestSize(
         base=base,

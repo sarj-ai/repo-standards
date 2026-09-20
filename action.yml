@@ -30,8 +30,11 @@ outputs:
     description: Total changed line count before exclusions
     value: ${{ steps.pull-request-size.outputs.total-lines }}
   report-json:
-    description: Canonical JSON report from pull-request-size
+    description: Bounded canonical JSON summary from pull-request-size
     value: ${{ steps.pull-request-size.outputs.report-json }}
+  report-path:
+    description: Path to the complete canonical JSON report
+    value: ${{ steps.pull-request-size.outputs.report-path }}
 
 runs:
   using: composite
@@ -61,15 +64,18 @@ runs:
         head=${INPUT_HEAD:-${PR_HEAD_SHA:-$EVENT_SHA}}
         test -n "$base" || { echo "A base revision is required outside pull_request events; pass base explicitly." >&2; exit 2; }
         test -n "$head" || { echo "A head revision is required." >&2; exit 2; }
-        report=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync repo-standards pull-request size "$INPUT_ROOT" \
+        report_path=$(mktemp "$RUNNER_TEMP/repo-standards-pr-size.XXXXXX.json")
+        uv run --project "$GITHUB_ACTION_PATH" --no-sync repo-standards pull-request size "$INPUT_ROOT" \
           --base "$base" --head "$head" \
-          --generated-attribute "$INPUT_GENERATED_ATTRIBUTE" --format json)
-        counted=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(sys.stdin)["summary"]["counted_lines"])' <<< "$report")
-        excluded=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(sys.stdin)["summary"]["excluded_lines"])' <<< "$report")
-        total=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(sys.stdin)["summary"]["total_lines"])' <<< "$report")
+          --generated-attribute "$INPUT_GENERATED_ATTRIBUTE" --report-path "$report_path" >/dev/null
+        counted=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["summary"]["counted_lines"])' "$report_path")
+        excluded=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["summary"]["excluded_lines"])' "$report_path")
+        total=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["summary"]["total_lines"])' "$report_path")
+        report=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; payload=json.load(open(sys.argv[1], encoding="utf-8")); print(json.dumps({key: value for key, value in payload.items() if key not in {"categories", "directories", "files"}}, sort_keys=True, separators=(",", ":")))' "$report_path")
         echo "counted-lines=$counted" >> "$GITHUB_OUTPUT"
         echo "excluded-lines=$excluded" >> "$GITHUB_OUTPUT"
         echo "total-lines=$total" >> "$GITHUB_OUTPUT"
         echo "report-json=$report" >> "$GITHUB_OUTPUT"
+        echo "report-path=$report_path" >> "$GITHUB_OUTPUT"
         printf '## Pull-request size\n\n- Counted: %s lines\n- Excluded: %s lines\n- Total: %s lines\n' \
           "$counted" "$excluded" "$total" >> "$GITHUB_STEP_SUMMARY"

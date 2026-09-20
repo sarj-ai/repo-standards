@@ -8,7 +8,8 @@ from importlib import metadata
 import json
 import os
 from pathlib import Path
-from typing import Annotated, ClassVar, NamedTuple, NoReturn, TypeGuard
+import re
+from typing import Annotated, ClassVar, Literal, NamedTuple, NoReturn, TypeGuard
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import typer
@@ -38,10 +39,13 @@ from repo_standards.core.models import (
     Diagnostic,
     ExecutionIssue,
     FindingsReport,
+    GitObjectId,
     IncompleteReport,
     Mode,
     Policy,
     PolicyId,
+    PullRequestConfig,
+    PullRequestReviewPolicyConfig,
     RepositoryId,
     RepositoryInspection,
     RepositoryPolicy,
@@ -49,6 +53,7 @@ from repo_standards.core.models import (
     RuleId,
 )
 from repo_standards.core.parser import load_manifest
+from repo_standards.core.pull_request_body import missing_required_body_sections
 from repo_standards.core.pull_request_commits import (
     DEFAULT_MAXIMUM_COMMITS,
     PullRequestCommits,
@@ -62,6 +67,16 @@ from repo_standards.core.pull_request_documentation import (
 )
 from repo_standards.core.pull_request_size import PullRequestSize, analyze_pull_request_size
 from repo_standards.core.render import render_text, report_dict
+from repo_standards.core.review_policy import (
+    CheckConclusion,
+    HumanReviewEvidence,
+    RequiredCheckEvidence,
+    ReviewPolicyConfig,
+    ReviewPolicyEvidence,
+    ReviewPolicyResult,
+    ReviewState,
+    evaluate_review_policy,
+)
 from repo_standards.core.rule_reviews import (
     RuleVersion,
     activated_rule_ids,
@@ -120,6 +135,7 @@ _OPENAPI_BASENAMES = frozenset({"openapi.json", "openapi.yaml", "openapi.yml"})
 _MAX_OPENAPI_DOCUMENTS = 100
 _MAX_OPENAPI_TOTAL_BYTES = 20 * 1024 * 1024
 _MAX_RENDERED_COMMIT_FINDINGS = 3
+_MAX_REVIEW_POLICY_EVIDENCE_BYTES = 1_048_576
 
 
 class _CompletedAnalysis(NamedTuple):
@@ -135,7 +151,9 @@ class _PageOptions(NamedTuple):
 
 
 class RequestError(ValueError):
-    """One invalid CLI request that must be returned as structured JSON."""
+    @classmethod
+    def fail(cls, message: str) -> NoReturn:
+        raise cls(message)
 
 
 class BaselineError(ConfigurationError):
@@ -151,6 +169,44 @@ class _TransitionExemptionInput(BaseModel):
     base_ref: str = Field(min_length=1)
     head_prefix: str = Field(min_length=1)
     sha_prefix_length: int = Field(default=12, ge=7, le=40)
+
+
+class _ReviewPolicyCheckInput(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    name: str = Field(min_length=1, max_length=256)
+    conclusion: CheckConclusion
+    head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+
+
+class _ReviewPolicyReviewInput(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    reviewer: str = Field(min_length=1, max_length=256)
+    state: ReviewState
+    commit_sha: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+
+
+class _ReviewPolicyEvidenceInput(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schema_version: Literal[1]
+    evaluated_head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    current_head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    base_ref: str = Field(min_length=1, max_length=1_024)
+    head_ref: str = Field(min_length=1, max_length=1_024)
+    base_repository_id: int = Field(gt=0)
+    head_repository_id: int = Field(gt=0)
+    is_draft: bool
+    author_login: str = Field(min_length=1, max_length=256)
+    author_is_bot: bool
+    required_checks_complete: bool
+    required_checks: tuple[_ReviewPolicyCheckInput, ...] = Field(max_length=512)
+    reviews_complete: bool
+    latest_human_reviews: tuple[_ReviewPolicyReviewInput, ...] = Field(max_length=10_000)
+    threads_complete: bool
+    threads_resolved: bool
+    body: str = Field(max_length=1_048_576)
 
 
 class OutputFormat(StrEnum):
@@ -238,6 +294,7 @@ def capabilities_command() -> None:
             "explain",
             "inspect",
             "pull-request commits",
+            "pull-request review-policy",
             "pull-request size",
             "report",
             "rest check",
@@ -362,7 +419,7 @@ def _render_commit_message(result: CommitMessageResult) -> str:
 
 
 @pull_request_app.command("size")
-def pull_request_size_command(
+def pull_request_size_command(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - Typer command options stay explicit
     root: Annotated[Path, typer.Argument()] = Path(),
     base: Annotated[str, typer.Option(help="Trusted base revision used for diff and policy.")] = "",
     head: Annotated[str, typer.Option(help="Head revision to compare with the base.")] = "HEAD",
@@ -370,6 +427,13 @@ def pull_request_size_command(
         str,
         typer.Option(help="Git attribute that marks repository-specific excluded artifacts."),
     ] = "pr-size-excluded",
+    report_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--report-path",
+            help="Write the complete canonical JSON report to this path.",
+        ),
+    ] = None,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
 ) -> None:
     """Calculate review-sized churn while excluding tests and declared generated artifacts."""
@@ -400,6 +464,17 @@ def pull_request_size_command(
         )
     top_files = 10
     payload = _pull_request_size_payload(result, top_files=top_files)
+    if report_path is not None:
+        try:
+            report_path.write_text(canonical_json(payload) + "\n", encoding="utf-8")
+        except OSError as error:
+            _emit_command_error(
+                "pull-request size",
+                "output.incomplete",
+                str(error),
+                phase="output",
+                remediation="Choose a writable --report-path and retry.",
+            )
     if output_format is OutputFormat.TEXT:
         typer.echo(_render_pull_request_size(result, top_files=top_files), nl=False)
     elif output_format is OutputFormat.PRETTY_JSON:
@@ -410,6 +485,7 @@ def pull_request_size_command(
 
 def _pull_request_size_payload(result: PullRequestSize, *, top_files: int) -> Mapping[str, object]:
     category_lines = result.category_lines()
+    summary = result.summary
     largest = sorted(
         (item for item in result.files if item.category == "production"),
         key=lambda item: (-item.lines, item.path),
@@ -428,9 +504,51 @@ def _pull_request_size_payload(result: PullRequestSize, *, top_files: int) -> Ma
             "counted_lines": result.counted_lines,
             "excluded_lines": result.excluded_lines,
             "total_lines": result.total_lines,
-            "changed_files": len(result.files),
+            "changed_files": summary.changed_files,
             "categories": category_lines,
+            "additions": summary.additions,
+            "deletions": summary.deletions,
+            "counted_files": summary.counted_files,
+            "counted_additions": summary.counted_additions,
+            "counted_deletions": summary.counted_deletions,
+            "excluded_files": summary.excluded_files,
+            "excluded_additions": summary.excluded_additions,
+            "excluded_deletions": summary.excluded_deletions,
+            "binary_files": summary.binary_files,
         },
+        "categories": [
+            {
+                **asdict(category),
+                "lines": category.lines,
+            }
+            for category in result.category_sizes()
+        ],
+        "directories": [
+            {
+                "path": directory.path,
+                "changed_files": directory.changed_files,
+                "additions": directory.additions,
+                "deletions": directory.deletions,
+                "counted_lines": directory.counted_lines,
+                "excluded_lines": directory.excluded_lines,
+                "total_lines": directory.total_lines,
+                "categories": [
+                    {
+                        **asdict(category),
+                        "lines": category.lines,
+                    }
+                    for category in directory.categories
+                ],
+            }
+            for directory in result.directory_sizes()
+        ],
+        "files": [
+            {
+                **asdict(item),
+                "lines": item.lines,
+            }
+            for item in result.files
+        ],
         "largest_counted_files": [
             {
                 "path": item.path,
@@ -445,10 +563,22 @@ def _pull_request_size_payload(result: PullRequestSize, *, top_files: int) -> Ma
 
 def _render_pull_request_size(result: PullRequestSize, *, top_files: int) -> str:
     categories = result.category_lines()
+    summary = result.summary
     lines = [
-        f"Counted review size: {result.counted_lines} lines",
-        f"Excluded churn: {result.excluded_lines} lines",
-        f"Total churn: {result.total_lines} lines",
+        (
+            f"Counted review size: {result.counted_lines} lines "
+            f"(+{summary.counted_additions}/-{summary.counted_deletions}, "
+            f"{summary.counted_files} files)"
+        ),
+        (
+            f"Excluded churn: {result.excluded_lines} lines "
+            f"(+{summary.excluded_additions}/-{summary.excluded_deletions}, "
+            f"{summary.excluded_files} files)"
+        ),
+        (
+            f"Total churn: {result.total_lines} lines "
+            f"(+{summary.additions}/-{summary.deletions}, {summary.changed_files} files)"
+        ),
         "Categories: " + ", ".join(f"{name}={value}" for name, value in categories.items()),
     ]
     largest = sorted(
@@ -530,6 +660,345 @@ def _render_pull_request_documentation(result: PullRequestDocumentation) -> str:
             "Remove or consolidate new pages; durable documentation belongs in the existing graph."
         )
     return "\n".join(lines) + "\n"
+
+
+@pull_request_app.command("review-policy")
+def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - trusted inputs stay explicit
+    root: Annotated[Path, typer.Argument()] = Path(),
+    base: Annotated[str, typer.Option(help="Exact trusted base commit SHA.")] = "",
+    head: Annotated[str, typer.Option(help="Exact evaluated pull-request head commit SHA.")] = "",
+    evidence: Annotated[
+        Path | None,
+        typer.Option(help="Strict, complete provider evidence JSON."),
+    ] = None,
+    manifest: Annotated[
+        Path | None,
+        typer.Option(help="Trusted schema 7 repository manifest."),
+    ] = None,
+    generated_attribute: Annotated[
+        str,
+        typer.Option(help="Git attribute that marks repository-specific excluded artifacts."),
+    ] = "pr-size-excluded",
+) -> None:
+    """Evaluate the configured review tier from exact Git and provider evidence."""
+    if not re.fullmatch(r"[0-9a-f]{40}", base) or not re.fullmatch(r"[0-9a-f]{40}", head):
+        _emit_command_error(
+            "pull-request review-policy",
+            "request.invalid",
+            "--base and --head must be exact lowercase 40-character commit SHAs",
+            phase="request",
+            remediation="Pass the immutable base and pull-request head commit object IDs.",
+        )
+    if evidence is None:
+        _emit_command_error(
+            "pull-request review-policy",
+            "request.invalid",
+            "--evidence is required",
+            phase="request",
+            remediation="Write the complete provider evidence JSON and pass its path.",
+        )
+    try:  # ruff: ignore[too-many-statements-in-try-clause] - one fail-closed evidence transaction
+        resolved_root = root.resolve(strict=True)
+        manifest_path = manifest or Path(".repo-standards/repository.toml")
+        if not manifest_path.is_absolute():
+            manifest_path = resolved_root / manifest_path
+        configured_manifest = load_manifest(manifest_path)
+        configured_pull_request = configured_manifest.pull_request
+        if configured_pull_request is None or configured_pull_request.review_policy is None:
+            ConfigurationError.fail(
+                "trusted manifest must define pull_request.review_policy using schema version 7"
+            )
+        configured = configured_pull_request.review_policy
+        provider = _load_review_policy_evidence(evidence)
+        _require_complete_review_policy_evidence(provider)
+        if provider.evaluated_head_sha != head:
+            ConfigurationError.fail(
+                "evidence evaluated_head_sha must equal the exact --head commit SHA"
+            )
+        configured_check_names = tuple(configured.required_checks)
+        observed_check_names = tuple(item.name for item in provider.required_checks)
+        if len(observed_check_names) != len(set(observed_check_names)):
+            ConfigurationError.fail("required_checks evidence contains duplicate check names")
+        if set(observed_check_names) != set(configured_check_names):
+            ConfigurationError.fail(
+                "required_checks evidence must contain exactly the checks in the trusted manifest"
+            )
+        transition_exemption = _matching_review_policy_transition(
+            provider=provider,
+            configured_pull_request=configured_pull_request,
+        )
+        if transition_exemption is None:
+            size = analyze_pull_request_size(
+                resolved_root,
+                base=base,
+                head=head,
+                generated_attribute=generated_attribute,
+            )
+            counted_lines = size.counted_lines
+            changed_paths = tuple(item.path for item in size.files)
+            missing_sections = missing_required_body_sections(
+                provider.body,
+                configured.required_body_sections,
+            )
+        else:
+            size = None
+            counted_lines = configured.zero_review_below_counted_lines
+            changed_paths = ()
+            missing_sections = ()
+        result = evaluate_review_policy(
+            ReviewPolicyEvidence(
+                counted_lines=counted_lines,
+                changed_paths=changed_paths,
+                evaluated_head_sha=GitObjectId(provider.evaluated_head_sha),
+                current_head_sha=GitObjectId(provider.current_head_sha),
+                required_checks=tuple(
+                    RequiredCheckEvidence(item.name, item.conclusion)
+                    for item in provider.required_checks
+                ),
+                latest_human_reviews=tuple(
+                    HumanReviewEvidence(
+                        reviewer=item.reviewer,
+                        state=item.state,
+                        commit_sha=(
+                            GitObjectId(item.commit_sha) if item.commit_sha is not None else None
+                        ),
+                    )
+                    for item in provider.latest_human_reviews
+                ),
+                threads_resolved=provider.threads_resolved,
+            ),
+            ReviewPolicyConfig(
+                zero_review_below_lines=configured.zero_review_below_counted_lines,
+                one_review_maximum_lines=configured.two_reviews_above_counted_lines,
+                migration_roots=configured.migration_roots,
+                accepted_check_conclusions=frozenset(
+                    CheckConclusion(item) for item in configured.accepted_check_conclusions
+                ),
+            ),
+        )
+    except (ConfigurationError, OSError, ValidationError, ValueError) as error:
+        _emit_command_error(
+            "pull-request review-policy",
+            "analysis.incomplete",
+            str(error),
+            phase="analysis",
+            remediation=(
+                "Verify the schema 7 manifest, exact revisions, and complete provider evidence."
+            ),
+        )
+    payload = _pull_request_review_policy_payload(
+        base=base,
+        size=size,
+        provider=provider,
+        configured=configured,
+        result=result,
+        missing_sections=missing_sections,
+        transition_exemption=transition_exemption,
+    )
+    typer.echo(canonical_json(payload) + "\n", nl=False)
+    if not _review_policy_merge_ready(
+        result=result,
+        provider=provider,
+        missing_sections=missing_sections,
+        transition_exemption=transition_exemption,
+    ):
+        raise typer.Exit(1)
+
+
+def _load_review_policy_evidence(path: Path) -> _ReviewPolicyEvidenceInput:
+    try:
+        if path.stat().st_size > _MAX_REVIEW_POLICY_EVIDENCE_BYTES:
+            RequestError.fail("review policy evidence exceeds 1048576 bytes")
+        return _ReviewPolicyEvidenceInput.model_validate_json(path.read_bytes())
+    except OSError:
+        RequestError.fail(f"cannot read review policy evidence: {path}")
+    except ValidationError:
+        RequestError.fail("review policy evidence does not match schema version 1")
+
+
+def _require_complete_review_policy_evidence(provider: _ReviewPolicyEvidenceInput) -> None:
+    incomplete = [
+        name
+        for name, complete in (
+            ("required checks", provider.required_checks_complete),
+            ("reviews", provider.reviews_complete),
+            ("conversation threads", provider.threads_complete),
+        )
+        if not complete
+    ]
+    if incomplete:
+        ConfigurationError.fail(f"provider evidence is incomplete for: {', '.join(incomplete)}")
+
+
+def _matching_review_policy_transition(
+    *,
+    provider: _ReviewPolicyEvidenceInput,
+    configured_pull_request: PullRequestConfig,
+) -> str | None:
+    review_policy = configured_pull_request.review_policy
+    if (
+        review_policy is None
+        or provider.head_repository_id != provider.base_repository_id
+        or provider.current_head_sha != provider.evaluated_head_sha
+        or provider.author_login not in review_policy.transition_actors
+    ):
+        return None
+    exemptions = set(review_policy.transition_exemptions)
+    for transition in configured_pull_request.commit_history.transitions:
+        expected_head_ref = (
+            f"{transition.head_prefix}{provider.evaluated_head_sha[: transition.sha_prefix_length]}"
+        )
+        if (
+            transition.transition_id in exemptions
+            and provider.base_ref == transition.base_ref
+            and provider.head_ref == expected_head_ref
+        ):
+            return transition.transition_id
+    return None
+
+
+def _review_policy_merge_ready(
+    *,
+    result: ReviewPolicyResult,
+    provider: _ReviewPolicyEvidenceInput,
+    missing_sections: tuple[str, ...],
+    transition_exemption: str | None,
+) -> bool:
+    return (
+        result.merge_ready
+        and not missing_sections
+        and not provider.is_draft
+        and (not provider.author_is_bot or transition_exemption is not None)
+        and provider.head_repository_id == provider.base_repository_id
+        and all(check.head_sha == provider.evaluated_head_sha for check in provider.required_checks)
+    )
+
+
+def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - receipt inputs are distinct evidence domains
+    *,
+    base: str,
+    size: PullRequestSize | None,
+    provider: _ReviewPolicyEvidenceInput,
+    configured: PullRequestReviewPolicyConfig,
+    result: ReviewPolicyResult,
+    missing_sections: tuple[str, ...],
+    transition_exemption: str | None,
+) -> Mapping[str, object]:
+    merge_ready = _review_policy_merge_ready(
+        result=result,
+        provider=provider,
+        missing_sections=missing_sections,
+        transition_exemption=transition_exemption,
+    )
+    summary = size.summary if size is not None else None
+    reasons = _review_policy_receipt_reasons(
+        result=result,
+        provider=provider,
+        missing_sections=missing_sections,
+        transition_exemption=transition_exemption,
+    )
+    return {
+        **_envelope(
+            "pull-request review-policy",
+            conclusion="passed" if merge_ready else "findings",
+            provenance={
+                "kind": "git-revisions-and-provider-evidence",
+                "base": base,
+                "evaluated_head": provider.evaluated_head_sha,
+                "current_head": provider.current_head_sha,
+            },
+        ),
+        "policy": {
+            "zero_review_below_counted_lines": configured.zero_review_below_counted_lines,
+            "two_reviews_above_counted_lines": configured.two_reviews_above_counted_lines,
+            "migration_roots": list(configured.migration_roots),
+            "required_checks": list(configured.required_checks),
+            "accepted_check_conclusions": list(configured.accepted_check_conclusions),
+            "required_body_sections": list(configured.required_body_sections),
+            "transition_exemptions": list(configured.transition_exemptions),
+            "transition_actors": list(configured.transition_actors),
+        },
+        "summary": {
+            "merge_ready": merge_ready,
+            "tier": result.required_human_reviews,
+            "required_human_reviews": result.required_human_reviews,
+            "current_human_approvals": result.current_human_approvals,
+            "touches_migration": result.touches_migration,
+            "transition_exemption": transition_exemption,
+            "missing_body_sections": list(missing_sections),
+            "reasons": reasons,
+        },
+        "counts": {
+            "changed_files": summary.changed_files if summary is not None else None,
+            "counted_files": summary.counted_files if summary is not None else None,
+            "excluded_files": summary.excluded_files if summary is not None else None,
+            "binary_files": summary.binary_files if summary is not None else None,
+            "required_checks": len(configured.required_checks),
+            "human_reviews": len(provider.latest_human_reviews),
+        },
+        "size": (
+            {
+                "classification": "measured",
+                "counted_lines": summary.counted_lines,
+                "excluded_lines": summary.excluded_lines,
+                "total_lines": summary.total_lines,
+                "additions": summary.additions,
+                "deletions": summary.deletions,
+                "counted_additions": summary.counted_additions,
+                "counted_deletions": summary.counted_deletions,
+                "excluded_additions": summary.excluded_additions,
+                "excluded_deletions": summary.excluded_deletions,
+                "categories": size.category_lines(),
+            }
+            if size is not None and summary is not None
+            else {
+                "classification": "transition-exempt",
+                "counted_lines": None,
+                "excluded_lines": None,
+                "total_lines": None,
+                "additions": None,
+                "deletions": None,
+                "counted_additions": None,
+                "counted_deletions": None,
+                "excluded_additions": None,
+                "excluded_deletions": None,
+                "categories": {},
+            }
+        ),
+        "files": [
+            {
+                "path": item.path,
+                "category": item.category,
+                "additions": item.additions,
+                "deletions": item.deletions,
+                "lines": item.lines,
+            }
+            for item in (() if size is None else size.files)
+        ],
+    }
+
+
+def _review_policy_receipt_reasons(
+    *,
+    result: ReviewPolicyResult,
+    provider: _ReviewPolicyEvidenceInput,
+    missing_sections: tuple[str, ...],
+    transition_exemption: str | None,
+) -> list[str]:
+    reasons = [reason.value for reason in result.reasons]
+    if transition_exemption is not None:
+        reasons.append("transition_exemption")
+    if missing_sections:
+        reasons.append("body_sections_incomplete")
+    if provider.is_draft:
+        reasons.append("draft_pull_request")
+    if provider.author_is_bot and transition_exemption is None:
+        reasons.append("bot_authored_pull_request")
+    if provider.head_repository_id != provider.base_repository_id:
+        reasons.append("cross_repository_pull_request")
+    if any(check.head_sha != provider.evaluated_head_sha for check in provider.required_checks):
+        reasons.append("check_head_mismatch")
+    return reasons
 
 
 @pull_request_app.command("commits")
@@ -719,8 +1188,7 @@ def _resolve_pull_request_commits_request(  # ruff: ignore[too-many-arguments] -
     )
     for transition in history.transitions:
         expected_head_ref = (
-            f"{transition.head_prefix}"
-            f"{inputs.context.head_sha[: transition.sha_prefix_length]}"
+            f"{transition.head_prefix}{inputs.context.head_sha[: transition.sha_prefix_length]}"
         )
         if (
             inputs.context.base_ref == transition.base_ref
@@ -751,13 +1219,9 @@ def _analyze_resolved_pull_request_inputs(
     context = inputs.context
     configured = inputs.manifest.pull_request if inputs.manifest is not None else None
     history = configured.commit_history if configured is not None else None
-    maximum_commits = (
-        history.maximum_commits if history is not None else DEFAULT_MAXIMUM_COMMITS
-    )
+    maximum_commits = history.maximum_commits if history is not None else DEFAULT_MAXIMUM_COMMITS
     repository_id = (
-        str(context.head_repository_id)
-        if context.head_repository_id is not None
-        else None
+        str(context.head_repository_id) if context.head_repository_id is not None else None
     )
     transition_exemptions = ()
     if history is not None and context.base_repository_id is not None:

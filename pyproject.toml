@@ -1,6 +1,6 @@
 [project]
 name = "repo-standards"
-version = "5.15.0"
+version = "5.16.0"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
@@ -63,6 +63,22 @@ extend-select = ["B", "E", "F", "I", "PERF", "PL", "RUF", "S", "SIM", "UP"]
 
 [tool.ruff.lint.extend-per-file-ignores]
 "**/tests/**" = ["implicit-namespace-package", "magic-value-comparison", "assert"]
+# This dependency-free GitHub adapter validates dynamic provider JSON at every
+# boundary and invokes only fixed git/uv executables with exact provider SHAs.
+"src/repo_standards/github_review_policy.py" = [
+  "any-type",
+  "banned-api",
+  "f-string-in-exception",
+  "line-too-long",
+  "print",
+  "raise-vanilla-args",
+  "raw-string-in-exception",
+  "start-process-with-partial-path",
+  "suspicious-subprocess-import",
+  "suspicious-url-open-usage",
+  "too-many-arguments",
+  "too-many-locals",
+]
 # This dependency-free release bootstrap has typed validation around its
 # standard-library CLI, environment, HTTP, and JSON boundaries.
 "release_reconciliation.py" = ["banned-api"]

@@ -153,6 +153,7 @@ def test_catalog_graph_is_complete() -> None:
         "inspect",
         "pull-request.commits",
         "pull-request.documentation",
+        "pull-request.review-policy",
         "pull-request.size",
         "report",
         "rest.check",
@@ -165,6 +166,7 @@ def test_catalog_graph_is_complete() -> None:
     }
     assert {capability.capability_id for capability in catalog.capabilities} == {
         "pull-request-commits",
+        "pull-request-review-policy",
         "pull-request-size",
         "repository",
         "rest",
