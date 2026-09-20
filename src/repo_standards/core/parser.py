@@ -574,9 +574,9 @@ def parse_pull_request_review_policy(
         "accepted_check_conclusions",
         default=["success"],
     )
-    if accepted_check_conclusions != ("success",):
+    if accepted_check_conclusions not in {("success",), ("success", "skipped")}:
         ConfigurationError.fail(
-            f"{context}.accepted_check_conclusions currently supports only success"
+            f"{context}.accepted_check_conclusions supports success and optional skipped"
         )
     return PullRequestReviewPolicyConfig(
         zero_review_below_counted_lines=zero_review_below,

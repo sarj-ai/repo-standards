@@ -285,6 +285,24 @@ def test_schema_seven_review_policy_defaults_to_successful_checks() -> None:
     assert manifest.pull_request.review_policy.accepted_check_conclusions == ("success",)
 
 
+def test_schema_seven_review_policy_can_accept_skipped_routed_checks() -> None:
+    manifest = parse_manifest_bytes(
+        _schema_seven_review_policy(
+            review_policy=_REVIEW_POLICY.replace(
+                b'accepted_check_conclusions = ["success"]',
+                b'accepted_check_conclusions = ["success", "skipped"]',
+            )
+        )
+    )
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.review_policy is not None
+    assert manifest.pull_request.review_policy.accepted_check_conclusions == (
+        "success",
+        "skipped",
+    )
+
+
 def test_schema_six_keeps_pull_request_behavior_without_review_policy() -> None:
     manifest = parse_manifest_bytes(
         b"""
@@ -354,7 +372,7 @@ def test_review_policy_requires_schema_seven() -> None:
         (
             b'accepted_check_conclusions = ["success"]',
             b'accepted_check_conclusions = ["success", "neutral"]',
-            "currently supports only success",
+            "supports success and optional skipped",
         ),
     ],
 )
