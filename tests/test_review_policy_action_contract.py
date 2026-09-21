@@ -16,6 +16,8 @@ from repo_standards.github_review_policy import (
     eligible_reviewer_ids,
     final_policy_decision,
     latest_human_reviews,
+    merge_group_pull_request,
+    reconcile_merge_group,
     require_unchanged_evidence,
     required_check_names,
     review_policy_status_passed,
@@ -36,6 +38,7 @@ def test_review_policy_action_contract() -> None:
         "manifest-path",
         "pr-number",
         "merge-group-head-sha",
+        "merge-group-head-ref",
         "github-token",
         "review-optional-enabled",
         "required-check-app-id",
@@ -374,3 +377,91 @@ def test_merge_group_accepts_configured_successful_actions_run() -> None:
         head_sha=head,
         workflow_path=".github/workflows/review-policy.yml",
     )
+
+
+def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None:
+    merge_head = "c" * 40
+    pull_head = "b" * 40
+    queue_parent = "a" * 40
+    client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
+    calls: list[tuple[str, str]] = []
+    posted_statuses: list[dict[str, object]] = []
+
+    def request(method: str, path: str, **kwargs: object) -> object:
+        calls.append((method, path))
+        if method == "POST" and path == f"/repos/owner/repo/statuses/{merge_head}":
+            posted_statuses.append(dict(kwargs["payload"]))  # type: ignore[arg-type]
+            return None
+        if path == f"/repos/owner/repo/commits/{merge_head}":
+            return {"sha": merge_head, "parents": [{"sha": queue_parent}]}
+        if path == "/repos/owner/repo/pulls/42":
+            return {
+                "base": {
+                    "sha": queue_parent,
+                    "ref": "dev",
+                    "repo": {"id": 1},
+                },
+                "head": {
+                    "sha": pull_head,
+                    "ref": "feature",
+                    "repo": {"id": 1, "full_name": "owner/repo"},
+                },
+                "user": {"id": 10, "login": "author", "type": "User"},
+                "body": "",
+                "draft": False,
+                "state": "open",
+            }
+        if path == f"/repos/owner/repo/compare/{pull_head}...{merge_head}":
+            return {"status": "ahead"}
+        if path == "/repos/owner/repo/actions/runs/123":
+            return {
+                "path": ".github/workflows/review-policy.yml@refs/heads/dev",
+                "status": "completed",
+                "conclusion": "success",
+                "event": "pull_request_target",
+            }
+        message = f"unexpected request: {method} {path}"
+        raise AssertionError(message)
+
+    def pages(path: str, **_kwargs: object) -> list[object]:
+        calls.append(("PAGES", path))
+        assert path == f"/repos/owner/repo/commits/{pull_head}/statuses"
+        return [
+            {
+                "id": 1,
+                "sha": pull_head,
+                "context": "Review Policy",
+                "state": "success",
+                "target_url": "https://github.com/owner/repo/actions/runs/123",
+                "creator": {"login": "github-actions[bot]", "type": "Bot"},
+            }
+        ]
+
+    client.request = request
+    client.rest_pages = pages
+
+    assert (
+        reconcile_merge_group(
+            client=client,
+            head_sha=merge_head,
+            head_ref=f"refs/heads/gh-readonly-queue/dev/pr-42-{queue_parent}",
+            workflow_path=".github/workflows/review-policy.yml",
+        )
+        == 0
+    )
+    assert [status["state"] for status in posted_statuses] == ["pending", "success"]
+    assert not any(path.endswith(f"/commits/{merge_head}/pulls") for _, path in calls)
+
+
+@pytest.mark.parametrize(
+    "head_ref",
+    [
+        "gh-readonly-queue/dev/pr-42-" + "a" * 40,
+        "refs/heads/gh-readonly-queue/dev/not-pr-42-" + "a" * 40,
+        "refs/heads/gh-readonly-queue/dev/pr-0-" + "a" * 40,
+        "refs/heads/gh-readonly-queue/dev/pr-42-not-a-sha",
+    ],
+)
+def test_merge_group_rejects_noncanonical_queue_ref(head_ref: str) -> None:
+    with pytest.raises(ReconciliationError, match="exact merge-queue ref"):
+        merge_group_pull_request(head_ref)
