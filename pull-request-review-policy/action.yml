@@ -15,7 +15,11 @@ inputs:
     required: false
     default: ''
   merge-group-head-sha:
-    description: Merge-group SHA whose constituent PR receipts must all pass
+    description: Merge-group SHA whose queued pull request receipt must pass
+    required: false
+    default: ''
+  merge-group-head-ref:
+    description: Exact merge-queue ref identifying the pull request under test
     required: false
     default: ''
   github-token:
@@ -65,6 +69,7 @@ runs:
         INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         INPUT_MERGE_GROUP_HEAD_SHA: ${{ inputs.merge-group-head-sha }}
+        INPUT_MERGE_GROUP_HEAD_REF: ${{ inputs.merge-group-head-ref }}
         INPUT_REQUIRED_CHECK_APP_ID: ${{ inputs.required-check-app-id }}
         INPUT_REVIEW_OPTIONAL_ENABLED: ${{ inputs.review-optional-enabled }}
         INPUT_POLICY_WORKFLOW_PATH: ${{ inputs.policy-workflow-path }}
@@ -77,7 +82,10 @@ runs:
           --policy-workflow-path "$INPUT_POLICY_WORKFLOW_PATH"
         )
         if [[ -n "$INPUT_MERGE_GROUP_HEAD_SHA" ]]; then
-          arguments+=(--merge-group-head-sha "$INPUT_MERGE_GROUP_HEAD_SHA")
+          arguments+=(
+            --merge-group-head-sha "$INPUT_MERGE_GROUP_HEAD_SHA"
+            --merge-group-head-ref "$INPUT_MERGE_GROUP_HEAD_REF"
+          )
         elif [[ -n "$INPUT_PR_NUMBER" ]]; then
           arguments+=(--pr-number "$INPUT_PR_NUMBER")
         else

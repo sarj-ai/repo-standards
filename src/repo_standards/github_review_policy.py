@@ -26,6 +26,10 @@ _MAX_ITEMS: Final = 10_000
 _PER_PAGE: Final = 100
 _INCOMPLETE_EXIT: Final = 2
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}\Z")
+_MERGE_GROUP_REF = re.compile(
+    r"refs/heads/gh-readonly-queue/(?P<base_ref>.+)/"
+    r"pr-(?P<number>[1-9][0-9]*)-(?P<parent_sha>[0-9a-f]{40})\Z"
+)
 
 
 class ReconciliationError(RuntimeError):
@@ -774,75 +778,89 @@ def review_policy_status_passed(
     )
 
 
+def merge_group_pull_request(head_ref: str) -> tuple[str, int, str]:
+    match = _MERGE_GROUP_REF.fullmatch(head_ref)
+    if match is None:
+        raise ReconciliationError("merge-group-head-ref must be an exact merge-queue ref")
+    return (
+        match.group("base_ref"),
+        int(match.group("number")),
+        match.group("parent_sha"),
+    )
+
+
 def reconcile_merge_group(
     *,
     client: GitHubClient,
     head_sha: str,
+    head_ref: str,
     workflow_path: str,
 ) -> int:
     if _OBJECT_ID.fullmatch(head_sha) is None:
         raise ReconciliationError("merge-group-head-sha must be an exact lowercase SHA")
+    base_ref, number, queue_parent_sha = merge_group_pull_request(head_ref)
     commit = _mapping(
         client.request("GET", f"/repos/{client.repository}/commits/{head_sha}"),
         "merge group commit",
     )
     if commit.get("sha") != head_sha:
         raise ReconciliationError("merge group commit lookup returned a different SHA")
+    parents = commit.get("parents")
+    if not isinstance(parents, list) or not parents:
+        raise ReconciliationError("merge group commit must have at least one parent")
+    parent_shas = {
+        _string(_mapping(parent, "merge group parent").get("sha"), "merge group parent SHA")
+        for parent in parents
+    }
+    if queue_parent_sha not in parent_shas:
+        raise ReconciliationError("merge-group-head-ref parent does not match the merge group")
     post_status(
         client,
         head_sha=head_sha,
         state="pending",
-        description="Checking constituent pull-request review policy receipts",
+        description=f"Checking pull request {number} review policy receipt",
         target_url=_workflow_url(),
     )
-    pulls = client.rest_pages(f"/repos/{client.repository}/commits/{head_sha}/pulls")
-    if not pulls:
-        raise ReconciliationError("merge group has no associated pull requests")
-    snapshots: list[PullRequestSnapshot] = []
-    failed: list[int] = []
-    for raw in pulls:
-        pull_request = _mapping(raw, "associated pull request")
-        number = _integer(pull_request.get("number"), "associated pull request number")
-        snapshot = pull_request_snapshot(client, number)
-        snapshots.append(snapshot)
-        comparison = _mapping(
-            client.request(
-                "GET",
-                f"/repos/{client.repository}/compare/{snapshot.head_sha}...{head_sha}",
-            ),
-            "merge group ancestry comparison",
+    snapshot = pull_request_snapshot(client, number)
+    if snapshot.base_ref != base_ref:
+        raise ReconciliationError(
+            f"pull request {number} targets {snapshot.base_ref!r}, not merge-group base {base_ref!r}"
         )
-        if comparison.get("status") not in {"ahead", "identical"}:
-            raise ReconciliationError(
-                f"pull request {number} head is not an ancestor of the merge group"
-            )
-        statuses = client.rest_pages(
-            f"/repos/{client.repository}/commits/{snapshot.head_sha}/statuses"
+    if snapshot.state != "open":
+        raise ReconciliationError(f"merge-group pull request {number} is not open")
+    comparison = _mapping(
+        client.request(
+            "GET",
+            f"/repos/{client.repository}/compare/{snapshot.head_sha}...{head_sha}",
+        ),
+        "merge group ancestry comparison",
+    )
+    if comparison.get("status") not in {"ahead", "identical"}:
+        raise ReconciliationError(f"pull request {number} head is not an ancestor of the merge group")
+    statuses = client.rest_pages(
+        f"/repos/{client.repository}/commits/{snapshot.head_sha}/statuses"
+    )
+    passed = review_policy_status_passed(
+        client,
+        statuses,
+        head_sha=snapshot.head_sha,
+        workflow_path=workflow_path,
+    )
+    refreshed = pull_request_snapshot(client, snapshot.number)
+    if refreshed.head_sha != snapshot.head_sha:
+        raise ReconciliationError(
+            f"pull request {snapshot.number} changed during merge-group reconciliation"
         )
-        if not review_policy_status_passed(
-            client,
-            statuses,
-            head_sha=snapshot.head_sha,
-            workflow_path=workflow_path,
-        ):
-            failed.append(number)
-    for snapshot in snapshots:
-        refreshed = pull_request_snapshot(client, snapshot.number)
-        if refreshed.head_sha != snapshot.head_sha:
-            raise ReconciliationError(
-                f"pull request {snapshot.number} changed during merge-group reconciliation"
-            )
     refreshed_commit = _mapping(
         client.request("GET", f"/repos/{client.repository}/commits/{head_sha}"),
         "refreshed merge group commit",
     )
     if refreshed_commit.get("sha") != head_sha:
         raise ReconciliationError("merge group changed during reconciliation")
-    passed = not failed
     description = (
-        f"All {len(snapshots)} constituent PR receipts passed"
+        f"Pull request {number} review policy receipt passed"
         if passed
-        else f"PR review policy blocked: {', '.join(str(item) for item in failed)}"
+        else f"Pull request {number} review policy receipt blocked"
     )
     post_status(
         client,
@@ -904,11 +922,16 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
     if args.merge_group_head_sha:
         if args.pr_number is not None:
             raise ReconciliationError("pr-number and merge-group-head-sha are mutually exclusive")
+        if args.merge_group_head_ref is None:
+            raise ReconciliationError("merge-group-head-ref is required in merge-group mode")
         return reconcile_merge_group(
             client=client,
             head_sha=args.merge_group_head_sha,
+            head_ref=args.merge_group_head_ref,
             workflow_path=args.policy_workflow_path,
         )
+    if args.merge_group_head_ref is not None:
+        raise ReconciliationError("merge-group-head-ref requires merge-group-head-sha")
     if args.pr_number is None:
         raise ReconciliationError("pr-number is required outside merge-group mode")
     snapshot = pull_request_snapshot(client, args.pr_number)
@@ -1086,6 +1109,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest-path", default=".repo-standards/repository.toml")
     parser.add_argument("--pr-number", type=int)
     parser.add_argument("--merge-group-head-sha")
+    parser.add_argument("--merge-group-head-ref")
     parser.add_argument("--required-check-app-id", type=int, default=15368)
     parser.add_argument("--policy-workflow-path", default=".github/workflows/review-policy.yml")
     parser.add_argument("--review-optional-enabled", action="store_true")
