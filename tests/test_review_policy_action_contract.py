@@ -17,6 +17,7 @@ from repo_standards.github_review_policy import (
     final_policy_decision,
     latest_human_reviews,
     merge_group_pull_request,
+    merge_queue_head_sha,
     reconcile_merge_group,
     require_unchanged_evidence,
     required_check_names,
@@ -411,8 +412,6 @@ def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None
                 "draft": False,
                 "state": "open",
             }
-        if path == f"/repos/owner/repo/compare/{pull_head}...{merge_head}":
-            return {"status": "ahead"}
         if path == "/repos/owner/repo/actions/runs/123":
             return {
                 "path": ".github/workflows/review-policy.yml@refs/heads/dev",
@@ -440,6 +439,17 @@ def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None
     client.request = request
     client.rest_pages = pages
 
+    def graphql(query: str, variables: object) -> dict[str, object]:
+        assert "mergeQueueEntry" in query
+        assert variables == {"owner": "owner", "repository": "repo", "number": 42}
+        return {
+            "repository": {
+                "pullRequest": {"mergeQueueEntry": {"headCommit": {"oid": merge_head}}}
+            }
+        }
+
+    client.graphql = graphql
+
     assert (
         reconcile_merge_group(
             client=client,
@@ -451,6 +461,7 @@ def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None
     )
     assert [status["state"] for status in posted_statuses] == ["pending", "success"]
     assert not any(path.endswith(f"/commits/{merge_head}/pulls") for _, path in calls)
+    assert not any("/compare/" in path for _, path in calls)
 
 
 @pytest.mark.parametrize(
@@ -465,3 +476,22 @@ def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None
 def test_merge_group_rejects_noncanonical_queue_ref(head_ref: str) -> None:
     with pytest.raises(ReconciliationError, match="exact merge-queue ref"):
         merge_group_pull_request(head_ref)
+
+
+@pytest.mark.parametrize("entry", [None, {"headCommit": {"oid": "d" * 40}}])
+def test_merge_group_requires_current_queue_entry(
+    entry: dict[str, object] | None,
+) -> None:
+    client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
+
+    def graphql(query: str, variables: object) -> dict[str, object]:
+        assert "mergeQueueEntry" in query
+        assert variables == {"owner": "owner", "repository": "repo", "number": 42}
+        return {"repository": {"pullRequest": {"mergeQueueEntry": entry}}}
+
+    client.graphql = graphql
+    if entry is None:
+        with pytest.raises(ReconciliationError, match="merge queue entry"):
+            merge_queue_head_sha(client, 42)
+    else:
+        assert merge_queue_head_sha(client, 42) == "d" * 40

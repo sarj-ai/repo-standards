@@ -789,6 +789,28 @@ def merge_group_pull_request(head_ref: str) -> tuple[str, int, str]:
     )
 
 
+def merge_queue_head_sha(client: GitHubClient, number: int) -> str:
+    owner, repository = client.repository.split("/", 1)
+    data = client.graphql(
+        """query($owner: String!, $repository: String!, $number: Int!) {
+          repository(owner: $owner, name: $repository) {
+            pullRequest(number: $number) {
+              mergeQueueEntry { headCommit { oid } }
+            }
+          }
+        }""",
+        {"owner": owner, "repository": repository, "number": number},
+    )
+    repo = _mapping(data.get("repository"), "merge queue repository")
+    pull_request = _mapping(repo.get("pullRequest"), "merge queue pull request")
+    entry = _mapping(pull_request.get("mergeQueueEntry"), "merge queue entry")
+    head_commit = _mapping(entry.get("headCommit"), "merge queue head commit")
+    sha = _string(head_commit.get("oid"), "merge queue head SHA")
+    if _OBJECT_ID.fullmatch(sha) is None:
+        raise ReconciliationError("merge queue head SHA must be an exact lowercase SHA")
+    return sha
+
+
 def reconcile_merge_group(
     *,
     client: GitHubClient,
@@ -828,15 +850,8 @@ def reconcile_merge_group(
         )
     if snapshot.state != "open":
         raise ReconciliationError(f"merge-group pull request {number} is not open")
-    comparison = _mapping(
-        client.request(
-            "GET",
-            f"/repos/{client.repository}/compare/{snapshot.head_sha}...{head_sha}",
-        ),
-        "merge group ancestry comparison",
-    )
-    if comparison.get("status") not in {"ahead", "identical"}:
-        raise ReconciliationError(f"pull request {number} head is not an ancestor of the merge group")
+    if merge_queue_head_sha(client, number) != head_sha:
+        raise ReconciliationError(f"pull request {number} queue entry changed during reconciliation")
     statuses = client.rest_pages(
         f"/repos/{client.repository}/commits/{snapshot.head_sha}/statuses"
     )
@@ -851,6 +866,8 @@ def reconcile_merge_group(
         raise ReconciliationError(
             f"pull request {snapshot.number} changed during merge-group reconciliation"
         )
+    if merge_queue_head_sha(client, number) != head_sha:
+        raise ReconciliationError(f"pull request {number} queue entry changed during reconciliation")
     refreshed_commit = _mapping(
         client.request("GET", f"/repos/{client.repository}/commits/{head_sha}"),
         "refreshed merge group commit",
