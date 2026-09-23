@@ -54,6 +54,7 @@ def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> 
         review_for(RuleId("repository/artifacts/terraform-test-files"), 1) == terraform_test_review
     )
     assert review_for(RuleId("repository/artifacts/mjs-files"), 1) == mjs_review
+    assert review_for(RuleId("repository/artifacts/mjs-files"), 2) == PendingRuleReview()
     for rule_id, version in (
         ("repository/artifacts/bespoke-iac-verifiers", 3),
         ("repository/artifacts/operational-script-tests", 1),
