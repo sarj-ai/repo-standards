@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 from typing import Any, Final
 from urllib.error import HTTPError, URLError
@@ -25,6 +26,10 @@ _MAX_PAGES: Final = 100
 _MAX_ITEMS: Final = 10_000
 _PER_PAGE: Final = 100
 _INCOMPLETE_EXIT: Final = 2
+# A reconcile run posts its final status a few seconds before the run completes,
+# and the merge queue starts a merge group as soon as that status turns green.
+_RUN_COMPLETION_TIMEOUT_SECONDS: Final = 300
+_RUN_COMPLETION_POLL_SECONDS: Final = 5
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}\Z")
 _MERGE_GROUP_REF = re.compile(
     r"refs/heads/gh-readonly-queue/(?P<base_ref>.+)/"
@@ -764,10 +769,7 @@ def review_policy_status_passed(
         _string(latest.get("target_url"), "review policy status target URL"),
         repository=client.repository,
     )
-    run = _mapping(
-        client.request("GET", f"/repos/{client.repository}/actions/runs/{run_id}"),
-        "review policy workflow run",
-    )
+    run = _completed_run(client, run_id)
     run_path = _string(run.get("path"), "review policy workflow path").split("@", 1)[0]
     return (
         run_path == workflow_path
@@ -776,6 +778,18 @@ def review_policy_status_passed(
         and run.get("event")
         in {"pull_request_target", "workflow_run", "schedule", "workflow_dispatch"}
     )
+
+
+def _completed_run(client: GitHubClient, run_id: int) -> Mapping[str, Any]:
+    deadline = time.monotonic() + _RUN_COMPLETION_TIMEOUT_SECONDS
+    while True:
+        run = _mapping(
+            client.request("GET", f"/repos/{client.repository}/actions/runs/{run_id}"),
+            "review policy workflow run",
+        )
+        if run.get("status") == "completed" or time.monotonic() >= deadline:
+            return run
+        time.sleep(_RUN_COMPLETION_POLL_SECONDS)
 
 
 def merge_group_pull_request(head_ref: str) -> tuple[str, int, str]:
