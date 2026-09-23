@@ -184,13 +184,28 @@ def test_non_schema_derived_config_example_paths_are_clean(path: str) -> None:
     [
         pytest.param("index.mjs", id="root"),
         pytest.param("scripts/generate-catalog.mjs", id="nested"),
-        pytest.param("apps/docs/ASTRO.CONFIG.MJS", id="case-insensitive"),
+        pytest.param("scripts/CONFIG.MJS", id="generic-config-module"),
+        pytest.param("scripts/generate.config-helper.mjs", id="config-name-near-miss"),
         pytest.param("vendor/tool/index.mjs", id="vendor-looking"),
         pytest.param("generated/client.mjs", id="generated-looking"),
     ],
 )
-def test_mjs_files_are_rejected_without_path_exclusions(path: str) -> None:
+def test_mjs_source_files_are_rejected(path: str) -> None:
     assert _rule_ids(_snapshot(path)) == [RuleId("repository/artifacts/mjs-files")]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("next.config.mjs", id="root-config"),
+        pytest.param("apps/docs/ASTRO.CONFIG.MJS", id="case-insensitive-config"),
+        pytest.param("eslint.strict.mjs", id="standards-eslint-config"),
+        pytest.param("tooling/eslint.strict.mjs", id="nested-standards-eslint-config"),
+        pytest.param(".dependency-cruiser.mjs", id="dependency-cruiser-config"),
+    ],
+)
+def test_mjs_config_files_are_exempt(path: str) -> None:
+    assert _rule_ids(_snapshot(path)) == []
 
 
 @pytest.mark.parametrize(

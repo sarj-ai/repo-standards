@@ -133,6 +133,7 @@ _AGENT_CONTRACT_ROOTS = (
 )
 _RETIRED_IAC_VERIFIER_NAMES = frozenset({"verify-dev-apply-plan.jq"})
 _TERRAFORM_TEST_SUFFIXES = (".tftest.hcl", ".tftest.json")
+_MJS_TOOL_CONFIG_NAMES = frozenset({".dependency-cruiser.mjs", "eslint.strict.mjs"})
 _ENV_SCHEMA_SUFFIXES = (
     ".schema",
     ".schema.json",
@@ -566,10 +567,13 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/mjs-files"),
-        version=1,
+        version=2,
         default_severity="error",
         title="Do not commit .mjs source files",
-        description="Tracked paths ending in .mjs are prohibited, case-insensitively.",
+        description=(
+            "Tracked .mjs source files are prohibited; conventional .config.mjs files and "
+            "known tool configs are exempt, case-insensitively."
+        ),
         why=(
             "Typed TypeScript source keeps executable tooling inside the repository's "
             "type-checking contract instead of maintaining untyped module islands."
@@ -723,7 +727,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=15,
+    policy_version=16,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -978,14 +982,14 @@ def _repository_artifact_diagnostics(
                     ),
                 )
             )
-        if path.casefold().endswith(".mjs"):
+        if path.casefold().endswith(".mjs") and not _is_mjs_config(path):
             diagnostics.append(
                 _repository_diagnostic(
                     rule_id=RuleId("repository/artifacts/mjs-files"),
                     component=component,
                     subject_kind="tracked-mjs-file",
                     observed=path,
-                    expected="no tracked .mjs filename",
+                    expected="no tracked .mjs source filename",
                     message="tracked .mjs source is prohibited by repository policy",
                     path=path,
                     remediation=Remediation(
@@ -1051,6 +1055,11 @@ def _repository_artifact_diagnostics(
 def _parent_path(path: str) -> str:
     parent = PurePosixPath(path).parent.as_posix()
     return "" if parent == "." else parent
+
+
+def _is_mjs_config(path: str) -> bool:
+    name = PurePosixPath(path).name.casefold()
+    return name.endswith(".config.mjs") or name in _MJS_TOOL_CONFIG_NAMES
 
 
 def _nearest_component(path: str, components: tuple[Component, ...]) -> Component | None:
