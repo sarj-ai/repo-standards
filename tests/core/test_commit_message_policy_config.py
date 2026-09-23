@@ -21,6 +21,16 @@ def test_schema_six_enables_strict_commit_messages_by_default() -> None:
     assert manifest.commit_message.enforcement is CommitMessageEnforcement.STRICT
 
 
+def test_versionless_manifest_uses_current_strict_commit_message_policy() -> None:
+    content = b'repository_id = "example"\ncomponents = []\n'
+
+    manifest = parse_manifest_bytes(content)
+
+    assert manifest.commit_message is not None
+    assert manifest.commit_message.enforcement is CommitMessageEnforcement.STRICT
+    assert enable_commit_message_policy_bytes(content) == content
+
+
 def test_canonical_commit_message_manifest_is_strict_and_round_trips() -> None:
     content = create_commit_message_policy_manifest("example-repo")
 
