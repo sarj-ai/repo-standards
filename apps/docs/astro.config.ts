@@ -33,7 +33,7 @@ export default defineConfig({
     starlight({
       title: 'Sarj Repo Standards',
       description: 'Deterministic repository policy and contract analysis.',
-      favicon: '/favicon.svg',
+      favicon: '/favicon.ico',
       logo: {
         alt: 'Sarj',
         dark: './public/sarj-logo-dark.webp',
