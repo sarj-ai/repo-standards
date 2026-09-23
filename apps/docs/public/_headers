@@ -22,7 +22,7 @@
   ! X-Frame-Options
   Cache-Control: public, max-age=86400
 
-/api/v7/*
+/api/*
   ! Content-Security-Policy
   ! Cross-Origin-Opener-Policy
   ! Permissions-Policy

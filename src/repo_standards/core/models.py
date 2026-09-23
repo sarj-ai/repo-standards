@@ -12,7 +12,6 @@ RuleId = NewType("RuleId", str)
 GitObjectId = NewType("GitObjectId", str)
 FixtureId = NewType("FixtureId", str)
 RuleCategoryId = NewType("RuleCategoryId", str)
-RuleTopicId = NewType("RuleTopicId", str)
 AuthorityId = NewType("AuthorityId", str)
 
 
@@ -198,7 +197,7 @@ class Remediation:
 @dataclass(frozen=True, slots=True)
 class RuleTaxonomy:
     category_id: RuleCategoryId
-    topic_id: RuleTopicId
+    topic_id: str
 
 
 @dataclass(frozen=True, slots=True)

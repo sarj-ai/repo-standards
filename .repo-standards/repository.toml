@@ -1,7 +1,6 @@
 schema_version = 6
 repository_id = "repo-standards"
 components = []
-enabled_rules = []
 
 [documentation]
 entrypoints = ["README.md"]

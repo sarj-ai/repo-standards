@@ -302,7 +302,7 @@ def capabilities_command() -> None:
                 "application_code_execution": False,
             },
         },
-        "schemas": {"catalog": 7, "report": 3},
+        "schemas": ["catalog", "report"],
         "pagination": {"default_limit": 100, "maximum_limit": _MAX_PAGE_SIZE},
     }
     typer.echo(canonical_json(payload))
@@ -1763,7 +1763,7 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
         typer.Option(
             "--enable-rule",
             help=(
-                "Activate one approved rule-id@version selector for a legacy manifest "
+                "Activate one current rule-id@version selector for a legacy manifest "
                 "or calibration run."
             ),
         ),
@@ -1794,7 +1794,7 @@ def report_command(
         list[str] | None,
         typer.Option(
             "--enable-rule",
-            help="Activate one approved rule-id@version selector for this run.",
+            help="Activate one current rule-id@version selector for this run.",
         ),
     ] = None,
 ) -> None:

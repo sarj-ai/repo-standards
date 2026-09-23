@@ -1,16 +1,12 @@
 ---
 import ReferencePage from '../../components/ReferencePage.astro';
 import RuleDirectory from '../../components/RuleDirectory.astro';
-import { approvedRules, referenceCatalog } from '../../lib/catalog';
+import { referenceCatalog } from '../../lib/catalog';
 
-const approvedIds = new Set(approvedRules.map((rule) => rule.rule_id));
-const rows = referenceCatalog.flatMap((category) => category.topics.flatMap((topic) => topic.rules))
-  .filter(({ rule }) => approvedIds.has(rule.rule_id));
+const rows = referenceCatalog.flatMap((category) => category.topics.flatMap((topic) => topic.rules));
 ---
 
-<ReferencePage title="Rules" description="Reviewed repository rules available for explicit activation.">
+<ReferencePage title="Rules" description="Repository rules available for explicit activation.">
   <h1 class="sarj-visually-hidden">Rules</h1>
-  {rows.length > 0
-    ? <RuleDirectory rows={rows} />
-    : <div class="directory-empty-state"><p>No rules are approved yet.</p><a href="/review/">Review pending rules</a></div>}
+  <RuleDirectory rows={rows} />
 </ReferencePage>

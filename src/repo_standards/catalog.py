@@ -32,13 +32,8 @@ from repo_standards.core.models import (
     Rule,
     RuleCategoryId,
     RuleId,
-    RuleTopicId,
 )
 from repo_standards.core.render import analysis_outcome_schema, output_schema
-from repo_standards.core.rule_reviews import (
-    ApprovedRuleReview,
-    review_for,
-)
 from repo_standards.core.taxonomy import CATEGORIES
 from repo_standards.policy_sarj.policy import POLICY_SPEC, SarjPolicy
 from repo_standards.rest import instrumentation_capabilities
@@ -49,7 +44,7 @@ if TYPE_CHECKING:
 
 
 _CATALOG_KIND = "repo-standards.catalog"
-_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog-v7.schema.json"
+_CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog.schema.json"
 _PUBLIC_REFERENCE_HOSTS = frozenset(
     {
         "docs.github.com",
@@ -65,10 +60,6 @@ CommandId = NewType("CommandId", str)
 CapabilityId = NewType("CapabilityId", str)
 NonEmptyText = Annotated[str, Field(min_length=1)]
 PositiveVersion = Annotated[int, Field(gt=0)]
-ImmutableReviewReference = Annotated[
-    str,
-    Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"),
-]
 RuleIdValue = Annotated[
     RuleId,
     Field(pattern=r"^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*){2,}$"),
@@ -160,24 +151,8 @@ class SourcePointer(CatalogModel):
         return value
 
 
-class PendingRuleReviewDescriptor(CatalogModel):
-    status: Literal["pending"] = "pending"
-    reviewed_in: None = None
-
-
-class ApprovedRuleReviewDescriptor(CatalogModel):
-    status: Literal["approved"] = "approved"
-    reviewed_in: ImmutableReviewReference
-
-
-RuleReviewDescriptor = Annotated[
-    PendingRuleReviewDescriptor | ApprovedRuleReviewDescriptor,
-    Field(discriminator="status"),
-]
-
-
 class TopicDescriptor(CatalogModel):
-    topic_id: RuleTopicId
+    topic_id: str
     label: str
     order: int
 
@@ -196,7 +171,7 @@ class RuleDescriptor(CatalogModel):
     rule_version: PositiveVersion
     title: Annotated[str, Field(min_length=1, max_length=72)]
     category_id: RuleCategoryId
-    topic_id: RuleTopicId
+    topic_id: str
     default_severity: Literal["warning", "error"]
     description: NonEmptyText
     why: NonEmptyText
@@ -204,7 +179,6 @@ class RuleDescriptor(CatalogModel):
     references: tuple[HttpsUrl, ...]
     examples: Annotated[tuple[ExampleDescriptor, ...], Field(min_length=1)]
     source: SourcePointer
-    review: RuleReviewDescriptor
 
     @model_validator(mode="after")
     def validate_clarity(self) -> Self:
@@ -240,7 +214,6 @@ class PolicyRuleBinding(CatalogModel):
     classification: str | None = None
     evidence_level: str | None = None
     precedence: int | None = None
-    review_status: Literal["pending", "approved"]
     default_activation: Literal["disabled"] = "disabled"
 
 
@@ -281,7 +254,6 @@ class CapabilityDescriptor(CatalogModel):
 class SchemaDescriptor(CatalogModel):
     schema_id: str
     title: str
-    schema_version: int
     media_type: Literal["application/schema+json"]
     cli_selector: str
     document: JSONValue
@@ -289,7 +261,6 @@ class SchemaDescriptor(CatalogModel):
 
 class Catalog(CatalogModel):
     kind: Literal["repo-standards.catalog"] = _CATALOG_KIND
-    schema_version: Literal[7] = 7
     catalog_version: str
     product: ProductDescriptor
     provenance: ProvenanceDescriptor
@@ -331,7 +302,7 @@ def _validate_taxonomy_graph(catalog: Catalog) -> None:
         message = "catalog topic ids must be unique"
         raise ValueError(message)
     used_categories: set[RuleCategoryId] = set()
-    used_topics: set[RuleTopicId] = set()
+    used_topics: set[str] = set()
     for rule in catalog.rules:
         if topic_parents.get(rule.topic_id) != rule.category_id:
             message = f"rule has an invalid taxonomy assignment: {rule.rule_id}"
@@ -380,7 +351,6 @@ def _validate_policy_bindings(
         if rule is None or (
             binding.rule_version != rule.rule_version
             or binding.severity != rule.default_severity
-            or binding.review_status != rule.review.status
         ):
             message = f"catalog policy binding does not match its rule: {binding.rule_id}"
             raise ValueError(message)
@@ -519,7 +489,6 @@ def _policies(policy: Policy) -> tuple[PolicyDescriptor, ...]:
     bindings: list[PolicyRuleBinding] = []
     for rule in sorted(policy.rules(), key=lambda item: str(item.rule_id)):
         item = governance.get(str(rule.rule_id))
-        review = review_for(RuleId(str(rule.rule_id)), rule.version)
         bindings.append(
             PolicyRuleBinding(
                 rule_id=RuleId(str(rule.rule_id)),
@@ -528,7 +497,6 @@ def _policies(policy: Policy) -> tuple[PolicyDescriptor, ...]:
                 classification=item.classification.value if item else None,
                 evidence_level=item.evidence if item else None,
                 precedence=item.precedence if item else None,
-                review_status=review.status,
             )
         )
     return (
@@ -562,13 +530,6 @@ def _add_rule(
 
 
 def _rule_descriptor(rule: Rule, source_path: str) -> RuleDescriptor:
-    review = review_for(RuleId(str(rule.rule_id)), rule.version)
-    if isinstance(review, ApprovedRuleReview):
-        review_descriptor: RuleReviewDescriptor = ApprovedRuleReviewDescriptor(
-            reviewed_in=review.reviewed_in,
-        )
-    else:
-        review_descriptor = PendingRuleReviewDescriptor()
     return RuleDescriptor(
         rule_id=RuleId(str(rule.rule_id)),
         slug=_RULE_SLUGS[str(rule.rule_id)],
@@ -593,7 +554,6 @@ def _rule_descriptor(rule: Rule, source_path: str) -> RuleDescriptor:
             for example in rule.examples
         ),
         source=SourcePointer(path=source_path, symbol=str(rule.rule_id)),
-        review=review_descriptor,
     )
 
 
@@ -807,19 +767,18 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
 
 def _schemas() -> tuple[SchemaDescriptor, ...]:
     documents = (
-        ("report", "Repository analysis report", 3, "report", report_schema()),
-        ("catalog", "Repo Standards public catalog", 7, "catalog", catalog_schema()),
+        ("report", "Repository analysis report", "report", report_schema()),
+        ("catalog", "Repo Standards public catalog", "catalog", catalog_schema()),
     )
     return tuple(
         SchemaDescriptor(
             schema_id=schema_id,
             title=title,
-            schema_version=schema_version,
             media_type="application/schema+json",
             cli_selector=selector,
             document=_JSON_OBJECT.validate_python(dict(document), strict=True),
         )
-        for schema_id, title, schema_version, selector, document in documents
+        for schema_id, title, selector, document in documents
     )
 
 

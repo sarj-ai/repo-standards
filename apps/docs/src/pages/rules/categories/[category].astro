@@ -2,14 +2,11 @@
 import Breadcrumbs from '@sarj/design/Breadcrumbs.astro';
 
 import ReferencePage from '../../../components/ReferencePage.astro';
-import { approvedRules, referenceCatalog, type CategoryView } from '../../../lib/catalog';
+import { referenceCatalog, type CategoryView } from '../../../lib/catalog';
 import { ruleDescription } from '../../../lib/rule-view';
 
 export function getStaticPaths() {
-  const approvedIds = new Set(approvedRules.map((rule) => rule.rule_id));
-  return referenceCatalog
-    .filter((category) => category.topics.some((topic) => topic.rules.some(({ rule }) => approvedIds.has(rule.rule_id))))
-    .map((category) => ({
+  return referenceCatalog.map((category) => ({
     params: { category: category.category.category_id },
     props: { category },
     }));
@@ -17,18 +14,14 @@ export function getStaticPaths() {
 
 interface Props { category: CategoryView }
 const { category } = Astro.props;
-const approvedIds = new Set(approvedRules.map((rule) => rule.rule_id));
-const topics = category.topics
-  .map(({ topic, rules }) => ({ topic, rules: rules.filter(({ rule }) => approvedIds.has(rule.rule_id)) }))
-  .filter(({ rules }) => rules.length > 0);
-const approvedCount = topics.reduce((total, topic) => total + topic.rules.length, 0);
+const topics = category.topics;
+const ruleCount = category.ruleCount;
 ---
 
-<ReferencePage title={category.category.label} description={`${approvedCount} approved repository rules.`}>
+<ReferencePage title={category.category.label} description={`${ruleCount} repository rules.`}>
   <Breadcrumbs ancestors={[{ label: 'Rules', href: '/rules/' }]} current={category.category.label} />
   <h1 class="sarj-visually-hidden">{category.category.label}</h1>
   <div class="rule-catalog" data-category-id={category.category.category_id}>
-    {topics.length === 0 && <div class="directory-empty-state"><p>No rules in this area are approved yet.</p><a href="/review/">Review pending rules</a></div>}
     {topics.map(({ topic, rules }) => {
       return (
         <section class="rule-topic" aria-labelledby={`topic-${topic.topic_id}`}>
