@@ -345,8 +345,6 @@ class Policy(Protocol):
 
     def rules(self) -> tuple[Rule, ...]: ...
 
-    def evaluate(self, manifest: Manifest) -> tuple[Diagnostic, ...]: ...
-
 
 @dataclass(frozen=True, slots=True)
 class Baseline:

@@ -128,10 +128,7 @@ def _finding_id(rule_id: str, path: str, anchor: str) -> str:
 
 def _worker(root: Path, manifest_path: Path, rule_id: str) -> int:
     snapshot = load_calibration_snapshot(root, manifest_path.read_bytes())
-    diagnostics = (
-        *SarjPolicy.evaluate(snapshot.manifest),
-        *SarjPolicy.evaluate_repository(snapshot),
-    )
+    diagnostics = SarjPolicy.evaluate_repository(snapshot)
     selected = [item for item in diagnostics if item.rule_id == rule_id]
     payload = {
         "tracked_files": snapshot.inspection.tracked_file_count,

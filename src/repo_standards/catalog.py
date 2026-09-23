@@ -24,7 +24,6 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator,
 from typer.models import ArgumentInfo, CommandInfo, DefaultPlaceholder, OptionInfo, TyperInfo
 
 from repo_standards.core.canonical import canonical_json
-from repo_standards.core.catalog import core_rules
 from repo_standards.core.models import (
     ExampleLanguage,
     JSONValue,
@@ -511,8 +510,6 @@ def _policies(policy: Policy) -> tuple[PolicyDescriptor, ...]:
 
 def _rules(policy: Policy) -> tuple[RuleDescriptor, ...]:
     selected: dict[str, tuple[RuleDescriptor, str]] = {}
-    for rule in core_rules():
-        _add_rule(selected, rule, "src/repo_standards/core/catalog.py")
     for rule in policy.rules():
         _add_rule(selected, rule, "src/repo_standards/policy_sarj/policy.py")
     return tuple(selected[key][0] for key in sorted(selected))
