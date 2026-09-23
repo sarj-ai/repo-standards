@@ -17,7 +17,6 @@ from repo_standards.catalog import (
 )
 from repo_standards.cli import app
 from repo_standards.core.canonical import canonical_json
-from repo_standards.core.catalog import core_rules
 from repo_standards.core.models import JSONValue
 from repo_standards.policy_sarj import SarjPolicy
 
@@ -50,8 +49,7 @@ def test_catalog_is_deterministic_and_digest_covers_all_content() -> None:
 def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
     registry = (SarjPolicy(),)
-    expected_rule_ids = {str(rule.rule_id) for rule in core_rules()}
-    expected_rule_ids.update(str(rule.rule_id) for policy in registry for rule in policy.rules())
+    expected_rule_ids = {str(rule.rule_id) for policy in registry for rule in policy.rules()}
     rule_ids = [rule.rule_id for rule in catalog.rules]
 
     assert "schema_version" not in Catalog.model_fields
@@ -96,8 +94,7 @@ def test_catalog_rule_slugs_are_valid_and_unique() -> None:
 def test_catalog_graph_is_complete() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
     registry = (SarjPolicy(),)
-    expected_rule_ids = {str(rule.rule_id) for rule in core_rules()}
-    expected_rule_ids.update(str(rule.rule_id) for policy in registry for rule in policy.rules())
+    expected_rule_ids = {str(rule.rule_id) for policy in registry for rule in policy.rules()}
     rule_ids = [rule.rule_id for rule in catalog.rules]
     assert rule_ids == sorted(expected_rule_ids)
     assert len(rule_ids) == len(set(rule_ids)) == 6

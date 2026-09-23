@@ -4,7 +4,6 @@ from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 
-from repo_standards.core.catalog import core_rules
 from repo_standards.core.engine import analyze, check_baseline, classify_baseline
 from repo_standards.core.errors import ConfigurationError, ManifestAbsentError
 from repo_standards.core.inspection import git_index_identity, load_repository_snapshot
@@ -74,7 +73,7 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         )(
             snapshot.manifest.enabled_rules or request.enabled_rule_ids,
             current_rules=frozenset(
-                RuleVersion(rule.rule_id, rule.version) for rule in core_rules() + policy.rules()
+                RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()
             ),
         ),
     )

@@ -4,7 +4,6 @@ from dataclasses import replace
 from datetime import date
 
 from .canonical import scope_digest, with_fingerprint
-from .catalog import core_rules
 from .errors import ConfigurationError
 from .models import (
     AnalysisReport,
@@ -25,11 +24,10 @@ from .models import (
 from .rule_reviews import RuleVersion
 
 
-def core_diagnostics(manifest: Manifest) -> tuple[Diagnostic, ...]:
+def validate_manifest_references(manifest: Manifest) -> None:
     by_id = {item.component_id: item for item in manifest.components}
     _validate_dependencies(manifest, by_id)
     _validate_migrations(manifest, by_id)
-    return ()
 
 
 def _validate_dependencies(manifest: Manifest, by_id: dict[ComponentId, Component]) -> None:
@@ -149,10 +147,11 @@ def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a
     additional_diagnostics: tuple[Diagnostic, ...] = (),
     enabled_rules: frozenset[RuleVersion] | None = None,
 ) -> AnalysisReport:
-    emitted = core_diagnostics(manifest) + policy.evaluate(manifest) + additional_diagnostics
+    validate_manifest_references(manifest)
+    emitted = additional_diagnostics
     if enabled_rules is not None:
         current_rules = frozenset(
-            RuleVersion(rule.rule_id, rule.version) for rule in core_rules() + policy.rules()
+            RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()
         )
         obsolete = sorted(
             f"{item.rule_id}@{item.version}" for item in enabled_rules - current_rules

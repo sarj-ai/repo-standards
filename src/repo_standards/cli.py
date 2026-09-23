@@ -20,7 +20,6 @@ from repo_standards.catalog import (
     report_schema,
 )
 from repo_standards.core.canonical import canonical_json
-from repo_standards.core.catalog import core_rules
 from repo_standards.core.commit_message import CommitMessageResult, check_local_commit_message_file
 from repo_standards.core.engine import analyze, check_baseline
 from repo_standards.core.errors import ConfigurationError
@@ -1929,7 +1928,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         )(
             snapshot.manifest.enabled_rules or enabled_rule_ids,
             current_rules=frozenset(
-                RuleVersion(rule.rule_id, rule.version) for rule in core_rules() + policy.rules()
+                RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()
             ),
         ),
     )
@@ -2261,4 +2260,4 @@ def _validate_severity(severity: str | None) -> None:
 
 
 def _all_rules(policy: Policy) -> tuple[Rule, ...]:
-    return core_rules() + policy.rules()
+    return policy.rules()

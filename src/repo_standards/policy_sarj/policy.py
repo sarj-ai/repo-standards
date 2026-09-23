@@ -13,7 +13,6 @@ from repo_standards.core.models import (
     Diagnostic,
     ExampleLanguage,
     FixtureId,
-    Manifest,
     PackageEvidence,
     PolicyId,
     Remediation,
@@ -988,7 +987,3 @@ class SarjPolicy:
     @staticmethod
     def evaluate_repository(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
         return _repository_artifact_diagnostics(snapshot)
-
-    @staticmethod
-    def evaluate(manifest: Manifest) -> tuple[Diagnostic, ...]:  # ruff: ignore[unused-static-method-argument] - Policy interface
-        return ()
