@@ -133,7 +133,6 @@ _AGENT_CONTRACT_ROOTS = (
 )
 _RETIRED_IAC_VERIFIER_NAMES = frozenset({"verify-dev-apply-plan.jq"})
 _TERRAFORM_TEST_SUFFIXES = (".tftest.hcl", ".tftest.json")
-_MJS_TOOL_CONFIG_NAMES = frozenset({".dependency-cruiser.mjs", "eslint.strict.mjs"})
 _ENV_SCHEMA_SUFFIXES = (
     ".schema",
     ".schema.json",
@@ -566,35 +565,6 @@ RULES = (
         ),
     ),
     Rule(
-        rule_id=RuleId("repository/artifacts/mjs-files"),
-        version=2,
-        default_severity="error",
-        title="Do not commit .mjs source files",
-        description=(
-            "Tracked .mjs source files are prohibited; conventional .config.mjs files and "
-            "known tool configs are exempt, case-insensitively."
-        ),
-        why=(
-            "Typed TypeScript source keeps executable tooling inside the repository's "
-            "type-checking contract instead of maintaining untyped module islands."
-        ),
-        fix=(
-            "Replace authored .mjs source with typed .ts. Use tool-native TypeScript loading "
-            "or Node.js type stripping for local tooling, and emit untracked JavaScript only "
-            "when a distribution target requires it."
-        ),
-        taxonomy=taxonomy(ARCHITECTURE, REPOSITORY_LAYOUT),
-        examples=(
-            _example(
-                example_id="sarj-artifact-no-mjs-files",
-                title="JavaScript module source",
-                language="text",
-                before="scripts/generate-catalog.mjs",
-                after="scripts/generate-catalog.ts",
-            ),
-        ),
-    ),
-    Rule(
         rule_id=RuleId("repository/documentation/placement"),
         version=3,
         default_severity="error",
@@ -665,7 +635,6 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/operational-script-tests"): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/terraform-test-files"): RuleClassification.OBJECTIVE,
-        RuleId("repository/artifacts/mjs-files"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
         RuleId("repository/documentation/reachability"): RuleClassification.JUDGMENT,
         RuleId("architecture/delivery/authority"): RuleClassification.OPERATIONAL,
@@ -681,7 +650,6 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
         RuleId("repository/artifacts/operational-script-tests"): 46,
         RuleId("repository/artifacts/terraform-test-files"): 47,
-        RuleId("repository/artifacts/mjs-files"): 48,
         RuleId("repository/documentation/placement"): 50,
         RuleId("repository/documentation/reachability"): 60,
         RuleId("architecture/delivery/authority"): 70,
@@ -727,7 +695,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=16,
+    policy_version=17,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -982,29 +950,6 @@ def _repository_artifact_diagnostics(
                     ),
                 )
             )
-        if path.casefold().endswith(".mjs") and not _is_mjs_config(path):
-            diagnostics.append(
-                _repository_diagnostic(
-                    rule_id=RuleId("repository/artifacts/mjs-files"),
-                    component=component,
-                    subject_kind="tracked-mjs-file",
-                    observed=path,
-                    expected="no tracked .mjs source filename",
-                    message="tracked .mjs source is prohibited by repository policy",
-                    path=path,
-                    remediation=Remediation(
-                        summary="Replace the JavaScript module with typed TypeScript source.",
-                        steps=(
-                            "Rename authored .mjs source to .ts and add explicit types.",
-                            (
-                                "Use tool-native TypeScript loading or Node.js type stripping; "
-                                "emit untracked JavaScript only for distribution targets."
-                            ),
-                        ),
-                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
-                    ),
-                )
-            )
         if path.casefold().endswith(".md") and not _markdown_path_is_owned(
             path,
             package_roots=document_package_roots,
@@ -1055,11 +1000,6 @@ def _repository_artifact_diagnostics(
 def _parent_path(path: str) -> str:
     parent = PurePosixPath(path).parent.as_posix()
     return "" if parent == "." else parent
-
-
-def _is_mjs_config(path: str) -> bool:
-    name = PurePosixPath(path).name.casefold()
-    return name.endswith(".config.mjs") or name in _MJS_TOOL_CONFIG_NAMES
 
 
 def _nearest_component(path: str, components: tuple[Component, ...]) -> Component | None:

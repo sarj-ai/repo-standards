@@ -70,7 +70,6 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
         "sarj-artifact-no-bespoke-iac-verifiers",
         "sarj-artifact-no-operational-script-tests",
         "sarj-artifact-no-terraform-test-files",
-        "sarj-artifact-no-mjs-files",
         "sarj-layout-markdown-placement",
     }:
         return _run_repository_path(source)

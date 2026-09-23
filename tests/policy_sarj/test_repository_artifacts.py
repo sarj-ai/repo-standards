@@ -188,23 +188,12 @@ def test_non_schema_derived_config_example_paths_are_clean(path: str) -> None:
         pytest.param("scripts/generate.config-helper.mjs", id="config-name-near-miss"),
         pytest.param("vendor/tool/index.mjs", id="vendor-looking"),
         pytest.param("generated/client.mjs", id="generated-looking"),
+        pytest.param("next.config.mjs", id="tool-config"),
+        pytest.param("eslint.strict.mjs", id="standards-config"),
+        pytest.param(".dependency-cruiser.mjs", id="dependency-config"),
     ],
 )
-def test_mjs_source_files_are_rejected(path: str) -> None:
-    assert _rule_ids(_snapshot(path)) == [RuleId("repository/artifacts/mjs-files")]
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        pytest.param("next.config.mjs", id="root-config"),
-        pytest.param("apps/docs/ASTRO.CONFIG.MJS", id="case-insensitive-config"),
-        pytest.param("eslint.strict.mjs", id="standards-eslint-config"),
-        pytest.param("tooling/eslint.strict.mjs", id="nested-standards-eslint-config"),
-        pytest.param(".dependency-cruiser.mjs", id="dependency-cruiser-config"),
-    ],
-)
-def test_mjs_config_files_are_exempt(path: str) -> None:
+def test_mjs_files_are_not_rejected_by_extension(path: str) -> None:
     assert _rule_ids(_snapshot(path)) == []
 
 
@@ -227,23 +216,17 @@ def test_non_mjs_file_paths_are_clean(path: str) -> None:
     [
         pytest.param(
             "verify-plan.mjs",
-            [
-                RuleId("repository/artifacts/bespoke-iac-verifiers"),
-                RuleId("repository/artifacts/mjs-files"),
-            ],
+            [RuleId("repository/artifacts/bespoke-iac-verifiers")],
             id="verifier",
         ),
         pytest.param(
             "iac/contract.test.mjs",
-            [
-                RuleId("repository/artifacts/mjs-files"),
-                RuleId("repository/artifacts/operational-script-tests"),
-            ],
+            [RuleId("repository/artifacts/operational-script-tests")],
             id="operational-test",
         ),
     ],
 )
-def test_mjs_diagnostic_is_additive_and_deterministic(path: str, expected: list[RuleId]) -> None:
+def test_other_artifact_rules_still_apply_to_mjs(path: str, expected: list[RuleId]) -> None:
     assert _rule_ids(_snapshot(path)) == expected
 
 
