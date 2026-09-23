@@ -120,7 +120,7 @@ def test_repository_analysis_api_selects_committed_or_staged_tree(tmp_path: Path
     manifest = tmp_path / ".repo-standards" / "repository.toml"
     manifest.parent.mkdir()
     manifest.write_text(
-        'schema_version = 6\nrepository_id = "committed"\ncomponents = []\n',
+        'repository_id = "committed"\ncomponents = []\n',
         encoding="utf-8",
     )
     subprocess.run(("git", "init", "--quiet"), cwd=tmp_path, check=True)
@@ -141,12 +141,12 @@ def test_repository_analysis_api_selects_committed_or_staged_tree(tmp_path: Path
         check=True,
     )
     manifest.write_text(
-        'schema_version = 6\nrepository_id = "staged"\ncomponents = []\n',
+        'repository_id = "staged"\ncomponents = []\n',
         encoding="utf-8",
     )
     subprocess.run(("git", "add", str(manifest)), cwd=tmp_path, check=True)
     manifest.write_text(
-        'schema_version = 6\nrepository_id = "unstaged"\ncomponents = []\n',
+        'repository_id = "unstaged"\ncomponents = []\n',
         encoding="utf-8",
     )
 
@@ -163,7 +163,7 @@ def test_repository_analysis_api_classifies_a_selected_ratchet_baseline(tmp_path
     manifest = tmp_path / ".repo-standards" / "repository.toml"
     manifest.parent.mkdir()
     manifest.write_text(
-        'schema_version = 6\nrepository_id = "ratcheted"\ncomponents = []\n',
+        'repository_id = "ratcheted"\ncomponents = []\n',
         encoding="utf-8",
     )
     subprocess.run(("git", "init", "--quiet"), cwd=tmp_path, check=True)
@@ -235,9 +235,8 @@ def test_repository_analysis_api_requires_a_ratchet_baseline_path(tmp_path: Path
     assert "baseline_path" in report.execution_issues[0].message
 
 
-def test_manifest_rejects_removed_delivery_provider_configuration() -> None:
+def test_manifest_rejects_removed_delivery_configuration() -> None:
     manifest = b"""
-schema_version = 3
 repository_id = "example"
 components = []
 
@@ -245,7 +244,7 @@ components = []
 provider = "github"
 """
 
-    with pytest.raises(ValueError, match="delivery has unknown fields: provider"):
+    with pytest.raises(ValueError, match="manifest has unknown fields: delivery"):
         parse_manifest_bytes(manifest)
 
 

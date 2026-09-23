@@ -54,7 +54,7 @@ def _repository(tmp_path: Path, *, maximum: int = 0, exemptions: tuple[str, ...]
         else ""
     )
     manifest.write_text(
-        'schema_version = 6\nrepository_id = "fixture"\ncomponents = []\n'
+        'repository_id = "fixture"\ncomponents = []\n'
         '[documentation]\nentrypoints = ["README.md"]\n'
         f"maximum_added_pages = {maximum}\n{exempt_line}",
         encoding="utf-8",

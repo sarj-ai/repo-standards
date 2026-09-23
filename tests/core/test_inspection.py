@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 
 
 _MANIFEST = b"""\
-schema_version = 2
 repository_id = "example-repository"
 [[components]]
 id = "application"
@@ -159,6 +158,45 @@ def test_snapshot_joins_manifest_and_inventory_from_one_git_tree(tmp_path: Path)
     assert repeated.manifest.repository_id == "example-repository"
     assert repeated.provenance == snapshot.provenance
     assert repeated.inspection == snapshot.inspection
+
+
+def test_documentation_entrypoint_must_exist_but_its_blob_need_not_be_read(
+    tmp_path: Path,
+) -> None:
+    repository = _committed_repository(tmp_path)
+    manifest = repository / ".repo-standards" / "repository.toml"
+    manifest.write_bytes(_MANIFEST + b'\n[documentation]\nentrypoints = ["README.md"]\n')
+    _git(repository, "add", ".repo-standards/repository.toml")
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "declare documentation",
+    )
+
+    with pytest.raises(ConfigurationError, match="documentation entrypoint is absent"):
+        load_repository_snapshot(repository)
+
+    (repository / "README.md").write_text("x" * 1_048_577, encoding="utf-8")
+    _git(repository, "add", "README.md")
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "add documentation",
+    )
+
+    assert load_repository_snapshot(repository).manifest.documentation is not None
 
 
 def test_snapshot_can_select_the_exact_staged_index(tmp_path: Path) -> None:

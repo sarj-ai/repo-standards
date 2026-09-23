@@ -15,7 +15,6 @@ _SCRIPT = (
     Path(__file__).parents[2] / ".agents/skills/repo-rule-authoring/scripts/calibrate_rules.py"
 )
 _MANIFEST = """\
-schema_version = 3
 repository_id = "calibration-fixture"
 components = []
 

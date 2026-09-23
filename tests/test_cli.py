@@ -194,7 +194,6 @@ def _review_policy_fixture(repository: Path) -> str:
     policy.mkdir()
     (policy / "repository.toml").write_text(
         """
-schema_version = 7
 repository_id = "example"
 components = []
 
@@ -271,6 +270,28 @@ def _review_policy_evidence(  # ruff: ignore[too-many-arguments] - focused fixtu
         encoding="utf-8",
     )
     return evidence
+
+
+def _promotion_evidence(
+    repository: Path,
+    *,
+    head: str,
+    author_login: str = "release-automation[bot]",
+    current_head: str | None = None,
+    head_repository_id: int = 123,
+) -> Path:
+    return _review_policy_evidence(
+        repository,
+        head=head,
+        reviews=[{"reviewer": "human", "state": "approved", "commit_sha": head}],
+        body="",
+        base_ref="preview",
+        head_ref=f"automation/promote-dev-{head[:12]}",
+        author_is_bot=True,
+        author_login=author_login,
+        current_head=current_head,
+        head_repository_id=head_repository_id,
+    )
 
 
 def test_pull_request_review_policy_emits_ready_tier_zero_receipt(tmp_path: Path) -> None:
@@ -389,16 +410,7 @@ def test_pull_request_review_policy_transition_requires_one_review_and_skips_siz
     (tmp_path / "large.py").write_text("value = 1\n" * 900, encoding="utf-8")
     _commit_changes(tmp_path)
     head = _git(tmp_path, "rev-parse", "HEAD")
-    evidence = _review_policy_evidence(
-        tmp_path,
-        head=head,
-        reviews=[{"reviewer": "human", "state": "approved", "commit_sha": head}],
-        body="",
-        base_ref="preview",
-        head_ref=f"automation/promote-dev-{head[:12]}",
-        author_is_bot=True,
-        author_login="release-automation[bot]",
-    )
+    evidence = _promotion_evidence(tmp_path, head=head)
 
     result = runner.invoke(
         app,
@@ -444,14 +456,9 @@ def test_pull_request_review_policy_transition_requires_exact_trusted_identity(
     (tmp_path / "large.py").write_text("value = 1\n" * 900, encoding="utf-8")
     _commit_changes(tmp_path)
     head = _git(tmp_path, "rev-parse", "HEAD")
-    evidence = _review_policy_evidence(
+    evidence = _promotion_evidence(
         tmp_path,
         head=head,
-        reviews=[{"reviewer": "human", "state": "approved", "commit_sha": head}],
-        body="",
-        base_ref="preview",
-        head_ref=f"automation/promote-dev-{head[:12]}",
-        author_is_bot=True,
         author_login=author_login,
         current_head=current_head,
         head_repository_id=head_repository_id,
@@ -690,7 +697,6 @@ def _object_list(value: object) -> list[dict[str, object]]:
 
 
 GOOD_MANIFEST = """
-schema_version = 2
 repository_id = "example-repository"
 [[components]]
 id = "alpha.agent"
@@ -754,7 +760,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(tmp_path: Path) -> None:
 
     committed = runner.invoke(
         app,
-        ["check", str(tmp_path), "--enable-rule", f"{rule_id}@5", "--format", "json"],
+        ["check", str(tmp_path), "--enable-rule", str(rule_id), "--format", "json"],
     )
     staged = runner.invoke(
         app,
@@ -763,7 +769,7 @@ def test_check_staged_blocks_a_new_forbidden_artifact(tmp_path: Path) -> None:
             str(tmp_path),
             "--staged",
             "--enable-rule",
-            f"{rule_id}@5",
+            str(rule_id),
             "--format",
             "json",
         ],
@@ -792,7 +798,7 @@ def test_unavailable_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None
             "report",
             str(tmp_path),
             "--enable-rule",
-            "unknown/rule/id@1",
+            "unknown/rule/id",
             "--format",
             "json",
         ],
@@ -801,14 +807,14 @@ def test_unavailable_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None
     report = _json_object(result.stdout)
     assert result.exit_code == 2
     assert report["conclusion"] == "inconclusive"
-    assert "selectors are obsolete" in str(report)
+    assert "rules are not available" in str(report)
 
 
 @pytest.mark.parametrize(
     ("selector", "path"),
     [
         (
-            "repository/artifacts/terraform-test-files@1",
+            "repository/artifacts/terraform-test-files",
             "iac/tests/routing.tftest.hcl",
         ),
     ],
@@ -842,7 +848,7 @@ def test_approved_artifact_rules_block_only_when_enabled(
 
 
 def test_manifest_enabled_rules_are_the_single_activation_source(tmp_path: Path) -> None:
-    manifest = GOOD_MANIFEST.replace("schema_version = 2", "schema_version = 4").replace(
+    manifest = GOOD_MANIFEST.replace(
         'repository_id = "example-repository"',
         'repository_id = "example-repository"\n'
         'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]',
@@ -859,7 +865,7 @@ def test_manifest_enabled_rules_are_the_single_activation_source(tmp_path: Path)
             "check",
             str(tmp_path),
             "--enable-rule",
-            "repository/artifacts/bespoke-iac-verifiers@5",
+            "repository/artifacts/bespoke-iac-verifiers",
             "--format",
             "json",
         ],
@@ -873,7 +879,7 @@ def test_manifest_enabled_rules_are_the_single_activation_source(tmp_path: Path)
 
 
 def test_manifest_rejects_versioned_rule_selectors(tmp_path: Path) -> None:
-    manifest = GOOD_MANIFEST.replace("schema_version = 2", "schema_version = 4").replace(
+    manifest = GOOD_MANIFEST.replace(
         'repository_id = "example-repository"',
         'repository_id = "example-repository"\n'
         'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers@5"]',
@@ -886,24 +892,7 @@ def test_manifest_rejects_versioned_rule_selectors(tmp_path: Path) -> None:
     assert "versionless rule IDs" in result.stdout
 
 
-@pytest.mark.parametrize(
-    ("selector", "expected_message"),
-    [
-        pytest.param(
-            "repository/artifacts/bespoke-iac-verifiers@2",
-            "selectors are obsolete",
-            id="superseded-version",
-        ),
-        pytest.param(
-            "repository/artifacts/bespoke-iac-verifiers@3",
-            "selectors are obsolete",
-            id="obsolete-version",
-        ),
-    ],
-)
-def test_non_current_artifact_rule_version_cannot_be_enabled(
-    tmp_path: Path, selector: str, expected_message: str
-) -> None:
+def test_versioned_rule_selector_cannot_be_enabled(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST)
 
     result = runner.invoke(
@@ -912,24 +901,25 @@ def test_non_current_artifact_rule_version_cannot_be_enabled(
             "check",
             str(tmp_path),
             "--enable-rule",
-            selector,
+            "repository/artifacts/bespoke-iac-verifiers@5",
             "--format",
             "json",
         ],
     )
 
     assert result.exit_code == 2
-    assert expected_message in result.stdout
+    assert "versionless rule IDs" in result.stdout
 
 
-def test_enable_rule_help_requires_an_exact_version() -> None:
+def test_enable_rule_help_uses_current_rule_ids() -> None:
     result = runner.invoke(app, ["check", "--help"], terminal_width=160)
     help_text = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", result.stdout).split())
 
     assert result.exit_code == 0
     assert "--enable-rule" in help_text
-    assert "rule-id@version" in help_text
-    assert "selector" in help_text
+    assert "Activate a current" in help_text
+    assert "rule ID for this run." in help_text
+    assert "rule-id@version" not in help_text
 
 
 def test_text_diagnostics_do_not_invent_source_coordinates(tmp_path: Path) -> None:
@@ -965,7 +955,7 @@ path = "iac/alpha"''',
 
 
 def test_malformed_manifest_is_incomplete(tmp_path: Path) -> None:
-    _manifest(tmp_path, "schema_version = 2\nunknown = true\n")
+    _manifest(tmp_path, "unknown = true\n")
     result = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     report = _json_object(result.stdout)
     assert result.exit_code == 2
@@ -1009,7 +999,7 @@ def test_report_schema_rejects_incoherent_outcome_state(tmp_path: Path) -> None:
 
 
 def test_incomplete_report_and_anchor_locations_validate_against_schema(tmp_path: Path) -> None:
-    _manifest(tmp_path, "schema_version = 2\nunknown = true\n")
+    _manifest(tmp_path, "unknown = true\n")
     incomplete = runner.invoke(app, ["report", str(tmp_path), "--format", "json"])
     schema_result = runner.invoke(app, ["schema"])
     validate(instance=_json_object(incomplete.stdout), schema=_json_object(schema_result.stdout))

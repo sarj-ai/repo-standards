@@ -7,7 +7,7 @@ inputs:
     required: false
     default: .
   manifest-path:
-    description: Trusted base-tree schema 7 manifest containing pull_request.review_policy
+    description: Trusted base-tree manifest containing pull_request.review_policy
     required: false
     default: .repo-standards/repository.toml
   pr-number:

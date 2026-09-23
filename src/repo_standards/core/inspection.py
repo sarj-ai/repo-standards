@@ -28,7 +28,6 @@ from .models import (
     PackageEvidence,
     RepositoryInspection,
     RepositorySnapshot,
-    TrackedContentEvidence,
     TrackedFileEvidence,
     WorkspaceEvidence,
 )
@@ -45,12 +44,6 @@ _MAX_TOTAL_METADATA_BYTES = 67_108_864
 _MAX_SELECTED_BLOB_BYTES = 5_242_880
 _MAX_TOTAL_SELECTED_BLOB_BYTES = 20_971_520
 _MAX_SELECTED_BLOBS = 100
-_MAX_MARKDOWN_BLOBS = 10_000
-_MAX_MARKDOWN_BLOB_BYTES = 1_048_576
-_MAX_TOTAL_MARKDOWN_BYTES = 67_108_864
-_MAX_ACTIVE_CONFIG_BLOBS = 100
-_MAX_ACTIVE_CONFIG_BLOB_BYTES = 1_048_576
-_MAX_TOTAL_ACTIVE_CONFIG_BYTES = 20_971_520
 _UNBORN_REVISION = "0" * 40
 _GIT_TREE_FIELD_COUNT = 3
 _GIT_INDEX_FIELD_COUNT = 3
@@ -115,6 +108,27 @@ class TrackedBlobContent:
     path: str
     object_id: str
     content: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _MetadataEvidence:
+    packages: tuple[PackageEvidence, ...]
+    workspaces: tuple[WorkspaceEvidence, ...]
+    issues: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ClassifiedBlobs:
+    workflows: tuple[TrackedBlob, ...]
+    cloudbuild: tuple[TrackedBlob, ...]
+    dockerfiles: tuple[TrackedBlob, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _IndexRecord:
+    mode: str
+    blob: TrackedBlob
+    encoded_path_size: int
 
 
 class _TreeRecord(NamedTuple):
@@ -195,7 +209,7 @@ def inspect_repository(root: Path, *, identity: GitIdentity | None = None) -> Re
     return _inspection_from_blobs(resolved, identity, blobs)
 
 
-def load_repository_snapshot(  # ruff: ignore[too-many-locals] - immutable inputs stay explicit
+def load_repository_snapshot(
     root: Path,
     *,
     manifest_path: str = ".repo-standards/repository.toml",
@@ -230,7 +244,7 @@ def load_repository_snapshot(  # ruff: ignore[too-many-locals] - immutable input
         _required_content(contents, baseline_blob) if baseline_blob is not None else None
     )
     manifest = parse_manifest_bytes(manifest_content)
-    evidence = _repository_content_evidence(resolved, manifest, blobs)
+    _validate_documentation_entrypoints(manifest, by_path)
     inspection = _inspection_from_blobs(resolved, identity, blobs)
     if inspection.completion != "complete":
         ConfigurationError.fail("repository inspection is incomplete")
@@ -253,7 +267,6 @@ def load_repository_snapshot(  # ruff: ignore[too-many-locals] - immutable input
                 _content_digest(baseline_content) if baseline_content is not None else None
             ),
         ),
-        content=evidence,
     )
 
 
@@ -270,6 +283,7 @@ def load_calibration_snapshot(
         identity = git_identity(resolved)
     blobs = _blobs_for_identity(resolved, identity)
     manifest = parse_manifest_bytes(manifest_content)
+    _validate_documentation_entrypoints(manifest, {blob.path: blob for blob in blobs})
     inspection = _inspection_from_blobs(resolved, identity, blobs)
     if inspection.completion != "complete":
         ConfigurationError.fail("repository inspection is incomplete")
@@ -285,102 +299,29 @@ def load_calibration_snapshot(
             manifest_object_id=None,
             manifest_digest=_content_digest(manifest_content),
         ),
-        content=_repository_content_evidence(resolved, manifest, blobs),
     )
 
 
-def _repository_content_evidence(
-    root: Path, manifest: Manifest, blobs: tuple[TrackedBlob, ...]
-) -> tuple[TrackedContentEvidence, ...]:
-    by_path = {blob.path: blob for blob in blobs}
-    if manifest.delivery is not None:
-        authority_paths = {
-            path for item in manifest.delivery.authorities for path in (item.path, *item.delegates)
-        }
-        if authority_paths - set(by_path):
-            ConfigurationError.fail("a deployment authority path is absent from the exact Git tree")
-    selected: dict[str, tuple[TrackedBlob, bytes]] = {}
-    if manifest.documentation is not None:
-        missing = sorted(set(manifest.documentation.entrypoints) - set(by_path))
-        if missing:
-            ConfigurationError.fail("a documentation entrypoint is absent from the exact Git tree")
-        markdown = tuple(blob for blob in blobs if blob.path.casefold().endswith(".md"))
-        if len(markdown) > _MAX_MARKDOWN_BLOBS:
-            ConfigurationError.fail("repository exceeds the 10000-file Markdown safety limit")
-        contents = _read_bounded_blob_batch(
-            root,
-            markdown,
-            max_file_bytes=_MAX_MARKDOWN_BLOB_BYTES,
-            max_total_bytes=_MAX_TOTAL_MARKDOWN_BYTES,
-        )
-        selected.update((blob.path, (blob, _required_content(contents, blob))) for blob in markdown)
-    if manifest.active_configuration:
-        if len(manifest.active_configuration) > _MAX_ACTIVE_CONFIG_BLOBS:
-            ConfigurationError.fail("active configuration exceeds the 100-file safety limit")
-        try:
-            active = tuple(by_path[item.path] for item in manifest.active_configuration)
-        except KeyError:
-            ConfigurationError.fail(
-                "an active configuration path is absent from the exact Git tree"
-            )
-        contents = _read_bounded_blob_batch(
-            root,
-            active,
-            max_file_bytes=_MAX_ACTIVE_CONFIG_BLOB_BYTES,
-            max_total_bytes=_MAX_TOTAL_ACTIVE_CONFIG_BYTES,
-        )
-        selected.update((blob.path, (blob, _required_content(contents, blob))) for blob in active)
-    return tuple(
-        TrackedContentEvidence(
-            path=path,
-            object_id=blob.object_id,
-            content_digest=_content_digest(content),
-            content=content,
-        )
-        for path, (blob, content) in sorted(selected.items())
-    )
+def _validate_documentation_entrypoints(
+    manifest: Manifest, by_path: dict[str, TrackedBlob]
+) -> None:
+    if manifest.documentation is not None and not set(
+        manifest.documentation.entrypoints
+    ).issubset(by_path):
+        ConfigurationError.fail("a documentation entrypoint is absent from the exact Git tree")
 
 
 def _inspection_from_blobs(
     root: Path, identity: GitIdentity, blobs: tuple[TrackedBlob, ...]
 ) -> RepositoryInspection:
-    issues: list[str] = []
-    metadata_blobs = tuple(
-        blob
-        for blob in blobs
-        if Path(blob.path).name in {"package.json", "pnpm-workspace.yaml", "pyproject.toml"}
-    )
-    if len(metadata_blobs) > _MAX_METADATA_FILES:
-        ConfigurationError.fail(
-            f"repository exceeds the {_MAX_METADATA_FILES} metadata-file safety limit"
-        )
-    contents, read_issues = _read_metadata_batch(root, metadata_blobs)
-    issues.extend(read_issues)
-    packages: list[PackageEvidence] = []
-    workspaces: list[WorkspaceEvidence] = []
-    for blob in metadata_blobs:
-        content = contents.get(blob.object_id)
-        if Path(blob.path).name != "pnpm-workspace.yaml":
-            project = _inspect_project(blob, content, issues)
-            if project is not None:
-                packages.append(project)
-        workspace = _inspect_workspace(blob, content, issues)
-        if workspace is not None:
-            workspaces.append(workspace)
+    metadata = _metadata_evidence(root, blobs)
+    packages, workspaces, issues = metadata.packages, metadata.workspaces, metadata.issues
     terraform_modules = _terraform_module_units(blobs)
-    workflow_blobs = tuple(
-        blob
-        for blob in blobs
-        if blob.path.startswith(".github/workflows/") and blob.path.endswith((".yaml", ".yml"))
-    )
-    cloudbuild_blobs = tuple(
-        blob
-        for blob in blobs
-        if Path(blob.path).name.casefold().startswith("cloudbuild")
-        and blob.path.endswith((".yaml", ".yml"))
-    )
-    dockerfile_blobs = tuple(
-        blob for blob in blobs if Path(blob.path).name.casefold().startswith("dockerfile")
+    classified = _classify_blobs(blobs)
+    workflow_blobs, cloudbuild_blobs, dockerfile_blobs = (
+        classified.workflows,
+        classified.cloudbuild,
+        classified.dockerfiles,
     )
     inventory_units = [
         InventoryUnit(
@@ -428,10 +369,56 @@ def _inspection_from_blobs(
     )
 
 
+def _classify_blobs(blobs: tuple[TrackedBlob, ...]) -> _ClassifiedBlobs:
+    workflows = tuple(
+        blob
+        for blob in blobs
+        if blob.path.startswith(".github/workflows/") and blob.path.endswith((".yaml", ".yml"))
+    )
+    cloudbuild = tuple(
+        blob
+        for blob in blobs
+        if Path(blob.path).name.casefold().startswith("cloudbuild")
+        and blob.path.endswith((".yaml", ".yml"))
+    )
+    dockerfiles = tuple(
+        blob for blob in blobs if Path(blob.path).name.casefold().startswith("dockerfile")
+    )
+    return _ClassifiedBlobs(workflows, cloudbuild, dockerfiles)
+
+
+def _metadata_evidence(
+    root: Path, blobs: tuple[TrackedBlob, ...]
+) -> _MetadataEvidence:
+    metadata_blobs = tuple(
+        blob
+        for blob in blobs
+        if Path(blob.path).name in {"package.json", "pnpm-workspace.yaml", "pyproject.toml"}
+    )
+    if len(metadata_blobs) > _MAX_METADATA_FILES:
+        ConfigurationError.fail(
+            f"repository exceeds the {_MAX_METADATA_FILES} metadata-file safety limit"
+        )
+    contents, read_issues = _read_metadata_batch(root, metadata_blobs)
+    issues = list(read_issues)
+    packages: list[PackageEvidence] = []
+    workspaces: list[WorkspaceEvidence] = []
+    for blob in metadata_blobs:
+        content = contents.get(blob.object_id)
+        if Path(blob.path).name != "pnpm-workspace.yaml":
+            project = _inspect_project(blob, content, issues)
+            if project is not None:
+                packages.append(project)
+        workspace = _inspect_workspace(blob, content, issues)
+        if workspace is not None:
+            workspaces.append(workspace)
+    return _MetadataEvidence(tuple(packages), tuple(workspaces), tuple(issues))
+
+
 def _tracked_file_evidence(
     root: Path,
     blobs: tuple[TrackedBlob, ...],
-    packages: list[PackageEvidence],
+    packages: tuple[PackageEvidence, ...],
 ) -> tuple[TrackedFileEvidence, ...]:
     evidence_paths = _ownership_evidence_paths(packages)
     evidence_blobs = tuple(blob for blob in blobs if blob.path in evidence_paths)
@@ -450,7 +437,7 @@ def _tracked_file_evidence(
     )
 
 
-def _ownership_evidence_paths(packages: list[PackageEvidence]) -> frozenset[str]:
+def _ownership_evidence_paths(packages: tuple[PackageEvidence, ...]) -> frozenset[str]:
     paths: set[str] = set()
     for project in packages:
         root = Path(project.path).parent.as_posix()
@@ -548,9 +535,7 @@ def _blobs_for_identity(root: Path, identity: GitIdentity) -> tuple[TrackedBlob,
     return blobs
 
 
-def _indexed_files(  # ruff: ignore[too-many-branches] - every malformed index form fails closed
-    root: Path,
-) -> _IndexedFiles:
+def _indexed_files(root: Path) -> _IndexedFiles:
     git_executable = shutil.which("git")
     if git_executable is None:
         ConfigurationError.fail("Git executable is unavailable")
@@ -579,30 +564,11 @@ def _indexed_files(  # ruff: ignore[too-many-branches] - every malformed index f
     parsed: list[tuple[str, TrackedBlob]] = []
     path_bytes = 0
     for record in records:
-        metadata, separator, path = record.partition("\t")
-        fields = metadata.split()
-        if separator != "\t" or len(fields) != _GIT_INDEX_FIELD_COUNT:
-            ConfigurationError.fail("Git index output is malformed")
-        mode, object_id, stage = fields
-        if stage != "0":
-            ConfigurationError.fail("Git index contains unresolved merge entries")
-        if mode == "120000":
-            ConfigurationError.fail(f"tracked path is a symlink: {path}")
-        if mode == "160000":
-            ConfigurationError.fail(f"tracked path is a Git submodule: {path}")
-        if mode not in {"100644", "100755"}:
-            ConfigurationError.fail(f"tracked path has an unsupported Git mode: {path}")
-        if len(object_id) not in {40, 64} or any(
-            character not in "0123456789abcdef" for character in object_id
-        ):
-            ConfigurationError.fail("Git index object ID is malformed")
-        encoded_path_size = len(path.encode("utf-8"))
-        if encoded_path_size > _MAX_PATH_BYTES:
-            ConfigurationError.fail("tracked path exceeds the 4096-byte safety limit")
-        path_bytes += encoded_path_size
+        parsed_record = _parse_index_record(record)
+        path_bytes += parsed_record.encoded_path_size
         if path_bytes > _MAX_TOTAL_PATH_BYTES:
             ConfigurationError.fail("tracked paths exceed the 16 MiB aggregate safety limit")
-        parsed.append((mode, TrackedBlob(path=path, object_id=object_id)))
+        parsed.append((parsed_record.mode, parsed_record.blob))
     canonical = tuple(canonical_path(blob.path) for _mode, blob in parsed)
     if canonical != tuple(blob.path for _mode, blob in parsed):
         ConfigurationError.fail("tracked paths must already be canonical")
@@ -620,6 +586,30 @@ def _indexed_files(  # ruff: ignore[too-many-branches] - every malformed index f
         digest.update(blob.path.encode("utf-8"))
         digest.update(b"\0")
     return _IndexedFiles(tuple(blob for _mode, blob in ordered), digest.hexdigest())
+
+
+def _parse_index_record(record: str) -> _IndexRecord:
+    metadata, separator, path = record.partition("\t")
+    fields = metadata.split()
+    if separator != "\t" or len(fields) != _GIT_INDEX_FIELD_COUNT:
+        ConfigurationError.fail("Git index output is malformed")
+    mode, object_id, stage = fields
+    if stage != "0":
+        ConfigurationError.fail("Git index contains unresolved merge entries")
+    if mode == "120000":
+        ConfigurationError.fail(f"tracked path is a symlink: {path}")
+    if mode == "160000":
+        ConfigurationError.fail(f"tracked path is a Git submodule: {path}")
+    if mode not in {"100644", "100755"}:
+        ConfigurationError.fail(f"tracked path has an unsupported Git mode: {path}")
+    if len(object_id) not in {40, 64} or any(
+        character not in "0123456789abcdef" for character in object_id
+    ):
+        ConfigurationError.fail("Git index object ID is malformed")
+    encoded_path_size = len(path.encode("utf-8"))
+    if encoded_path_size > _MAX_PATH_BYTES:
+        ConfigurationError.fail("tracked path exceeds the 4096-byte safety limit")
+    return _IndexRecord(mode, TrackedBlob(path=path, object_id=object_id), encoded_path_size)
 
 
 def _tracked_files(root: Path, tree_digest: str) -> tuple[TrackedBlob, ...]:

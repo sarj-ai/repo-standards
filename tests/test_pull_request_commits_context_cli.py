@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter
 from typer.testing import CliRunner
 
-from repo_standards.cli import app
+from repo_standards.cli import BaseRepositoryId, HeadRepositoryId, app
 
 
 if TYPE_CHECKING:
@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 OBJECT_MAP = TypeAdapter(dict[str, object])
+_BASE_REPOSITORY_ID = BaseRepositoryId(101)
+_HEAD_REPOSITORY_ID = HeadRepositoryId(101)
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -52,8 +54,7 @@ def _manifest(
     *,
     maximum_commits: int = 5,
     transition: bool = False,
-    schema_version: int = 5,
-    enforcement: str = "strict",
+    enforcement: str | None = None,
 ) -> str:
     transition_table = ""
     if transition:
@@ -64,11 +65,8 @@ source_ref = "dev"
 base_ref = "preview"
 head_prefix = "automation/promote-dev-"
 """
-    commit_message = (
-        f'\n[commit_message]\nenforcement = "{enforcement}"\n' if schema_version == 6 else ""
-    )
+    commit_message = f'\n[commit_message]\nenforcement = "{enforcement}"\n' if enforcement else ""
     return f"""\
-schema_version = {schema_version}
 repository_id = "fixture"
 components = []
 
@@ -96,8 +94,8 @@ def _event(  # ruff: ignore[too-many-arguments] - fixture keeps provider evidenc
     head: str,
     base_ref: str = "dev",
     head_ref: str = "feature",
-    base_repository_id: int = 101,
-    head_repository_id: int = 101,
+    base_repository_id: BaseRepositoryId = _BASE_REPOSITORY_ID,
+    head_repository_id: HeadRepositoryId = _HEAD_REPOSITORY_ID,
 ) -> None:
     path.write_text(
         json.dumps(
@@ -169,7 +167,7 @@ def test_github_event_enforces_commit_messages_from_exact_base(tmp_path: Path) -
     _git(tmp_path, "init", "--quiet", "--initial-branch=dev")
     policy = tmp_path / ".repo-standards"
     policy.mkdir()
-    (policy / "repository.toml").write_text(_manifest(schema_version=6), encoding="utf-8")
+    (policy / "repository.toml").write_text(_manifest(), encoding="utf-8")
     (tmp_path / "change.txt").write_text("base\n", encoding="utf-8")
     base = _commit(tmp_path, "chore: configure policy")
     (tmp_path / "change.txt").write_text("change\n", encoding="utf-8")
@@ -192,7 +190,7 @@ def test_github_event_observe_mode_reports_without_blocking(tmp_path: Path) -> N
     policy = tmp_path / ".repo-standards"
     policy.mkdir()
     (policy / "repository.toml").write_text(
-        _manifest(schema_version=6, enforcement="observe"), encoding="utf-8"
+        _manifest(enforcement="observe"), encoding="utf-8"
     )
     (tmp_path / "change.txt").write_text("base\n", encoding="utf-8")
     base = _commit(tmp_path, "chore: configure policy")
@@ -233,7 +231,7 @@ def test_local_advisory_is_quiet_when_satisfied(tmp_path: Path) -> None:
     _git(tmp_path, "remote", "add", "origin", str(tmp_path))
     _git(tmp_path, "fetch", "--quiet", "origin", f"{base}:refs/remotes/origin/dev")
     (tmp_path / "change.txt").write_text("one\n", encoding="utf-8")
-    _commit(tmp_path, "one")
+    _commit(tmp_path, "chore: one")
 
     result = runner.invoke(
         app,
@@ -366,7 +364,7 @@ def test_github_event_never_exempts_fork_transition(tmp_path: Path) -> None:
         head=head,
         base_ref="preview",
         head_ref=head_ref,
-        head_repository_id=202,
+        head_repository_id=HeadRepositoryId(202),
     )
 
     result = runner.invoke(

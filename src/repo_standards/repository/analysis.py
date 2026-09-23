@@ -15,11 +15,7 @@ from repo_standards.core.models import (
     PolicyId,
     RepositoryId,
 )
-from repo_standards.core.rule_reviews import (
-    RuleVersion,
-    activated_rule_ids,
-    activated_rule_versions,
-)
+from repo_standards.core.rule_reviews import RuleVersion, activated_rule_ids
 from repo_standards.policy_sarj import SarjPolicy
 
 
@@ -68,9 +64,7 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         mode=request.mode,
         as_of=request.as_of,
         additional_diagnostics=repository_diagnostics,
-        enabled_rules=(
-            activated_rule_ids if snapshot.manifest.enabled_rules else activated_rule_versions
-        )(
+        enabled_rules=activated_rule_ids(
             snapshot.manifest.enabled_rules or request.enabled_rule_ids,
             current_rules=frozenset(
                 RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()
@@ -82,7 +76,7 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         baseline = snapshot.baseline
         if baseline is None:
             ConfigurationError.fail("selected ratchet baseline was not loaded")
-        _ = check_baseline(report, baseline)
+        check_baseline(report, baseline)
         report = replace(report, ratchet=classify_baseline(report, baseline))
     return report
 

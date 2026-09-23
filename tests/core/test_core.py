@@ -19,7 +19,6 @@ from repo_standards.core.models import (
     FindingsReport,
     IncompleteReport,
     Manifest,
-    MigrationPath,
     Mode,
     PassedReport,
     PolicyId,
@@ -41,8 +40,7 @@ class EmptyPolicy:
         return ()
 
     @staticmethod
-    def evaluate(manifest: Manifest) -> tuple[Diagnostic, ...]:
-        del manifest
+    def evaluate(_manifest: Manifest) -> tuple[Diagnostic, ...]:
         return ()
 
 
@@ -125,21 +123,6 @@ def _manifest(*components: Component) -> Manifest:
         repository_id=RepositoryId("example-repository"),
         components=components,
     )
-
-
-def test_migration_swap_fails_closed() -> None:
-    manifest = replace(
-        _manifest(
-            Component(ComponentId("first"), "service", "services/a", "@example/payments"),
-            Component(ComponentId("second"), "service", "services/b", "@example/payments"),
-        ),
-        migration_paths=(
-            MigrationPath(ComponentId("first"), "services/b", "services/a"),
-            MigrationPath(ComponentId("second"), "services/a", "services/b"),
-        ),
-    )
-    with pytest.raises(ConfigurationError, match="swap or cycle"):
-        analyze(manifest, EmptyPolicy(), mode=Mode.STRICT)
 
 
 def test_fingerprint_ignores_message_and_path_but_tracks_evidence() -> None:

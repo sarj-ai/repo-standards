@@ -19,9 +19,8 @@ After a rule is approved, activate its stable ID in `.repo-standards/repository.
 enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]
 ```
 
-The locked Repo Standards release supplies the current reviewed implementation. Manifests never
-select historical rule versions; `--enable-rule <rule-id>@<version>` remains available only for
-legacy manifests and calibration runs.
+The locked Repo Standards release supplies the current reviewed implementation. Manifests and
+one-off `--enable-rule` checks select current rules by stable, versionless ID.
 
 ## Run it
 
@@ -86,8 +85,7 @@ git rebase -i "$(git merge-base origin/dev HEAD)"
 ```
 
 Configure local base discovery, commit-message enforcement, and narrowly scoped
-promotion/synchronization transitions in the repository manifest. New manifests may omit
-`schema_version`; omitted versions use the current policy. Strict CI reads this TOML from the exact PR
+promotion/synchronization transitions in the repository manifest. Strict CI reads this TOML from the exact PR
 **base** commit, so a PR cannot raise its own limit
 or grant itself an exemption. Each transition also requires the exact destination, a same-repository
 PR, an immutable source-SHA branch suffix equal to the PR head, and proof that the head remains in
@@ -95,10 +93,8 @@ the configured source ancestry. Protect automation branch namespaces so only the
 create or update them.
 
 ```toml
-schema_version = 6
-
 [commit_message]
-enforcement = "strict" # default in schema 6; use "observe" only for measured migrations
+enforcement = "strict" # default; use "observe" only for measured migrations
 
 [pull_request.commit_history]
 advisory_base_ref = "dev"
@@ -125,7 +121,7 @@ re-evaluates the new exact base.
 
 ## Commit-message policy
 
-Schema 6 enables Managed Conventional Header v1 by default. It checks only the first physical
+The repository manifest enables Managed Conventional Header v1 by default. It checks only the first physical
 line; bodies, trailers, punctuation, prose, and language remain untouched. Valid headers use
 `[(i/N) ][TICKET] type(scope)!: description`, where the numbering and ticket prefixes and scope
 are optional. Types are the fixed Conventional Commits set: `build`, `chore`, `ci`, `docs`, `feat`,
