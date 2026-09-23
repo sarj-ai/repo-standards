@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 import re
+import time
 
 import pytest
 
@@ -378,6 +379,80 @@ def test_merge_group_accepts_configured_successful_actions_run() -> None:
         head_sha=head,
         workflow_path=".github/workflows/review-policy.yml",
     )
+
+
+def _successful_status(head: str) -> list[dict[str, object]]:
+    return [
+        {
+            "id": 1,
+            "sha": head,
+            "context": "Review Policy",
+            "state": "success",
+            "target_url": "https://github.com/owner/repo/actions/runs/123",
+            "creator": {"login": "github-actions[bot]", "type": "Bot"},
+        }
+    ]
+
+
+def test_merge_group_waits_for_the_status_run_to_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    head = "a" * 40
+    client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
+    runs = iter(
+        [
+            {"status": "in_progress", "conclusion": None},
+            {"status": "completed", "conclusion": "success"},
+        ]
+    )
+    sleeps: list[float] = []
+
+    def request(_method: str, _path: str, **_kwargs: object) -> object:
+        return {
+            "path": ".github/workflows/review-policy.yml@refs/heads/dev",
+            "event": "workflow_run",
+            **next(runs),
+        }
+
+    client.request = request  # type: ignore[method-assign]
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+
+    assert review_policy_status_passed(
+        client,
+        _successful_status(head),
+        head_sha=head,
+        workflow_path=".github/workflows/review-policy.yml",
+    )
+    assert sleeps == [5]
+
+
+def test_merge_group_rejects_a_status_run_that_never_completes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    head = "a" * 40
+    client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
+    clock = iter([0.0, 100.0, 200.0, 300.0])
+    sleeps: list[float] = []
+
+    def request(_method: str, _path: str, **_kwargs: object) -> object:
+        return {
+            "path": ".github/workflows/review-policy.yml@refs/heads/dev",
+            "status": "in_progress",
+            "conclusion": None,
+            "event": "workflow_run",
+        }
+
+    client.request = request  # type: ignore[method-assign]
+    monkeypatch.setattr(time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+
+    assert not review_policy_status_passed(
+        client,
+        _successful_status(head),
+        head_sha=head,
+        workflow_path=".github/workflows/review-policy.yml",
+    )
+    assert sleeps == [5, 5]
 
 
 def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None:
