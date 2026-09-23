@@ -1,7 +1,7 @@
 schema_version = 6
 repository_id = "repo-standards"
 components = []
-enabled_rules = []
+enabled_rules = ["repository/artifacts/mjs-files"]
 
 [documentation]
 entrypoints = ["README.md"]
