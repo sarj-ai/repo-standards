@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 
 import { catalog } from '../lib/catalog';
 
-const origin = catalog.product.website_url.replace(/\/$/u, '');
+const origin = catalog.product["website_url"].replace(/\/$/u, '');
 const body = `User-agent: *
 Allow: /
 

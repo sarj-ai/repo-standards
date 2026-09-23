@@ -33,7 +33,7 @@ export function ruleExamples(rule: Rule): readonly RuleExampleView[] {
     title: example.title,
     before: example.before,
     after: example.after,
-    expectedSeverity: example.expected_severity,
+    expectedSeverity: example["expected_severity"],
     language: example.language,
     marks: changedLineMarks(example.before, example.after),
   }));

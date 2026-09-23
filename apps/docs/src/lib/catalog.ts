@@ -43,14 +43,14 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
       .toSorted((left, right) => left.order - right.order)
       .map((topicValue) => {
         const rules = catalog.rules
-          .filter((rule) => rule.topic_id === topicValue.topic_id)
+          .filter((rule) => rule["topic_id"] === topicValue["topic_id"])
           .toSorted((left, right) => left.title.localeCompare(right.title, 'en'))
           .map((rule) => ({
             rule,
             href: ruleHref(rule),
             category: categoryValue.label,
           }));
-        if (rules.length === 0) throw new TypeError(`Rule topic has no rules: ${topicValue.topic_id}`);
+        if (rules.length === 0) throw new TypeError(`Rule topic has no rules: ${topicValue["topic_id"]}`);
         return { topic: topicValue, rules };
       });
     return {
@@ -62,13 +62,13 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
 
 export function rulePage(rule: Rule) {
   const categoryValue = referenceCatalog.find((item) =>
-    item.topics.some((topic) => topic.topic.topic_id === rule.topic_id));
-  const topicValue = categoryValue?.topics.find((item) => item.topic.topic_id === rule.topic_id);
+    item.topics.some((topic) => topic.topic["topic_id"] === rule["topic_id"]));
+  const topicValue = categoryValue?.topics.find((item) => item.topic["topic_id"] === rule["topic_id"]);
   const peerRules = referenceCatalog.flatMap((category) => category.topics)
     .flatMap((topic) => topic.rules);
-  const index = peerRules.findIndex((item) => item.rule.rule_id === rule.rule_id);
+  const index = peerRules.findIndex((item) => item.rule["rule_id"] === rule["rule_id"]);
   if (categoryValue === undefined || topicValue === undefined || index < 0) {
-    throw new TypeError(`Rule is not present in the reference catalog: ${rule.rule_id}`);
+    throw new TypeError(`Rule is not present in the reference catalog: ${rule["rule_id"]}`);
   }
   return {
     category: categoryValue,
@@ -89,8 +89,8 @@ export function referenceSidebar() {
         ...referenceCatalog
           .map((value) => ({
             label: value.category.label,
-            link: categoryHref(value.category.category_id),
-            attrs: { 'data-sidebar-category': value.category.category_id },
+            link: categoryHref(value.category["category_id"]),
+            attrs: { 'data-sidebar-category': value.category["category_id"] },
           })),
       ],
     },
