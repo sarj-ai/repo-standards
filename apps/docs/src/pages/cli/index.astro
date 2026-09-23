@@ -7,7 +7,7 @@ function parameterLabel(parameter: Parameter): string {
 }
 
 function parameterDetails(parameter: Parameter): string {
-  const pieces = [parameter.value_type, parameter.required ? 'required' : 'optional'];
+  const pieces = [parameter["value_type"], parameter.required ? 'required' : 'optional'];
   if (parameter.repeatable) pieces.push('repeatable');
   if (parameter.choices.length > 0) pieces.push(parameter.choices.join(' | '));
   return pieces.join(' · ');
@@ -17,10 +17,10 @@ function parameterDetails(parameter: Parameter): string {
 <ReferencePage title="CLI" description={`${catalog.commands.length} cataloged commands.`}>
   <h1 class="sarj-visually-hidden">CLI</h1>
   <nav class="command-index" aria-label="Commands">
-    {catalog.commands.map((command) => <a href={`#${command.command_id}`}>{command.path.join(' ')}</a>)}
+    {catalog.commands.map((command) => <a href={`#${command["command_id"]}`}>{command.path.join(' ')}</a>)}
   </nav>
   {catalog.commands.map((command) => (
-    <section class="command" id={command.command_id}>
+    <section class="command" id={command["command_id"]}>
       <h2><code>repo-standards {command.path.join(' ')}</code></h2>
       <p>{command.summary}</p>
       {[...command.arguments, ...command.options].length > 0 && (

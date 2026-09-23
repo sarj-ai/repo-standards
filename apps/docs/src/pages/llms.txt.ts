@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 
 import { catalog, categoryHref } from '../lib/catalog';
 
-const origin = catalog.product.website_url.replace(/\/$/u, '');
+const origin = catalog.product["website_url"].replace(/\/$/u, '');
 const lines = [
   `# ${catalog.product.title}`,
   '',
@@ -19,7 +19,7 @@ const lines = [
   '',
   '## Rule categories',
   '',
-  ...catalog.categories.map((category) => `- [${category.label}](${origin}${categoryHref(category.category_id)})`),
+  ...catalog.categories.map((category) => `- [${category.label}](${origin}${categoryHref(category["category_id"])})`),
   '',
 ];
 

@@ -116,20 +116,20 @@ function parseDiscoveryCatalog(value: unknown): DiscoveryCatalog {
     throw new Error('Generated catalog is missing its category or rule collection.');
   }
   const categories = value.categories.map((candidate) => {
-    if (!isRecord(candidate) || typeof candidate.category_id !== 'string' || typeof candidate.label !== 'string') {
+    if (!isRecord(candidate) || typeof candidate["category_id"] !== 'string' || typeof candidate.label !== 'string') {
       throw new Error('Generated catalog contains an invalid category descriptor.');
     }
-    return { id: candidate.category_id, label: candidate.label };
+    return { id: candidate["category_id"], label: candidate.label };
   });
   const rules = value.rules.map((candidate) => {
     if (
       !isRecord(candidate)
       || typeof candidate.slug !== 'string'
-      || typeof candidate.category_id !== 'string'
+      || typeof candidate["category_id"] !== 'string'
     ) {
       throw new Error('Generated catalog contains an invalid rule descriptor.');
     }
-    return { categoryId: candidate.category_id, slug: candidate.slug };
+    return { categoryId: candidate["category_id"], slug: candidate.slug };
   });
   return { categories, rules };
 }

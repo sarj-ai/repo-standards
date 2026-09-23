@@ -6,8 +6,8 @@ import { catalog } from '../lib/catalog';
 const payload = {
   status: 'ok',
   commit: sourceRevision,
-  catalogVersion: catalog.catalog_version,
-  catalogDigest: catalog.provenance.content_digest,
+  catalogVersion: catalog["catalog_version"],
+  catalogDigest: catalog.provenance["content_digest"],
   rules: catalog.rules.length,
   commands: catalog.commands.length,
 };

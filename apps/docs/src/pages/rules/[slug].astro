@@ -21,13 +21,13 @@ export function getStaticPaths() {
 
 interface Props { rule: Rule }
 const { rule } = Astro.props;
-const sourceUrl = `${catalog.product.repository_url}/blob/${sourceRevision}/${rule.source.path}`;
-const ruleJsonUrl = `/api/rules/${rule.rule_id.split('/').map(encodeURIComponent).join('/')}.json`;
+const sourceUrl = `${catalog.product["repository_url"]}/blob/${sourceRevision}/${rule.source.path}`;
+const ruleJsonUrl = `/api/rules/${rule["rule_id"].split('/').map(encodeURIComponent).join('/')}.json`;
 const { category, topic, previous, next } = rulePage(rule);
 const description = ruleDescription(rule);
 const examples = ruleExamples(rule);
 const [primaryExample, ...additionalExamples] = examples;
-const categoryUrl = `/rules/categories/${encodeURIComponent(rule.category_id)}/`;
+const categoryUrl = `/rules/categories/${encodeURIComponent(rule["category_id"])}/`;
 const referenceLinks = [...new Set(rule.references)].map((href) => ({
   href,
   label: new URL(href).hostname.replace(/^www\./, ''),
@@ -41,15 +41,15 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
   <article
     class="rule-detail"
     data-rule-page
-    data-rule-id={rule.rule_id}
-    data-rule-category={rule.category_id}
-    data-rule-topic={rule.topic_id}
+    data-rule-id={rule["rule_id"]}
+    data-rule-category={rule["category_id"]}
+    data-rule-topic={rule["topic_id"]}
   >
     <header class="rule-detail__header">
       <div class="rule-detail__toolbar">
         <nav class="rule-breadcrumb" aria-label="Breadcrumb">
           <a class="rule-breadcrumb__category" href={categoryUrl}>
-            <RuleTypeMark categoryId={rule.category_id} label={category.category.label} decorative />
+            <RuleTypeMark categoryId={rule["category_id"]} label={category.category.label} decorative />
             <span>{category.category.label}</span>
           </a>
           <span aria-hidden="true">·</span>
@@ -64,7 +64,7 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
       <h1>{rule.slug}</h1>
       <p class="lede" data-rule-description>{description}</p>
       <div class="rule-header-links" aria-label="Rule links">
-        <code>{rule.rule_id}</code>
+        <code>{rule["rule_id"]}</code>
         <a href={sourceUrl}>Rule source</a>
         <a href={ruleJsonUrl}>Rule JSON</a>
         <a href="/api/catalog.json">Catalog JSON</a>

@@ -10,7 +10,7 @@ interface DeploymentHealth {
 }
 
 interface DeploymentCatalog {
-  readonly provenance: { readonly content_digest: string };
+  readonly provenance: { readonly "content_digest": string };
 }
 
 type Pause = (milliseconds: number) => Promise<void> | void;
@@ -78,7 +78,7 @@ async function deploymentAtAttempt({
   const health = parseHealth(await healthResponse.json());
   const catalog = parseCatalog(await catalogResponse.json());
   if (health.commit !== expectedCommit) throw new Error('deployed commit does not match');
-  if (health.catalogDigest !== catalog.provenance.content_digest) {
+  if (health.catalogDigest !== catalog.provenance["content_digest"]) {
     throw new Error('deployed catalog digest does not match');
   }
   return health;
@@ -99,11 +99,11 @@ function parseCatalog(value: unknown): DeploymentCatalog {
   if (
     !isRecord(value)
     || !isRecord(value.provenance)
-    || typeof value.provenance.content_digest !== 'string'
+    || typeof value.provenance["content_digest"] !== 'string'
   ) {
     throw new Error('catalog endpoint returned an invalid payload');
   }
-  return { provenance: { content_digest: value.provenance.content_digest } };
+  return { provenance: { "content_digest": value.provenance["content_digest"] } };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

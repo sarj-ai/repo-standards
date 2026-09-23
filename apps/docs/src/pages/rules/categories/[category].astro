@@ -7,7 +7,7 @@ import { ruleDescription } from '../../../lib/rule-view';
 
 export function getStaticPaths() {
   return referenceCatalog.map((category) => ({
-    params: { category: category.category.category_id },
+    params: { category: category.category["category_id"] },
     props: { category },
     }));
 }
@@ -21,18 +21,18 @@ const ruleCount = category.ruleCount;
 <ReferencePage title={category.category.label} description={`${ruleCount} repository rules.`}>
   <Breadcrumbs ancestors={[{ label: 'Rules', href: '/rules/' }]} current={category.category.label} />
   <h1 class="sarj-visually-hidden">{category.category.label}</h1>
-  <div class="rule-catalog" data-category-id={category.category.category_id}>
+  <div class="rule-catalog" data-category-id={category.category["category_id"]}>
     {topics.map(({ topic, rules }) => {
       return (
-        <section class="rule-topic" aria-labelledby={`topic-${topic.topic_id}`}>
-          <h2 id={`topic-${topic.topic_id}`}>{topic.label}</h2>
+        <section class="rule-topic" aria-labelledby={`topic-${topic["topic_id"]}`}>
+          <h2 id={`topic-${topic["topic_id"]}`}>{topic.label}</h2>
           <div class="rule-list">
             {rules.map(({ rule, href }) => (
-              <a class="rule-row" href={href} data-rule-id={rule.rule_id}>
+              <a class="rule-row" href={href} data-rule-id={rule["rule_id"]}>
                 <strong>{rule.title}</strong>
                 <span>{ruleDescription(rule)}</span>
-                <code>{rule.rule_id}</code>
-                <span class:list={['severity', `severity--${rule.default_severity}`]}>{rule.default_severity}</span>
+                <code>{rule["rule_id"]}</code>
+                <span class:list={['severity', `severity--${rule["default_severity"]}`]}>{rule["default_severity"]}</span>
               </a>
             ))}
           </div>

@@ -21,7 +21,7 @@ void test('accepts matching deployment identity and catalog digest', async () =>
       requests.push([url.pathname, url.search, options.cache]);
       return url.pathname.endsWith('/health.json')
         ? response({ commit: COMMIT, catalogDigest: DIGEST })
-        : response({ provenance: { content_digest: DIGEST } });
+        : response({ provenance: { "content_digest": DIGEST } });
     },
   });
 
@@ -45,7 +45,7 @@ void test('retries a stale deployment before accepting the expected commit', asy
       if (url.pathname.endsWith('/health.json')) attempt += 1;
       return url.pathname.endsWith('/health.json')
         ? response({ commit: attempt === 1 ? 'b'.repeat(40) : COMMIT, catalogDigest: DIGEST })
-        : response({ provenance: { content_digest: DIGEST } });
+        : response({ provenance: { "content_digest": DIGEST } });
     },
   });
 
@@ -77,7 +77,7 @@ void test('rejects malformed deployment payloads', async () => {
       attempts: 1,
       expectedCommit: COMMIT,
       request: (url) => response(url.pathname.endsWith('/health.json') ? {} : {
-        provenance: { content_digest: DIGEST },
+        provenance: { "content_digest": DIGEST },
       }),
     }),
     /health endpoint returned an invalid payload/u,
