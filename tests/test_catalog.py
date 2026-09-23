@@ -20,7 +20,6 @@ from repo_standards.cli import app
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.catalog import core_rules
 from repo_standards.core.models import JSONValue, RuleId
-from repo_standards.openapi import rules as openapi_rules
 from repo_standards.policy_sarj import SarjPolicy
 
 
@@ -54,7 +53,6 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     registry = (SarjPolicy(),)
     expected_rule_ids = {str(rule.rule_id) for rule in core_rules()}
     expected_rule_ids.update(str(rule.rule_id) for policy in registry for rule in policy.rules())
-    expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
 
     assert catalog.schema_version == 7
@@ -81,8 +79,8 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
         review.status for rule_id, review in reviews.items() if rule_id not in approved_ids
     } == {"pending"}
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 10
-    assert len({rule.slug for rule in catalog.rules}) == 10
+    assert len(rule_ids) == len(set(rule_ids)) == 6
+    assert len({rule.slug for rule in catalog.rules}) == 6
     assert {
         binding.default_activation for policy in catalog.policies for binding in policy.bindings
     } == {"disabled"}
@@ -130,10 +128,9 @@ def test_catalog_graph_is_complete() -> None:
     registry = (SarjPolicy(),)
     expected_rule_ids = {str(rule.rule_id) for rule in core_rules()}
     expected_rule_ids.update(str(rule.rule_id) for policy in registry for rule in policy.rules())
-    expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 10
+    assert len(rule_ids) == len(set(rule_ids)) == 6
     assert {policy.policy_id for policy in catalog.policies} == {
         str(policy.policy_id) for policy in registry
     }
@@ -154,11 +151,8 @@ def test_catalog_graph_is_complete() -> None:
         "pull-request.review-policy",
         "pull-request.size",
         "report",
-        "rest.check",
         "rest.discover",
         "rest.doctor",
-        "rest.explain",
-        "rest.rules",
         "rules",
         "schema",
     }
@@ -188,7 +182,7 @@ def test_catalog_rules_have_complete_clarity_taxonomy_and_examples() -> None:
     }
     fixture_ids: list[str] = []
 
-    assert category_ids == {"api-contracts", "repository"}
+    assert category_ids == {"repository"}
     assert {rule.category_id for rule in catalog.rules} == category_ids
     assert {rule.topic_id for rule in catalog.rules} == set(topic_parents)
     for rule in catalog.rules:
@@ -279,7 +273,6 @@ def test_catalog_schema_descriptor_versions_match_public_contracts() -> None:
 
     assert versions == {
         "catalog": 7,
-        "openapi-analysis": 3,
         "report": 3,
     }
 

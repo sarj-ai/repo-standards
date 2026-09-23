@@ -17,7 +17,6 @@ import typer
 from repo_standards.catalog import (
     build_catalog,
     catalog_schema,
-    openapi_report_schema,
     report_schema,
 )
 from repo_standards.core.canonical import canonical_json
@@ -81,14 +80,6 @@ from repo_standards.core.rule_reviews import (
     activated_rule_ids,
     activated_rule_versions,
 )
-from repo_standards.openapi import (
-    AnalysisReport as OpenApiAnalysisReport,
-    AnalysisRequest as OpenApiAnalysisRequest,
-    DocumentInput as OpenApiDocumentInput,
-    analyze as analyze_openapi,
-    local_reference_paths,
-    rules as openapi_rules,
-)
 from repo_standards.policy_sarj import SarjPolicy
 from repo_standards.pull_request._context import NotApplicable
 from repo_standards.pull_request._inputs import (
@@ -131,8 +122,6 @@ _INSPECTION_KINDS = frozenset(
     {"all", "project", "workflow", "cloudbuild", "dockerfile", "terraform", "openapi"}
 )
 _OPENAPI_BASENAMES = frozenset({"openapi.json", "openapi.yaml", "openapi.yml"})
-_MAX_OPENAPI_DOCUMENTS = 100
-_MAX_OPENAPI_TOTAL_BYTES = 20 * 1024 * 1024
 _MAX_RENDERED_COMMIT_FINDINGS = 3
 _MAX_REVIEW_POLICY_EVIDENCE_BYTES = 1_048_576
 
@@ -216,16 +205,8 @@ class OutputFormat(StrEnum):
     TEXT = "text"
 
 
-class RestEnforcement(StrEnum):
-    """Blocking behavior for committed REST contracts."""
-
-    REPORT = "report"
-    STRICT = "strict"
-
-
 class SchemaDocument(StrEnum):
     REPORT = "report"
-    OPENAPI_ANALYSIS = "openapi-analysis"
     CATALOG = "catalog"
 
 
@@ -296,11 +277,8 @@ def capabilities_command() -> None:
             "pull-request review-policy",
             "pull-request size",
             "report",
-            "rest check",
             "rest discover",
             "rest doctor",
-            "rest explain",
-            "rest rules",
             "rules",
             "schema",
         ],
@@ -324,7 +302,7 @@ def capabilities_command() -> None:
                 "application_code_execution": False,
             },
         },
-        "schemas": {"catalog": 7, "openapi-analysis": 3, "report": 3},
+        "schemas": {"catalog": 7, "report": 3},
         "pagination": {"default_limit": 100, "maximum_limit": _MAX_PAGE_SIZE},
     }
     typer.echo(canonical_json(payload))
@@ -1672,7 +1650,7 @@ def rest_discover_command(
         "next_actions": (
             []
             if len(candidates) == 1
-            else ["Select one exact tracked contract with `repo-standards rest check --spec PATH`."]
+            else ["Select one exact tracked contract for an OpenAPI linter."]
         ),
     }
     typer.echo(canonical_json(payload))
@@ -1725,198 +1703,6 @@ def rest_doctor_command(root: Annotated[Path, typer.Argument()] = Path()) -> Non
         raise typer.Exit(2)
 
 
-@rest_app.command("check")
-def rest_check_command(
-    root: Annotated[Path, typer.Argument()] = Path(),
-    spec: Annotated[
-        str | None,
-        typer.Option(help="Exact tracked OpenAPI entry path; inferred only when unambiguous."),
-    ] = None,
-    semantics: Annotated[
-        str | None,
-        typer.Option(help="Optional exact tracked contract-semantics JSON path."),
-    ] = None,
-    enforcement: Annotated[
-        RestEnforcement,
-        typer.Option(help="report or strict; incomplete evidence always exits 2."),
-    ] = RestEnforcement.STRICT,
-    enable_rule: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--enable-rule",
-            help=(
-                "Activate one approved rule-id@version selector for a legacy manifest "
-                "or calibration run."
-            ),
-        ),
-    ] = None,
-) -> None:
-    """Check one committed OpenAPI contract from the exact selected Git tree."""
-    identity: GitIdentity | None = None
-    try:
-        enabled = activated_rule_versions(
-            tuple(enable_rule or ()),
-            current_rules=frozenset(
-                RuleVersion(rule.rule_id, rule.version) for rule in openapi_rules()
-            ),
-        )
-        resolved = root.resolve(strict=True)
-        identity = git_identity(resolved)
-    except (ConfigurationError, OSError, RequestError) as error:
-        _emit_rest_error("rest.check", "rest.analysis-incomplete", str(error), identity)
-    try:
-        report = _analyze_rest_snapshot(resolved, identity, spec, semantics)
-    except (ConfigurationError, OSError, RequestError) as error:
-        _emit_rest_error("rest.check", "rest.analysis-incomplete", str(error), identity)
-    diagnostics = tuple(
-        item
-        for item in report.diagnostics
-        if any(
-            str(rule.rule_id) == item.rule_id and rule.version == item.rule_version
-            for rule in enabled
-        )
-    )
-    conclusion = (
-        "inconclusive"
-        if report.completion != "complete"
-        else "findings"
-        if diagnostics
-        else "passed"
-    )
-    payload = {
-        **_envelope(
-            "rest.check",
-            completion=report.completion,
-            conclusion=conclusion,
-            provenance=_git_provenance(identity),
-            issues=[asdict(item) for item in report.execution_issues],
-        ),
-        "application_code_executed": False,
-        "entrypoint": report.entrypoint,
-        "openapi_version": report.openapi_version,
-        "diagnostics": [asdict(item) for item in diagnostics],
-        "summary": {
-            "diagnostics": len(diagnostics),
-            "errors": sum(item.severity == "error" for item in diagnostics),
-            "warnings": sum(item.severity == "warning" for item in diagnostics),
-        },
-    }
-    payload["schema_version"] = 3
-    typer.echo(canonical_json(payload))
-    if report.completion != "complete":
-        raise typer.Exit(2)
-    if enforcement is RestEnforcement.STRICT and any(
-        item.severity == "error" for item in diagnostics
-    ):
-        raise typer.Exit(1)
-
-
-@rest_app.command("rules")
-def rest_rules_command() -> None:
-    """List the immutable REST/OpenAPI RuleProblem catalog."""
-    installed = openapi_rules()
-    payload = {
-        **_envelope(
-            "rest.rules",
-            provenance={"kind": "installed-package", "package": "repo-standards"},
-        ),
-        "rules": [asdict(item) for item in installed],
-        "summary": {"rules": len(installed)},
-    }
-    typer.echo(canonical_json(payload))
-
-
-@rest_app.command("explain")
-def rest_explain_command(rule_id: Annotated[str, typer.Argument()]) -> None:
-    """Explain one immutable REST/OpenAPI rule without scanning a repository."""
-    installed = {item.rule_id: item for item in openapi_rules()}
-    rule = installed.get(RuleId(rule_id))
-    if rule is None:
-        _emit_rest_error("rest.explain", "rule.unknown", f"unknown REST rule: {rule_id}", None)
-    payload = {
-        **_envelope(
-            "rest.explain",
-            provenance={"kind": "installed-package", "package": "repo-standards"},
-        ),
-        "rule": asdict(rule),
-    }
-    typer.echo(canonical_json(payload))
-
-
-def _analyze_rest_snapshot(
-    root: Path,
-    identity: GitIdentity,
-    spec: str | None,
-    semantics: str | None,
-) -> OpenApiAnalysisReport:
-    inspection = inspect_repository(root, identity=identity)
-    entrypoint = _select_openapi_entry(inspection, spec)
-    documents = _read_openapi_closure(root, identity, inspection, entrypoint)
-    semantics_bytes = None
-    if semantics is not None:
-        semantics_bytes = read_tracked_blob_contents(root, (semantics,), identity=identity)[
-            0
-        ].content
-    request = OpenApiAnalysisRequest(
-        entrypoint=entrypoint,
-        documents=documents,
-        semantics=semantics_bytes,
-    )
-    return analyze_openapi(request)
-
-
-def _select_openapi_entry(inspection: RepositoryInspection, selected: str | None) -> str:
-    candidates = _openapi_candidates(inspection)
-    if selected is not None:
-        tracked = {item.path for item in inspection.tracked_files}
-        if selected not in tracked:
-            message = "--spec must name an exact tracked regular file"
-            raise RequestError(message)
-        return selected
-    if len(candidates) != 1:
-        raise RequestError(
-            "OpenAPI discovery is ambiguous; select one exact candidate with --spec"
-            if candidates
-            else "no conventional committed OpenAPI document was discovered"
-        )
-    candidate = candidates[0]
-    if not candidate.endswith(".json"):
-        message = "the only discovered OpenAPI document uses YAML, which is discovery-only in v2"
-        raise RequestError(message)
-    return candidate
-
-
-def _read_openapi_closure(
-    root: Path,
-    identity: GitIdentity,
-    inspection: RepositoryInspection,
-    entrypoint: str,
-) -> tuple[OpenApiDocumentInput, ...]:
-    tracked = {item.path for item in inspection.tracked_files}
-    queued = [entrypoint]
-    selected: dict[str, bytes] = {}
-    total_bytes = 0
-    while queued:
-        path = queued.pop(0)
-        if path in selected:
-            continue
-        if len(selected) >= _MAX_OPENAPI_DOCUMENTS:
-            message = "OpenAPI reference closure exceeds the 100-document limit"
-            raise RequestError(message)
-        content = read_tracked_blob_contents(root, (path,), identity=identity)[0].content
-        total_bytes += len(content)
-        if total_bytes > _MAX_OPENAPI_TOTAL_BYTES:
-            message = "OpenAPI reference closure exceeds the 20 MiB aggregate limit"
-            raise RequestError(message)
-        selected[path] = content
-        queued.extend(
-            target
-            for target in local_reference_paths(path, content)
-            if target in tracked and target not in selected
-        )
-    return tuple(OpenApiDocumentInput(path, selected[path]) for path in sorted(selected))
-
-
 def _emit_rest_error(
     command: str,
     code: str,
@@ -1939,16 +1725,6 @@ def _emit_rest_error(
         ],
     )
     payload["schema_version"] = 3
-    if command == "rest.check":
-        payload.update(
-            {
-                "application_code_executed": False,
-                "entrypoint": "",
-                "openapi_version": None,
-                "diagnostics": [],
-                "summary": {"diagnostics": 0, "errors": 0, "warnings": 0},
-            }
-        )
     typer.echo(canonical_json(payload))
     raise typer.Exit(2)
 
@@ -2420,7 +2196,7 @@ def _emit_command_error(
 def print_schema(
     document: Annotated[str, typer.Argument()] = SchemaDocument.REPORT,
 ) -> None:
-    """Print report, OpenAPI analysis, or catalog JSON Schema."""
+    """Print repository report or catalog JSON Schema."""
     try:
         selected = SchemaDocument(document)
     except ValueError:
@@ -2429,20 +2205,14 @@ def print_schema(
             "schema.unknown",
             f"unknown schema document: {document}",
             phase="request",
-            remediation="Request `report`, `openapi-analysis`, or `catalog`.",
+            remediation="Request `report` or `catalog`.",
         )
     match selected:
         case SchemaDocument.CATALOG:
             payload = catalog_schema()
-        case SchemaDocument.OPENAPI_ANALYSIS:
-            payload = _openapi_report_schema()
         case SchemaDocument.REPORT:
             payload = _report_schema()
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
-
-
-def _openapi_report_schema() -> Mapping[str, object]:
-    return openapi_report_schema()
 
 
 def _report_schema() -> Mapping[str, object]:

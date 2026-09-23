@@ -40,7 +40,6 @@ from repo_standards.core.rule_reviews import (
     review_for,
 )
 from repo_standards.core.taxonomy import CATEGORIES
-from repo_standards.openapi import analysis_schema, rules as rest_rules
 from repo_standards.policy_sarj.policy import POLICY_SPEC, SarjPolicy
 from repo_standards.rest import instrumentation_capabilities
 
@@ -89,10 +88,6 @@ HttpsUrl = Annotated[str, Field(pattern=r"^https://")]
 
 _RULE_SLUGS = types.MappingProxyType(
     {
-    "api/artifact/provenance": "artifact-provenance",
-    "api/errors/problem-details": "problem-details",
-    "api/http/message-semantics": "http-message-semantics",
-    "api/references/local-resolution": "local-references",
     "repository/artifacts/terraform-examples": "terraform-examples",
     "repository/artifacts/schema-derived-config-examples": "schema-derived-config-examples",
     "repository/artifacts/bespoke-iac-verifiers": "bespoke-iac-verifiers",
@@ -454,42 +449,6 @@ def report_schema() -> dict[str, JSONValue]:
     return schema
 
 
-def openapi_report_schema() -> dict[str, JSONValue]:
-    schema = _schema_object(analysis_schema())
-    required = _schema_required(schema)
-    required.extend(["tool", "command", "provenance", "application_code_executed", "summary"])
-    properties = _schema_properties(schema)
-    properties.update(
-        {
-            "tool": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["name", "version"],
-                "properties": {
-                    "name": {"const": "repo-standards"},
-                    "version": {"type": "string"},
-                },
-            },
-            "command": {"const": "rest.check"},
-            "provenance": {"type": "object"},
-            "application_code_executed": {"const": False},
-            "summary": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["diagnostics", "errors", "warnings"],
-                "properties": {
-                    "diagnostics": {"type": "integer", "minimum": 0},
-                    "errors": {"type": "integer", "minimum": 0},
-                    "warnings": {"type": "integer", "minimum": 0},
-                },
-            },
-        }
-    )
-    schema["required"] = required
-    schema["properties"] = properties
-    return schema
-
-
 def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
     policy = SarjPolicy()
     commands = _commands(app)
@@ -588,8 +547,6 @@ def _rules(policy: Policy) -> tuple[RuleDescriptor, ...]:
         _add_rule(selected, rule, "src/repo_standards/core/catalog.py")
     for rule in policy.rules():
         _add_rule(selected, rule, "src/repo_standards/policy_sarj/policy.py")
-    for rule in rest_rules():
-        _add_rule(selected, rule, "src/repo_standards/openapi/catalog.py")
     return tuple(selected[key][0] for key in sorted(selected))
 
 
@@ -840,7 +797,7 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
         CapabilityDescriptor(
             capability_id=CapabilityId("rest"),
             title="REST and OpenAPI",
-            summary="Analyze committed API contracts without executing application code.",
+    summary="Discover API frameworks without executing application code.",
             status="preview",
             command_ids=tuple(item for item in command_ids if item.startswith("rest.")),
             input_kinds=rest_inputs,
@@ -851,13 +808,6 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
 def _schemas() -> tuple[SchemaDescriptor, ...]:
     documents = (
         ("report", "Repository analysis report", 3, "report", report_schema()),
-        (
-            "openapi-analysis",
-            "OpenAPI analysis report",
-            3,
-            "openapi-analysis",
-            openapi_report_schema(),
-        ),
         ("catalog", "Repo Standards public catalog", 7, "catalog", catalog_schema()),
     )
     return tuple(
