@@ -32,12 +32,6 @@ def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> 
     clarity_review = ApprovedRuleReview(
         reviewed_in="23c6cb225373f0b33d256191d93605c6a63917b9"
     )
-    mjs_review = ApprovedRuleReview(
-        reviewed_in="b1d9b9117d4aa00199eb93232e0d92e62a4273a2"
-    )
-    mjs_config_review = ApprovedRuleReview(
-        reviewed_in="5209a7483543a00cb0672a27240b1a6734c852b8"
-    )
     assert approved_rule_versions() == frozenset(
         {
             RuleVersion(RuleId("repository/artifacts/bespoke-iac-verifiers"), 3),
@@ -48,8 +42,6 @@ def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> 
             RuleVersion(RuleId("repository/artifacts/schema-derived-config-examples"), 2),
             RuleVersion(RuleId("repository/artifacts/schema-derived-config-examples"), 3),
             RuleVersion(RuleId("repository/artifacts/terraform-test-files"), 1),
-            RuleVersion(RuleId("repository/artifacts/mjs-files"), 1),
-            RuleVersion(RuleId("repository/artifacts/mjs-files"), 2),
             RuleVersion(RuleId("repository/documentation/placement"), 2),
             RuleVersion(RuleId("repository/documentation/placement"), 3),
         }
@@ -57,8 +49,6 @@ def test_only_reviewed_rule_versions_are_available_for_explicit_activation() -> 
     assert (
         review_for(RuleId("repository/artifacts/terraform-test-files"), 1) == terraform_test_review
     )
-    assert review_for(RuleId("repository/artifacts/mjs-files"), 1) == mjs_review
-    assert review_for(RuleId("repository/artifacts/mjs-files"), 2) == mjs_config_review
     for rule_id, version in (
         ("repository/artifacts/bespoke-iac-verifiers", 3),
         ("repository/artifacts/operational-script-tests", 1),

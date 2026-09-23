@@ -86,16 +86,6 @@ APPROVED_RULE_REVIEWS: tuple[tuple[RuleId, int, ApprovedRuleReview], ...] = (
         ApprovedRuleReview(reviewed_in="0e124af8dde6016278bda7db96bd6b9b1bc12a76"),
     ),
     (
-        RuleId("repository/artifacts/mjs-files"),
-        1,
-        ApprovedRuleReview(reviewed_in="b1d9b9117d4aa00199eb93232e0d92e62a4273a2"),
-    ),
-    (
-        RuleId("repository/artifacts/mjs-files"),
-        2,
-        ApprovedRuleReview(reviewed_in="5209a7483543a00cb0672a27240b1a6734c852b8"),
-    ),
-    (
         RuleId("repository/documentation/placement"),
         2,
         ApprovedRuleReview(reviewed_in="8080480deab8e7f8573f0338bb840f4e0aff28f4"),

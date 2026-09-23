@@ -64,7 +64,6 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
         RuleId("repository/artifacts/operational-script-tests"),
         RuleId("repository/artifacts/schema-derived-config-examples"),
         RuleId("repository/artifacts/terraform-test-files"),
-        RuleId("repository/artifacts/mjs-files"),
         RuleId("repository/documentation/placement"),
     }
     assert {
@@ -77,14 +76,13 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
         "319d3ee27278f2b915ee7fb063592298a8b49485",
         "6a52b0723886f591c733edc6ca2836cbedffc7ee",
         "23c6cb225373f0b33d256191d93605c6a63917b9",
-        "5209a7483543a00cb0672a27240b1a6734c852b8",
     }
     assert {
         review.status for rule_id, review in reviews.items() if rule_id not in approved_ids
     } == {"pending"}
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 17
-    assert len({rule.slug for rule in catalog.rules}) == 17
+    assert len(rule_ids) == len(set(rule_ids)) == 16
+    assert len({rule.slug for rule in catalog.rules}) == 16
     assert {
         binding.default_activation for policy in catalog.policies for binding in policy.bindings
     } == {"disabled"}
@@ -135,7 +133,7 @@ def test_catalog_graph_is_complete() -> None:
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 17
+    assert len(rule_ids) == len(set(rule_ids)) == 16
     assert {policy.policy_id for policy in catalog.policies} == {
         str(policy.policy_id) for policy in registry
     }
