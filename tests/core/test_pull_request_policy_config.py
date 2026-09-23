@@ -273,6 +273,15 @@ def test_schema_seven_parses_review_policy() -> None:
     assert policy.accepted_check_conclusions == ("success",)
 
 
+def test_versionless_manifest_uses_current_review_policy_schema() -> None:
+    content = _schema_seven_review_policy().replace(b"schema_version = 7\n", b"")
+
+    manifest = parse_manifest_bytes(content)
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.review_policy is not None
+
+
 def test_schema_seven_review_policy_defaults_to_successful_checks() -> None:
     manifest = parse_manifest_bytes(
         _schema_seven_review_policy(

@@ -680,7 +680,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         "pull_request",
         "commit_message",
     }
-    required = {"schema_version", "repository_id", "components"}
+    required = {"repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
     schema_version = _validate_manifest_schema(data)
     raw_components = _list(data["components"], "manifest.components")
@@ -743,7 +743,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
 
 
 def _validate_manifest_schema(data: dict[str, object]) -> int:
-    schema_version = data["schema_version"]
+    schema_version = data.get("schema_version", _MANIFEST_SCHEMA_VERSION)
     supported_versions = {
         _LEGACY_MANIFEST_SCHEMA_VERSION,
         _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
@@ -800,6 +800,8 @@ def load_manifest(path: Path) -> Manifest:
 def enable_commit_message_policy_bytes(content: bytes) -> bytes:
     parse_manifest_bytes(content)
     matches = tuple(_SCHEMA_VERSION_LINE.finditer(content))
+    if not matches:
+        return content
     if len(matches) != 1:
         ConfigurationError.fail("manifest must contain one canonical schema_version assignment")
     match = matches[0]

@@ -86,7 +86,8 @@ git rebase -i "$(git merge-base origin/dev HEAD)"
 ```
 
 Configure local base discovery, commit-message enforcement, and narrowly scoped
-promotion/synchronization transitions in schema 6. Strict CI reads this TOML from the exact PR
+promotion/synchronization transitions in the repository manifest. New manifests may omit
+`schema_version`; omitted versions use the current policy. Strict CI reads this TOML from the exact PR
 **base** commit, so a PR cannot raise its own limit
 or grant itself an exemption. Each transition also requires the exact destination, a same-repository
 PR, an immutable source-SHA branch suffix equal to the PR head, and proof that the head remains in
