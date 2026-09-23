@@ -68,14 +68,29 @@ def _execution_issue() -> ExecutionIssue:
     )
 
 
+def _finding() -> Diagnostic:
+    return Diagnostic(
+        rule_id=RuleId("example/rule"),
+        rule_version=1,
+        severity="error",
+        evidence_level="verified",
+        component_id=ComponentId("child"),
+        subject_kind="component",
+        observed="unexpected",
+        expected="expected",
+        message="Example finding",
+        path="services/a/child",
+        manifest_anchor="components.child",
+        remediation=Remediation("Fix the example", ("Change it.",), ("Check it.",)),
+    )
+
+
 def test_analysis_report_variants_reject_empty_required_payloads() -> None:
     finding = analyze(
-        _manifest(
-            Component(ComponentId("parent"), "service", "services/a", "@example/team"),
-            Component(ComponentId("child"), "service", "services/a/child", "@example/team"),
-        ),
+        _manifest(),
         EmptyPolicy(),
         mode=Mode.STRICT,
+        additional_diagnostics=(_finding(),),
     ).diagnostics[0]
     common = {
         "mode": Mode.STRICT,
@@ -110,45 +125,6 @@ def _manifest(*components: Component) -> Manifest:
         repository_id=RepositoryId("example-repository"),
         components=components,
     )
-
-
-def test_overlapping_roots_are_verified_errors() -> None:
-    report = analyze(
-        _manifest(
-            Component(ComponentId("service"), "service", "services/payments", "@example/payments"),
-            Component(
-                ComponentId("worker"), "worker", "services/payments/worker", "@example/payments"
-            ),
-        ),
-        EmptyPolicy(),
-        mode=Mode("strict"),
-    )
-    assert [item.rule_id for item in report.diagnostics] == ["architecture/layout/component-paths"]
-    assert report.diagnostics[0].evidence_level == "verified"
-
-
-def test_duplicate_roots_are_verified_errors() -> None:
-    report = analyze(
-        _manifest(
-            Component(ComponentId("first"), "service", "services/payments", "@example/payments"),
-            Component(ComponentId("second"), "service", "services/payments", "@example/payments"),
-        ),
-        EmptyPolicy(),
-        mode=Mode.STRICT,
-    )
-    assert [item.rule_id for item in report.diagnostics] == ["architecture/layout/component-paths"]
-
-
-def test_casefold_colliding_roots_are_verified_errors() -> None:
-    report = analyze(
-        _manifest(
-            Component(ComponentId("first"), "service", "services/Payments", "@example/payments"),
-            Component(ComponentId("second"), "service", "services/payments", "@example/payments"),
-        ),
-        EmptyPolicy(),
-        mode=Mode.STRICT,
-    )
-    assert [item.rule_id for item in report.diagnostics] == ["architecture/layout/component-paths"]
 
 
 def test_migration_swap_fails_closed() -> None:
@@ -200,12 +176,10 @@ def test_unsafe_paths_fail_closed(path: str) -> None:
 
 def test_ratchet_rejects_new_and_stale_findings() -> None:
     report = analyze(
-        _manifest(
-            Component(ComponentId("parent"), "service", "services/a", "@example/team"),
-            Component(ComponentId("child"), "service", "services/a/child", "@example/team"),
-        ),
+        _manifest(),
         EmptyPolicy(),
         mode=Mode("ratchet"),
+        additional_diagnostics=(_finding(),),
     )
     baseline = Baseline(
         repository_id=report.repository_id,
@@ -244,11 +218,10 @@ def test_scope_digest_allows_inventory_changes_to_be_ratcheted() -> None:
         ),
         EmptyPolicy(),
         mode=Mode("ratchet"),
+        additional_diagnostics=(_finding(),),
     )
     assert changed.scope_digest == clean.scope_digest
-    assert [item.rule_id for item in check_baseline(changed, baseline)] == [
-        "architecture/layout/component-paths"
-    ]
+    assert [item.rule_id for item in check_baseline(changed, baseline)] == ["example/rule"]
 
 
 def test_valid_exception_stays_visible_and_nonblocking() -> None:
@@ -256,12 +229,14 @@ def test_valid_exception_stays_visible_and_nonblocking() -> None:
         Component(ComponentId("parent"), "service", "services/a", "@example/team"),
         Component(ComponentId("child"), "service", "services/a/child", "@example/team"),
     )
-    finding = analyze(manifest, EmptyPolicy(), mode=Mode.STRICT).diagnostics[0]
+    finding = analyze(
+        manifest, EmptyPolicy(), mode=Mode.STRICT, additional_diagnostics=(_finding(),)
+    ).diagnostics[0]
     manifest = replace(
         manifest,
         exceptions=(
             ExceptionRecord(
-                rule_id=RuleId("architecture/layout/component-paths"),
+                rule_id=RuleId("example/rule"),
                 component_id=ComponentId("child"),
                 manifest_anchor=finding.manifest_anchor,
                 fingerprint=finding.fingerprint,
@@ -273,7 +248,13 @@ def test_valid_exception_stays_visible_and_nonblocking() -> None:
             ),
         ),
     )
-    report = analyze(manifest, EmptyPolicy(), mode=Mode("strict"), as_of=date(2029, 1, 1))
+    report = analyze(
+        manifest,
+        EmptyPolicy(),
+        mode=Mode("strict"),
+        as_of=date(2029, 1, 1),
+        additional_diagnostics=(_finding(),),
+    )
     assert report.diagnostics[0].disposition == "excepted"
     assert report.diagnostics[0].exception is not None
     assert report.summary["errors"] == 0

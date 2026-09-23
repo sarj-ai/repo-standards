@@ -20,42 +20,24 @@ class RuleCategory:
     topics: tuple[RuleTopic, ...]
 
 
-ARCHITECTURE = RuleCategoryId("architecture")
 CHANGE_SAFETY = RuleCategoryId("repository")
 API_CONTRACTS = RuleCategoryId("api-contracts")
 
-DEPENDENCY_BOUNDARIES = RuleTopicId("dependency-boundaries")
-REPOSITORY_LAYOUT = RuleTopicId("repository-layout")
-NAMING = RuleTopicId("naming")
-REUSE = RuleTopicId("reuse")
-COMPONENT_SCHEMA = RuleTopicId("component-schema")
-MIGRATIONS = RuleTopicId("migrations")
-BASELINES = RuleTopicId("baselines")
-EXCEPTIONS = RuleTopicId("exceptions")
-API_SECURITY = RuleTopicId("api-security")
+ARTIFACTS = RuleTopicId("artifacts")
+DOCUMENTATION = RuleTopicId("documentation")
 HTTP_SEMANTICS = RuleTopicId("http-semantics")
 GENERATED_ARTIFACTS = RuleTopicId("generated-artifacts")
 ERROR_CONTRACTS = RuleTopicId("error-contracts")
-API_LIFECYCLE = RuleTopicId("api-lifecycle")
 REFERENCES = RuleTopicId("references")
 
 CATEGORIES = (
-    RuleCategory(
-        category_id=ARCHITECTURE,
-        label="Architecture",
-        order=10,
-        topics=(
-            RuleTopic(DEPENDENCY_BOUNDARIES, "Dependencies", 10),
-            RuleTopic(REPOSITORY_LAYOUT, "Components & layout", 20),
-            RuleTopic(COMPONENT_SCHEMA, "Naming & identity", 30),
-        ),
-    ),
     RuleCategory(
         category_id=CHANGE_SAFETY,
         label="Repository changes",
         order=20,
         topics=(
-            RuleTopic(MIGRATIONS, "Migrations", 10),
+            RuleTopic(ARTIFACTS, "Artifacts", 10),
+            RuleTopic(DOCUMENTATION, "Documentation", 20),
         ),
     ),
     RuleCategory(

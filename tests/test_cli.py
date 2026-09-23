@@ -1128,13 +1128,13 @@ def test_capabilities_are_machine_discoverable() -> None:
 def test_rules_are_filterable_and_paginated() -> None:
     result = runner.invoke(
         app,
-        ["rules", "--rule-prefix", "architecture/", "--severity", "error", "--limit", "2"],
+        ["rules", "--rule-prefix", "repository/", "--severity", "error", "--limit", "2"],
     )
     assert result.exit_code == 0
     payload = _json_object(result.stdout)
     rules = _object_list(payload["rules"])
     assert len(rules) == 2
-    assert all(str(item["rule_id"]).startswith("architecture/") for item in rules)
+    assert all(str(item["rule_id"]).startswith("repository/") for item in rules)
     assert all(item["default_severity"] == "error" for item in rules)
     assert _object(payload["page"])["next_cursor"] == "2"
 

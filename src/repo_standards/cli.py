@@ -33,7 +33,6 @@ from repo_standards.core.inspection import (
     load_repository_snapshot,
     read_tracked_blob_contents,
 )
-from repo_standards.core.migration import migration_diagnostics
 from repo_standards.core.models import (
     AnalysisReport,
     Diagnostic,
@@ -2148,7 +2147,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         policy,
         mode=mode,
         as_of=_parse_date(as_of),
-        additional_diagnostics=migration_diagnostics(snapshot) + repository_diagnostics,
+        additional_diagnostics=repository_diagnostics,
         enabled_rules=(
             activated_rule_ids if snapshot.manifest.enabled_rules else activated_rule_versions
         )(

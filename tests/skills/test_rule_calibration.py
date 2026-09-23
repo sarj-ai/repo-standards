@@ -47,9 +47,9 @@ def _git(repository: Path, *arguments: str) -> str:
 def _fixture(tmp_path: Path) -> _CalibrationFixture:
     repository = tmp_path / "private-consumer-name"
     repository.mkdir()
-    (repository / "docs").mkdir()
+    (repository / "misc").mkdir()
     (repository / "README.md").write_text("# Entry\n", encoding="utf-8")
-    (repository / "docs/orphan.md").write_text("# Orphan\n", encoding="utf-8")
+    (repository / "misc/orphan.md").write_text("# Orphan\n", encoding="utf-8")
     _git(repository, "init", "--quiet")
     _git(repository, "add", ".")
     _git(
@@ -110,7 +110,7 @@ def test_calibration_isolated_worker_redacts_private_report(  # ruff: ignore[too
         "--corpus",
         str(corpus),
         "--rule",
-        "repository/documentation/reachability",
+        "repository/documentation/placement",
         "--fixtures-passed",
         "--private-output",
         str(private_output),
@@ -121,7 +121,7 @@ def test_calibration_isolated_worker_redacts_private_report(  # ruff: ignore[too
     public = public_output.read_text(encoding="utf-8")
     assert str(repository) not in public
     assert "private-consumer-name" not in public
-    assert "docs/orphan.md" not in public
+    assert "misc/orphan.md" not in public
     public_payload = _JSON_OBJECT.validate_json(public)
     public_private = _JSON_OBJECT.validate_python(public_payload["private"])
     assert public_private["findings"] == 1
@@ -147,7 +147,7 @@ def test_calibration_isolated_worker_redacts_private_report(  # ruff: ignore[too
         "--corpus",
         str(corpus),
         "--rule",
-        "repository/documentation/reachability",
+        "repository/documentation/placement",
         "--fixtures-passed",
         "--labels",
         str(labels),
