@@ -414,7 +414,7 @@ def verify_installed_distributions(
 
     execute = _run_release_command if run_command is None else run_command
     imports = (
-        "import repo_standards, repo_standards.catalog, repo_standards.openapi, "
+        "import repo_standards, repo_standards.catalog, "
         "repo_standards.pull_request, repo_standards.repository"
     )
     artifacts = (
