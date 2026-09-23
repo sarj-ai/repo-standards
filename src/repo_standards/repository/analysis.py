@@ -8,7 +8,6 @@ from repo_standards.core.catalog import core_rules
 from repo_standards.core.engine import analyze, check_baseline, classify_baseline
 from repo_standards.core.errors import ConfigurationError, ManifestAbsentError
 from repo_standards.core.inspection import git_index_identity, load_repository_snapshot
-from repo_standards.core.migration import migration_diagnostics
 from repo_standards.core.models import (
     AnalysisReport,
     ExecutionIssue,
@@ -69,7 +68,7 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         policy,
         mode=request.mode,
         as_of=request.as_of,
-        additional_diagnostics=migration_diagnostics(snapshot) + repository_diagnostics,
+        additional_diagnostics=repository_diagnostics,
         enabled_rules=(
             activated_rule_ids if snapshot.manifest.enabled_rules else activated_rule_versions
         )(

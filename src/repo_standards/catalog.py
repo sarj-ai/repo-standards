@@ -93,18 +93,12 @@ _RULE_SLUGS = types.MappingProxyType(
     "api/errors/problem-details": "problem-details",
     "api/http/message-semantics": "http-message-semantics",
     "api/references/local-resolution": "local-references",
-    "architecture/dependencies/policy": "dependency-policy",
-    "architecture/layout/component-paths": "component-paths",
-    "architecture/schema/component": "component-identity",
-    "repository/migration/consistency": "migration-consistency",
     "repository/artifacts/terraform-examples": "terraform-examples",
     "repository/artifacts/schema-derived-config-examples": "schema-derived-config-examples",
     "repository/artifacts/bespoke-iac-verifiers": "bespoke-iac-verifiers",
     "repository/artifacts/operational-script-tests": "operational-script-tests",
     "repository/artifacts/terraform-test-files": "terraform-test-files",
     "repository/documentation/placement": "documentation-placement",
-    "repository/documentation/reachability": "documentation-reachability",
-    "architecture/delivery/authority": "deployment-authority",
     }
 )
 

@@ -14,7 +14,6 @@ from repo_standards.core.inspection import (
     parse_workspace_metadata as parse_workspace_metadata,
     read_tracked_blob_contents as read_tracked_blob_contents,
 )
-from repo_standards.core.migration import migration_diagnostics as migration_diagnostics
 from repo_standards.core.models import (
     AnalysisReport as AnalysisReport,
     Manifest as Manifest,

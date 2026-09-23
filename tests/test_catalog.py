@@ -81,8 +81,8 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
         review.status for rule_id, review in reviews.items() if rule_id not in approved_ids
     } == {"pending"}
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 16
-    assert len({rule.slug for rule in catalog.rules}) == 16
+    assert len(rule_ids) == len(set(rule_ids)) == 10
+    assert len({rule.slug for rule in catalog.rules}) == 10
     assert {
         binding.default_activation for policy in catalog.policies for binding in policy.bindings
     } == {"disabled"}
@@ -99,7 +99,7 @@ def test_catalog_rule_versions_are_positive() -> None:
 def test_catalog_policy_binding_review_status_must_match_its_rule() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
     payload = catalog.model_dump(mode="python")
-    payload["policies"][0]["bindings"][0]["review_status"] = "approved"
+    payload["policies"][0]["bindings"][0]["review_status"] = "pending"
 
     with pytest.raises(ValidationError, match="policy binding does not match its rule"):
         Catalog.model_validate(payload)
@@ -133,7 +133,7 @@ def test_catalog_graph_is_complete() -> None:
     expected_rule_ids.update(rule.rule_id for rule in openapi_rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
     assert rule_ids == sorted(expected_rule_ids)
-    assert len(rule_ids) == len(set(rule_ids)) == 16
+    assert len(rule_ids) == len(set(rule_ids)) == 10
     assert {policy.policy_id for policy in catalog.policies} == {
         str(policy.policy_id) for policy in registry
     }
@@ -188,7 +188,7 @@ def test_catalog_rules_have_complete_clarity_taxonomy_and_examples() -> None:
     }
     fixture_ids: list[str] = []
 
-    assert category_ids == {"architecture", "api-contracts", "repository"}
+    assert category_ids == {"api-contracts", "repository"}
     assert {rule.category_id for rule in catalog.rules} == category_ids
     assert {rule.topic_id for rule in catalog.rules} == set(topic_parents)
     for rule in catalog.rules:

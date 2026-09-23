@@ -21,62 +21,15 @@ from .models import (
     RatchetClassification,
     RatchetComparison,
     RatchetEntry,
-    Remediation,
-    RuleId,
 )
 from .rule_reviews import RuleVersion
 
 
 def core_diagnostics(manifest: Manifest) -> tuple[Diagnostic, ...]:
     by_id = {item.component_id: item for item in manifest.components}
-    diagnostics = list(_overlap_diagnostics(manifest))
     _validate_dependencies(manifest, by_id)
     _validate_migrations(manifest, by_id)
-    return tuple(diagnostics)
-
-
-def _overlap_diagnostics(manifest: Manifest) -> tuple[Diagnostic, ...]:
-    diagnostics: list[Diagnostic] = []
-    ordered = sorted(
-        manifest.components, key=lambda item: (item.path.casefold(), item.path, item.component_id)
-    )
-    ownership_stack: list[Component] = []
-    for component in ordered:
-        while ownership_stack and not (
-            component.path.casefold() == ownership_stack[-1].path.casefold()
-            or component.path.casefold().startswith(f"{ownership_stack[-1].path.casefold()}/")
-        ):
-            ownership_stack.pop()
-        if ownership_stack:
-            owner = ownership_stack[-1]
-            diagnostics.append(
-                Diagnostic(
-                    rule_id=RuleId("architecture/layout/component-paths"),
-                    rule_version=1,
-                    severity="error",
-                    evidence_level="verified",
-                    component_id=component.component_id,
-                    subject_kind="component-root",
-                    observed=f"{owner.path} contains {component.path}",
-                    expected="component roots must be disjoint",
-                    message=f"component root overlaps {owner.component_id}",
-                    path=component.path,
-                    manifest_anchor=f"components.{component.component_id}.path",
-                    remediation=Remediation(
-                        summary="Give each component one disjoint ownership root.",
-                        steps=(
-                            "Choose which component owns the overlapping files.",
-                            (
-                                "Move the other component to a disjoint root or merge "
-                                "the declarations."
-                            ),
-                        ),
-                        validation=("Run repo-standards check again.",),
-                    ),
-                )
-            )
-        ownership_stack.append(component)
-    return tuple(diagnostics)
+    return ()
 
 
 def _validate_dependencies(manifest: Manifest, by_id: dict[ComponentId, Component]) -> None:
