@@ -43,7 +43,7 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
       .toSorted((left, right) => left.order - right.order)
       .map((topicValue) => {
         const rules = catalog.rules
-          .filter((rule) => rule.category_id === categoryValue.category_id && rule.topic_id === topicValue.topic_id)
+          .filter((rule) => rule.topic_id === topicValue.topic_id)
           .toSorted((left, right) => left.title.localeCompare(right.title, 'en'))
           .map((rule) => ({
             rule,
@@ -69,7 +69,8 @@ export const pendingRules = catalog.rules.filter((rule) => hasReviewStatus(rule,
 const approvedRuleIds = new Set(approvedRules.map((rule) => rule.rule_id));
 
 export function rulePage(rule: Rule) {
-  const categoryValue = referenceCatalog.find((item) => item.category.category_id === rule.category_id);
+  const categoryValue = referenceCatalog.find((item) =>
+    item.topics.some((topic) => topic.topic.topic_id === rule.topic_id));
   const topicValue = categoryValue?.topics.find((item) => item.topic.topic_id === rule.topic_id);
   const peerRules = referenceCatalog.flatMap((category) => category.topics)
     .flatMap((topic) => topic.rules)

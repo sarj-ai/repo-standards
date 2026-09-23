@@ -21,14 +21,9 @@ class RuleCategory:
 
 
 CHANGE_SAFETY = RuleCategoryId("repository")
-API_CONTRACTS = RuleCategoryId("api-contracts")
 
 ARTIFACTS = RuleTopicId("artifacts")
 DOCUMENTATION = RuleTopicId("documentation")
-HTTP_SEMANTICS = RuleTopicId("http-semantics")
-GENERATED_ARTIFACTS = RuleTopicId("generated-artifacts")
-ERROR_CONTRACTS = RuleTopicId("error-contracts")
-REFERENCES = RuleTopicId("references")
 
 CATEGORIES = (
     RuleCategory(
@@ -38,17 +33,6 @@ CATEGORIES = (
         topics=(
             RuleTopic(ARTIFACTS, "Artifacts", 10),
             RuleTopic(DOCUMENTATION, "Documentation", 20),
-        ),
-    ),
-    RuleCategory(
-        category_id=API_CONTRACTS,
-        label="API contracts",
-        order=30,
-        topics=(
-            RuleTopic(REFERENCES, "References", 10),
-            RuleTopic(HTTP_SEMANTICS, "HTTP", 20),
-            RuleTopic(ERROR_CONTRACTS, "Errors", 30),
-            RuleTopic(GENERATED_ARTIFACTS, "Generated artifacts", 40),
         ),
     ),
 )
