@@ -7,7 +7,6 @@ const payload = {
   status: 'ok',
   commit: sourceRevision,
   catalogVersion: catalog.catalog_version,
-  catalogSchemaVersion: catalog.schema_version,
   catalogDigest: catalog.provenance.content_digest,
   rules: catalog.rules.length,
   commands: catalog.commands.length,

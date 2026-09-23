@@ -60,21 +60,12 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
     };
   });
 
-function hasReviewStatus(rule: { readonly review: { readonly status: string } }, status: string): boolean {
-  return rule.review.status === status;
-}
-
-export const approvedRules = catalog.rules.filter((rule) => hasReviewStatus(rule, 'approved'));
-export const pendingRules = catalog.rules.filter((rule) => hasReviewStatus(rule, 'pending'));
-const approvedRuleIds = new Set(approvedRules.map((rule) => rule.rule_id));
-
 export function rulePage(rule: Rule) {
   const categoryValue = referenceCatalog.find((item) =>
     item.topics.some((topic) => topic.topic.topic_id === rule.topic_id));
   const topicValue = categoryValue?.topics.find((item) => item.topic.topic_id === rule.topic_id);
   const peerRules = referenceCatalog.flatMap((category) => category.topics)
-    .flatMap((topic) => topic.rules)
-    .filter((item) => hasReviewStatus(item.rule, rule.review.status));
+    .flatMap((topic) => topic.rules);
   const index = peerRules.findIndex((item) => item.rule.rule_id === rule.rule_id);
   if (categoryValue === undefined || topicValue === undefined || index < 0) {
     throw new TypeError(`Rule is not present in the reference catalog: ${rule.rule_id}`);
@@ -94,10 +85,8 @@ export function referenceSidebar() {
     {
       label: 'Rules',
       items: [
-        { label: `Approved (${String(approvedRules.length)})`, link: '/rules/' },
-        { label: `Review (${String(pendingRules.length)})`, link: '/review/' },
+        { label: `All (${String(catalog.rules.length)})`, link: '/rules/' },
         ...referenceCatalog
-          .filter((value) => value.topics.some((topic) => topic.rules.some(({ rule }) => approvedRuleIds.has(rule.rule_id))))
           .map((value) => ({
             label: value.category.label,
             link: categoryHref(value.category.category_id),

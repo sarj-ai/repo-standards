@@ -40,7 +40,7 @@ async function verifySearchDiscovery(
     [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/gu)].map((match) => match[1]),
   );
   const expected = [
-    'https://repo-standards.sarj.ai/review/',
+    'https://repo-standards.sarj.ai/rules/',
     ...catalog.rules.map((rule: { slug: string }) => `https://repo-standards.sarj.ai/rules/${rule.slug}/`),
   ];
   for (const location of expected) {
@@ -65,14 +65,6 @@ async function verifySearchDiscovery(
     }
   }
 
-  for (const rule of catalog.rules.filter((candidate: { review: { status: string } }) => candidate.review.status === 'pending')) {
-    const path = `rules/${rule.slug}/index.html`;
-    const document = pagesByPath.get(path) ?? '';
-    if (!document.includes('Pending review') || !document.includes('not yet approved for enforcement')) {
-      throw new Error(`Pending rule is missing search-visible review status: ${rule.slug}`);
-    }
-  }
-
   const notFound = pagesByPath.get('404.html') ?? '';
   if (!/name="robots" content="[^"]*noindex/iu.test(notFound)) {
     throw new Error('The 404 page must remain noindex.');
@@ -83,11 +75,7 @@ async function verifySidebarCategories(
   catalog: DiscoveryCatalog,
   pagesByPath: ReadonlyMap<string, string>,
 ): Promise<void> {
-  const approvedCategoryIds = new Set(
-    catalog.rules
-      .filter((rule) => rule.review.status === 'approved')
-      .map((rule) => rule.categoryId),
-  );
+  const categoryIds = new Set(catalog.rules.map((rule) => rule.categoryId));
   const rulesIndex = pagesByPath.get('rules/index.html') ?? '';
   const stylesheet = await readFile(new URL('../src/styles/global.css', import.meta.url), 'utf8');
   if (
@@ -97,7 +85,7 @@ async function verifySidebarCategories(
   ) {
     throw new Error('Sidebar categories are missing their shared decorative mark contract.');
   }
-  for (const category of catalog.categories.filter(({ id }) => approvedCategoryIds.has(id))) {
+  for (const category of catalog.categories.filter(({ id }) => categoryIds.has(id))) {
     const hook = `data-sidebar-category="${category.id}"`;
     if (!rulesIndex.includes(hook)) {
       throw new Error(`Rendered sidebar is missing the ${category.label} category hook.`);
@@ -120,7 +108,6 @@ interface DiscoveryCategory {
 
 interface DiscoveryRule {
   readonly categoryId: string;
-  readonly review: { readonly status: string };
   readonly slug: string;
 }
 
@@ -139,12 +126,10 @@ function parseDiscoveryCatalog(value: unknown): DiscoveryCatalog {
       !isRecord(candidate)
       || typeof candidate.slug !== 'string'
       || typeof candidate.category_id !== 'string'
-      || !isRecord(candidate.review)
-      || typeof candidate.review.status !== 'string'
     ) {
       throw new Error('Generated catalog contains an invalid rule descriptor.');
     }
-    return { categoryId: candidate.category_id, slug: candidate.slug, review: { status: candidate.review.status } };
+    return { categoryId: candidate.category_id, slug: candidate.slug };
   });
   return { categories, rules };
 }

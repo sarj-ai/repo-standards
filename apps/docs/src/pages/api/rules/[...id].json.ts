@@ -1,6 +1,6 @@
 import type { APIRoute, GetStaticPaths } from 'astro';
 
-import { catalog } from '../../../../lib/catalog';
+import { catalog } from '../../../lib/catalog';
 
 export const getStaticPaths = (() => catalog.rules.map((rule) => ({
   params: { id: rule.rule_id },

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from repo_standards.core.models import RuleCategoryId, RuleTaxonomy, RuleTopicId
+from repo_standards.core.models import RuleCategoryId, RuleTaxonomy
 
 
 @dataclass(frozen=True, slots=True)
 class RuleTopic:
-    topic_id: RuleTopicId
+    topic_id: str
     label: str
     order: int
 
@@ -22,8 +22,8 @@ class RuleCategory:
 
 CHANGE_SAFETY = RuleCategoryId("repository")
 
-ARTIFACTS = RuleTopicId("artifacts")
-DOCUMENTATION = RuleTopicId("documentation")
+ARTIFACTS = "artifacts"
+DOCUMENTATION = "documentation"
 
 CATEGORIES = (
     RuleCategory(
@@ -38,5 +38,5 @@ CATEGORIES = (
 )
 
 
-def taxonomy(category_id: RuleCategoryId, topic_id: RuleTopicId) -> RuleTaxonomy:
+def taxonomy(category_id: RuleCategoryId, topic_id: str) -> RuleTaxonomy:
     return RuleTaxonomy(category_id=category_id, topic_id=topic_id)

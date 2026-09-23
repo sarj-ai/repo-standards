@@ -11,7 +11,6 @@ import pytest
 from typer.testing import CliRunner
 
 from repo_standards.catalog import (
-    ApprovedRuleReviewDescriptor,
     Catalog,
     build_catalog,
     catalog_schema,
@@ -19,7 +18,7 @@ from repo_standards.catalog import (
 from repo_standards.cli import app
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.catalog import core_rules
-from repo_standards.core.models import JSONValue, RuleId
+from repo_standards.core.models import JSONValue
 from repo_standards.policy_sarj import SarjPolicy
 
 
@@ -55,29 +54,7 @@ def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> 
     expected_rule_ids.update(str(rule.rule_id) for policy in registry for rule in policy.rules())
     rule_ids = [rule.rule_id for rule in catalog.rules]
 
-    assert catalog.schema_version == 7
-    reviews = {rule.rule_id: rule.review for rule in catalog.rules}
-    approved_ids = {
-        RuleId("repository/artifacts/bespoke-iac-verifiers"),
-        RuleId("repository/artifacts/operational-script-tests"),
-        RuleId("repository/artifacts/schema-derived-config-examples"),
-        RuleId("repository/artifacts/terraform-test-files"),
-        RuleId("repository/documentation/placement"),
-    }
-    assert {
-        rule_id for rule_id, review in reviews.items() if review.status == "approved"
-    } == approved_ids
-    assert {
-        review.reviewed_in for rule_id, review in reviews.items() if rule_id in approved_ids
-    } == {
-        "0e124af8dde6016278bda7db96bd6b9b1bc12a76",
-        "319d3ee27278f2b915ee7fb063592298a8b49485",
-        "6a52b0723886f591c733edc6ca2836cbedffc7ee",
-        "23c6cb225373f0b33d256191d93605c6a63917b9",
-    }
-    assert {
-        review.status for rule_id, review in reviews.items() if rule_id not in approved_ids
-    } == {"pending"}
+    assert "schema_version" not in Catalog.model_fields
     assert rule_ids == sorted(expected_rule_ids)
     assert len(rule_ids) == len(set(rule_ids)) == 6
     assert len({rule.slug for rule in catalog.rules}) == 6
@@ -94,10 +71,10 @@ def test_catalog_rule_versions_are_positive() -> None:
         Catalog.model_validate(payload)
 
 
-def test_catalog_policy_binding_review_status_must_match_its_rule() -> None:
+def test_catalog_policy_binding_version_must_match_its_rule() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
     payload = catalog.model_dump(mode="python")
-    payload["policies"][0]["bindings"][0]["review_status"] = "pending"
+    payload["policies"][0]["bindings"][0]["rule_version"] = 99
 
     with pytest.raises(ValidationError, match="policy binding does not match its rule"):
         Catalog.model_validate(payload)
@@ -114,13 +91,6 @@ def test_catalog_rule_slugs_are_valid_and_unique() -> None:
     payload["rules"][0]["slug"] = "Not a slug"
     with pytest.raises(ValidationError, match="string_pattern_mismatch"):
         Catalog.model_validate(payload)
-
-
-def test_approved_review_descriptor_requires_immutable_object_id() -> None:
-    with pytest.raises(ValidationError, match="string_pattern_mismatch"):
-        ApprovedRuleReviewDescriptor(
-            reviewed_in="mutable-branch",
-        )
 
 
 def test_catalog_graph_is_complete() -> None:
@@ -219,7 +189,6 @@ def test_rule_wire_contract_contains_only_compact_fields() -> None:
         "references",
         "examples",
         "source",
-        "review",
     }
     assert set(rule.examples[0].model_dump()) == {
         "id",
@@ -244,18 +213,6 @@ def test_catalog_and_every_embedded_schema_are_valid_json_schemas() -> None:
         Draft202012Validator.check_schema(document)
 
 
-def test_catalog_schema_encodes_approved_review_states() -> None:
-    schema = catalog_schema()
-    definitions = schema["$defs"]
-    assert isinstance(definitions, dict)
-
-    approved = _JSON_OBJECT.validate_python(
-        definitions["ApprovedRuleReviewDescriptor"], strict=True
-    )
-    properties = _JSON_OBJECT.validate_python(approved["properties"], strict=True)
-    assert set(properties) == {"status", "reviewed_in"}
-
-
 def test_catalog_schema_documents_exactly_match_their_cli_selectors() -> None:
     catalog = build_catalog(app, package_version="9.8.7")
 
@@ -263,18 +220,6 @@ def test_catalog_schema_documents_exactly_match_their_cli_selectors() -> None:
         result = runner.invoke(app, ["schema", descriptor.cli_selector])
         assert result.exit_code == 0
         assert json.loads(result.stdout) == descriptor.document
-
-
-def test_catalog_schema_descriptor_versions_match_public_contracts() -> None:
-    versions = {
-        descriptor.schema_id: descriptor.schema_version
-        for descriptor in build_catalog(app, package_version="9.8.7").schemas
-    }
-
-    assert versions == {
-        "catalog": 7,
-        "report": 3,
-    }
 
 
 def test_catalog_cli_emits_canonical_schema_valid_json() -> None:

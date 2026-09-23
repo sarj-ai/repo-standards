@@ -12,9 +12,7 @@ import pytest
 from typer.testing import CliRunner
 
 from repo_standards.cli import app
-from repo_standards.core import rule_reviews
 from repo_standards.core.models import RuleId
-from repo_standards.core.rule_reviews import ApprovedRuleReview
 
 
 runner = CliRunner()
@@ -746,16 +744,9 @@ def test_check_staged_reads_index_and_ignores_unstaged_bytes(tmp_path: Path) -> 
     assert _object(staged_payload["provenance"])["kind"] == "git-index"
 
 
-def test_check_staged_blocks_a_new_forbidden_artifact(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_check_staged_blocks_a_new_forbidden_artifact(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST)
     rule_id = RuleId("repository/artifacts/bespoke-iac-verifiers")
-    monkeypatch.setattr(
-        rule_reviews,
-        "APPROVED_RULE_REVIEWS",
-        ((rule_id, 5, ApprovedRuleReview(reviewed_in="a" * 40)),),
-    )
     verifier = tmp_path / "iac" / "verify-plan.mjs"
     verifier.parent.mkdir()
     verifier.write_text("export {};\n", encoding="utf-8")
@@ -793,7 +784,7 @@ def test_pending_report_findings_are_disabled(tmp_path: Path) -> None:
     assert _object_list(report["diagnostics"]) == []
 
 
-def test_unapproved_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
+def test_unavailable_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
     _manifest(tmp_path, GOOD_MANIFEST)
     result = runner.invoke(
         app,
@@ -801,7 +792,7 @@ def test_unapproved_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
             "report",
             str(tmp_path),
             "--enable-rule",
-            "architecture/dependencies/policy@1",
+            "unknown/rule/id@1",
             "--format",
             "json",
         ],
@@ -810,7 +801,7 @@ def test_unapproved_rule_cannot_be_explicitly_activated(tmp_path: Path) -> None:
     report = _json_object(result.stdout)
     assert result.exit_code == 2
     assert report["conclusion"] == "inconclusive"
-    assert "not approved for activation" in str(report)
+    assert "selectors are obsolete" in str(report)
 
 
 @pytest.mark.parametrize(
@@ -900,13 +891,13 @@ def test_manifest_rejects_versioned_rule_selectors(tmp_path: Path) -> None:
     [
         pytest.param(
             "repository/artifacts/bespoke-iac-verifiers@2",
-            "not approved for activation",
-            id="unapproved-superseded-version",
+            "selectors are obsolete",
+            id="superseded-version",
         ),
         pytest.param(
             "repository/artifacts/bespoke-iac-verifiers@3",
             "selectors are obsolete",
-            id="approved-obsolete-version",
+            id="obsolete-version",
         ),
     ],
 )

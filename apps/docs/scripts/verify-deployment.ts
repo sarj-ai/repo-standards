@@ -70,7 +70,7 @@ async function deploymentAtAttempt({
   const query = `?commit=${expectedCommit}&attempt=${String(attempt)}`;
   const [healthResponse, catalogResponse] = await Promise.all([
     request(new globalThis.URL(`health.json${query}`, baseUrl), { cache: 'no-store' }),
-    request(new globalThis.URL(`api/v7/catalog.json${query}`, baseUrl), { cache: 'no-store' }),
+    request(new globalThis.URL(`api/catalog.json${query}`, baseUrl), { cache: 'no-store' }),
   ]);
   if (!healthResponse.ok || !catalogResponse.ok) {
     throw new Error('reference endpoints are unavailable');
