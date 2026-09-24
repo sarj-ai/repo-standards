@@ -100,8 +100,7 @@ def _commit(repository: Path, message: str) -> str:
 
 
 def _manifest(repository_id: str) -> str:
-    return f"""schema_version = 4
-repository_id = "{repository_id}"
+    return f"""repository_id = "{repository_id}"
 enabled_rules = []
 components = []
 """

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from enum import StrEnum
 from importlib import metadata
@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import Annotated, ClassVar, Literal, NamedTuple, NoReturn, TypeGuard
+from typing import Annotated, ClassVar, Literal, NamedTuple, NewType, NoReturn, TypeGuard
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import typer
@@ -33,6 +33,7 @@ from repo_standards.core.inspection import (
 )
 from repo_standards.core.models import (
     AnalysisReport,
+    Baseline,
     Diagnostic,
     ExecutionIssue,
     FindingsReport,
@@ -74,11 +75,7 @@ from repo_standards.core.review_policy import (
     ReviewState,
     evaluate_review_policy,
 )
-from repo_standards.core.rule_reviews import (
-    RuleVersion,
-    activated_rule_ids,
-    activated_rule_versions,
-)
+from repo_standards.core.rule_reviews import RuleVersion, activated_rule_ids
 from repo_standards.policy_sarj import SarjPolicy
 from repo_standards.pull_request._context import NotApplicable
 from repo_standards.pull_request._inputs import (
@@ -132,6 +129,12 @@ class _CompletedAnalysis(NamedTuple):
     ratchet_state: Mapping[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class _TrustedReviewPolicy:
+    pull_request: PullRequestConfig
+    config: PullRequestReviewPolicyConfig
+
+
 class _PageOptions(NamedTuple):
     limit: int
     offset: int
@@ -174,6 +177,10 @@ class _ReviewPolicyReviewInput(BaseModel):
     commit_sha: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
 
 
+BaseRepositoryId = NewType("BaseRepositoryId", int)
+HeadRepositoryId = NewType("HeadRepositoryId", int)
+
+
 class _ReviewPolicyEvidenceInput(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -182,8 +189,8 @@ class _ReviewPolicyEvidenceInput(BaseModel):
     current_head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     base_ref: str = Field(min_length=1, max_length=1_024)
     head_ref: str = Field(min_length=1, max_length=1_024)
-    base_repository_id: int = Field(gt=0)
-    head_repository_id: int = Field(gt=0)
+    base_repository_id: BaseRepositoryId = Field(gt=0)
+    head_repository_id: HeadRepositoryId = Field(gt=0)
     is_draft: bool
     author_login: str = Field(min_length=1, max_length=256)
     author_is_bot: bool
@@ -638,6 +645,18 @@ def _render_pull_request_documentation(result: PullRequestDocumentation) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _trusted_review_policy(
+    root: Path, manifest: Path | None
+) -> _TrustedReviewPolicy:
+    manifest_path = manifest or Path(".repo-standards/repository.toml")
+    if not manifest_path.is_absolute():
+        manifest_path = root / manifest_path
+    configured_pull_request = load_manifest(manifest_path).pull_request
+    if configured_pull_request is None or configured_pull_request.review_policy is None:
+        ConfigurationError.fail("trusted manifest must define pull_request.review_policy")
+    return _TrustedReviewPolicy(configured_pull_request, configured_pull_request.review_policy)
+
+
 @pull_request_app.command("review-policy")
 def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - trusted inputs stay explicit
     root: Annotated[Path, typer.Argument()] = Path(),
@@ -649,7 +668,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
     ] = None,
     manifest: Annotated[
         Path | None,
-        typer.Option(help="Trusted schema 7 repository manifest."),
+        typer.Option(help="Trusted repository manifest."),
     ] = None,
     generated_attribute: Annotated[
         str,
@@ -675,16 +694,9 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         )
     try:  # ruff: ignore[too-many-statements-in-try-clause] - one fail-closed evidence transaction
         resolved_root = root.resolve(strict=True)
-        manifest_path = manifest or Path(".repo-standards/repository.toml")
-        if not manifest_path.is_absolute():
-            manifest_path = resolved_root / manifest_path
-        configured_manifest = load_manifest(manifest_path)
-        configured_pull_request = configured_manifest.pull_request
-        if configured_pull_request is None or configured_pull_request.review_policy is None:
-            ConfigurationError.fail(
-                "trusted manifest must define pull_request.review_policy using schema version 7"
-            )
-        configured = configured_pull_request.review_policy
+        trusted_policy = _trusted_review_policy(resolved_root, manifest)
+        configured_pull_request = trusted_policy.pull_request
+        configured = trusted_policy.config
         provider = _load_review_policy_evidence(evidence)
         _require_complete_review_policy_evidence(provider)
         if provider.evaluated_head_sha != head:
@@ -759,7 +771,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
             str(error),
             phase="analysis",
             remediation=(
-                "Verify the schema 7 manifest, exact revisions, and complete provider evidence."
+                "Verify the repository manifest, exact revisions, and complete provider evidence."
             ),
         )
     payload = _pull_request_review_policy_payload(
@@ -1183,7 +1195,7 @@ def _resolve_pull_request_commits_request(  # ruff: ignore[too-many-arguments] -
         head=inputs.context.head_sha,
         maximum_commits=history.maximum_commits,
         commit_message_enforcement=(
-            manifest.commit_message.enforcement if manifest.commit_message is not None else None
+            manifest.commit_message.enforcement
         ),
     )
 
@@ -1223,7 +1235,7 @@ def _analyze_resolved_pull_request_inputs(
         transition_exemptions=transition_exemptions,
         commit_message_enforcement=(
             inputs.manifest.commit_message.enforcement
-            if inputs.manifest is not None and inputs.manifest.commit_message is not None
+            if inputs.manifest is not None
             else None
         ),
     )
@@ -1761,10 +1773,7 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
         list[str] | None,
         typer.Option(
             "--enable-rule",
-            help=(
-                "Activate one current rule-id@version selector for a legacy manifest "
-                "or calibration run."
-            ),
+            help="Activate a current rule ID for this run.",
         ),
     ] = None,
 ) -> None:
@@ -1793,7 +1802,7 @@ def report_command(
         list[str] | None,
         typer.Option(
             "--enable-rule",
-            help="Activate one current rule-id@version selector for this run.",
+            help="Activate a current rule ID for this run.",
         ),
     ] = None,
 ) -> None:
@@ -1923,9 +1932,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         mode=mode,
         as_of=_parse_date(as_of),
         additional_diagnostics=repository_diagnostics,
-        enabled_rules=(
-            activated_rule_ids if snapshot.manifest.enabled_rules else activated_rule_versions
-        )(
+        enabled_rules=activated_rule_ids(
             snapshot.manifest.enabled_rules or enabled_rule_ids,
             current_rules=frozenset(
                 RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()
@@ -1940,11 +1947,16 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
             {"status": "not-requested", "path": None},
             {"status": "not-requested"},
         )
+    if snapshot.baseline is None:
+        message = "baseline is absent from the selected Git tree"
+        raise BaselineError(message)
+    return _complete_ratchet_analysis(report, snapshot.baseline, baseline_path)
+
+
+def _complete_ratchet_analysis(
+    report: AnalysisReport, baseline: Baseline, baseline_path: str
+) -> _CompletedAnalysis:
     try:
-        baseline = snapshot.baseline
-        if baseline is None:
-            message = "baseline is absent from the selected Git tree"
-            raise BaselineError(message)
         regressions = check_baseline(report, baseline)
     except ConfigurationError as error:
         raise BaselineError(str(error)) from error

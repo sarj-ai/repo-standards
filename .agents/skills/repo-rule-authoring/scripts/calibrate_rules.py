@@ -132,8 +132,6 @@ def _worker(root: Path, manifest_path: Path, rule_id: str) -> int:
     selected = [item for item in diagnostics if item.rule_id == rule_id]
     payload = {
         "tracked_files": snapshot.inspection.tracked_file_count,
-        "content_files": len(snapshot.content),
-        "content_bytes": sum(len(item.content) for item in snapshot.content),
         "findings": [
             {
                 "finding_id": _finding_id(str(item.rule_id), item.path, item.manifest_anchor),
@@ -239,7 +237,6 @@ def _evaluate(  # ruff: ignore[too-many-arguments] - explicit report boundaries 
             "report_name": source["report_name"],
             "findings": len(result.get("findings", [])),
             "tracked_files": result.get("tracked_files", 0),
-            "content_bytes": result.get("content_bytes", 0),
             "elapsed_ms": result.get("elapsed_ms", 0),
         }
         for source, result in results

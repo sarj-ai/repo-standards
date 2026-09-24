@@ -8,8 +8,6 @@ from .errors import ConfigurationError
 from .models import (
     AnalysisReport,
     Baseline,
-    Component,
-    ComponentId,
     Diagnostic,
     ExceptionUse,
     FindingsReport,
@@ -22,60 +20,6 @@ from .models import (
     RatchetEntry,
 )
 from .rule_reviews import RuleVersion
-
-
-def validate_manifest_references(manifest: Manifest) -> None:
-    by_id = {item.component_id: item for item in manifest.components}
-    _validate_dependencies(manifest, by_id)
-    _validate_migrations(manifest, by_id)
-
-
-def _validate_dependencies(manifest: Manifest, by_id: dict[ComponentId, Component]) -> None:
-    for component in manifest.components:
-        for dependency in component.dependencies:
-            if dependency.target not in by_id:
-                ConfigurationError.fail(
-                    f"component {component.component_id} references unknown target "
-                    f"{dependency.target}"
-                )
-
-
-def _validate_migrations(manifest: Manifest, by_id: dict[ComponentId, Component]) -> None:
-    migration_components: set[ComponentId] = set()
-    migration_sources: set[str] = set()
-    migration_targets: dict[str, ComponentId] = {}
-    for migration in manifest.migration_paths:
-        if migration.component_id not in by_id:
-            ConfigurationError.fail(
-                f"migration path references unknown component {migration.component_id}"
-            )
-        if migration.component_id in migration_components:
-            ConfigurationError.fail(
-                f"component {migration.component_id} has multiple migration path declarations"
-            )
-        migration_components.add(migration.component_id)
-        if migration.old_path == migration.new_path:
-            ConfigurationError.fail(
-                f"migration path for {migration.component_id} must change the component path"
-            )
-        if migration.old_path in migration_sources:
-            ConfigurationError.fail(
-                f"migration source path is declared more than once: {migration.old_path}"
-            )
-        migration_sources.add(migration.old_path)
-        if migration.new_path != by_id[migration.component_id].path:
-            ConfigurationError.fail(
-                f"migration target for {migration.component_id} must equal its declared "
-                "component path"
-            )
-        migration_targets[migration.new_path] = migration.component_id
-    for migration in manifest.migration_paths:
-        occupying_component = migration_targets.get(migration.old_path)
-        if occupying_component is not None and occupying_component != migration.component_id:
-            ConfigurationError.fail(
-                f"migration paths form a swap or cycle at {migration.old_path}; "
-                "use a disjoint staging path and explicit sequencing"
-            )
 
 
 def apply_exceptions(
@@ -147,24 +91,7 @@ def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a
     additional_diagnostics: tuple[Diagnostic, ...] = (),
     enabled_rules: frozenset[RuleVersion] | None = None,
 ) -> AnalysisReport:
-    validate_manifest_references(manifest)
-    emitted = additional_diagnostics
-    if enabled_rules is not None:
-        current_rules = frozenset(
-            RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()
-        )
-        obsolete = sorted(
-            f"{item.rule_id}@{item.version}" for item in enabled_rules - current_rules
-        )
-        if obsolete:
-            ConfigurationError.fail(
-                "enabled rule selectors are not current for this policy: " + ", ".join(obsolete)
-            )
-        emitted = tuple(
-            item
-            for item in emitted
-            if RuleVersion(item.rule_id, item.rule_version) in enabled_rules
-        )
+    emitted = _selected_diagnostics(policy, additional_diagnostics, enabled_rules)
     findings = tuple(with_fingerprint(item) for item in emitted)
     fingerprints = [item.fingerprint for item in findings]
     if len(fingerprints) != len(set(fingerprints)):
@@ -209,6 +136,30 @@ def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a
         scope_digest=scope_digest(manifest),
         summary=summary,
     )
+
+
+def _selected_diagnostics(
+    policy: Policy,
+    diagnostics: tuple[Diagnostic, ...],
+    enabled_rules: frozenset[RuleVersion] | None,
+) -> tuple[Diagnostic, ...]:
+    if enabled_rules is not None:
+        current_rules = frozenset(
+            RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()
+        )
+        obsolete = sorted(
+            f"{item.rule_id}@{item.version}" for item in enabled_rules - current_rules
+        )
+        if obsolete:
+            ConfigurationError.fail(
+                "enabled rule selectors are not current for this policy: " + ", ".join(obsolete)
+            )
+        return tuple(
+            item
+            for item in diagnostics
+            if RuleVersion(item.rule_id, item.rule_version) in enabled_rules
+        )
+    return diagnostics
 
 
 def check_baseline(report: AnalysisReport, baseline: Baseline) -> tuple[Diagnostic, ...]:

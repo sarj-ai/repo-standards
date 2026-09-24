@@ -6,7 +6,6 @@ from repo_standards.core.parser import parse_manifest_bytes
 
 
 _BASE = b"""
-schema_version = 5
 repository_id = "example"
 components = []
 """
@@ -27,7 +26,7 @@ def _transition(**overrides: str) -> bytes:
     return ("\n".join(lines) + "\n").encode()
 
 
-def test_schema_five_parses_commit_history_defaults_and_transitions() -> None:
+def test_manifest_parses_commit_history_defaults_and_transitions() -> None:
     manifest = parse_manifest_bytes(
         _BASE
         + b"""
@@ -55,7 +54,7 @@ head_prefix = "automation/promote-dev-"
     assert transition.sha_prefix_length == 12
 
 
-def test_schema_five_allows_a_bounded_maximum_and_distinct_destinations() -> None:
+def test_commit_history_allows_a_bounded_maximum_and_distinct_destinations() -> None:
     manifest = parse_manifest_bytes(
         _BASE
         + b"""
@@ -81,34 +80,6 @@ head_prefix = "automation/main-promote-"
     assert manifest.pull_request is not None
     assert manifest.pull_request.commit_history.maximum_commits == 9
     assert len(manifest.pull_request.commit_history.transitions) == 2
-
-
-@pytest.mark.parametrize("schema_version", [2, 3, 4])
-def test_older_manifest_schemas_remain_supported(schema_version: int) -> None:
-    manifest = parse_manifest_bytes(
-        f'schema_version = {schema_version}\nrepository_id = "example"\ncomponents = []\n'.encode()
-    )
-
-    assert manifest.pull_request is None
-
-
-def test_schema_four_keeps_enabled_rules_support() -> None:
-    manifest = parse_manifest_bytes(
-        b'schema_version = 4\nrepository_id = "example"\ncomponents = []\n'
-        b'enabled_rules = ["repository/no-empty-readme"]\n'
-    )
-
-    assert manifest.enabled_rules == ("repository/no-empty-readme",)
-
-
-@pytest.mark.parametrize("schema_version", [2, 3, 4])
-def test_pull_request_policy_requires_schema_five(schema_version: int) -> None:
-    content = _BASE.replace(b"schema_version = 5", f"schema_version = {schema_version}".encode())
-
-    with pytest.raises(ValueError, match="schema version 5 is required for pull_request"):
-        parse_manifest_bytes(
-            content + b'\n[pull_request.commit_history]\nadvisory_base_ref = "dev"\n'
-        )
 
 
 @pytest.mark.parametrize(
@@ -237,10 +208,9 @@ accepted_check_conclusions = ["success"]
 """
 
 
-def _schema_seven_review_policy(*, review_policy: bytes = _REVIEW_POLICY) -> bytes:
+def _manifest_with_review_policy(*, review_policy: bytes = _REVIEW_POLICY) -> bytes:
     return (
         b"""
-schema_version = 7
 repository_id = "example"
 components = []
 
@@ -257,8 +227,8 @@ head_prefix = "automation/promote-dev-"
     )
 
 
-def test_schema_seven_parses_review_policy() -> None:
-    manifest = parse_manifest_bytes(_schema_seven_review_policy())
+def test_manifest_parses_review_policy() -> None:
+    manifest = parse_manifest_bytes(_manifest_with_review_policy())
 
     assert manifest.pull_request is not None
     policy = manifest.pull_request.review_policy
@@ -273,18 +243,9 @@ def test_schema_seven_parses_review_policy() -> None:
     assert policy.accepted_check_conclusions == ("success",)
 
 
-def test_versionless_manifest_uses_current_review_policy_schema() -> None:
-    content = _schema_seven_review_policy().replace(b"schema_version = 7\n", b"")
-
-    manifest = parse_manifest_bytes(content)
-
-    assert manifest.pull_request is not None
-    assert manifest.pull_request.review_policy is not None
-
-
-def test_schema_seven_review_policy_defaults_to_successful_checks() -> None:
+def test_review_policy_defaults_to_successful_checks() -> None:
     manifest = parse_manifest_bytes(
-        _schema_seven_review_policy(
+        _manifest_with_review_policy(
             review_policy=_REVIEW_POLICY.replace(b'accepted_check_conclusions = ["success"]\n', b"")
         )
     )
@@ -294,9 +255,9 @@ def test_schema_seven_review_policy_defaults_to_successful_checks() -> None:
     assert manifest.pull_request.review_policy.accepted_check_conclusions == ("success",)
 
 
-def test_schema_seven_review_policy_can_accept_skipped_routed_checks() -> None:
+def test_review_policy_can_accept_skipped_routed_checks() -> None:
     manifest = parse_manifest_bytes(
-        _schema_seven_review_policy(
+        _manifest_with_review_policy(
             review_policy=_REVIEW_POLICY.replace(
                 b'accepted_check_conclusions = ["success"]',
                 b'accepted_check_conclusions = ["success", "skipped"]',
@@ -312,10 +273,9 @@ def test_schema_seven_review_policy_can_accept_skipped_routed_checks() -> None:
     )
 
 
-def test_schema_six_keeps_pull_request_behavior_without_review_policy() -> None:
+def test_pull_request_behavior_without_review_policy() -> None:
     manifest = parse_manifest_bytes(
         b"""
-schema_version = 6
 repository_id = "example"
 components = []
 [pull_request.commit_history]
@@ -326,13 +286,6 @@ advisory_base_ref = "dev"
     assert manifest.pull_request is not None
     assert manifest.pull_request.review_policy is None
     assert manifest.commit_message is not None
-
-
-def test_review_policy_requires_schema_seven() -> None:
-    content = _schema_seven_review_policy().replace(b"schema_version = 7", b"schema_version = 6")
-
-    with pytest.raises(ValueError, match="schema version 7 is required for review_policy"):
-        parse_manifest_bytes(content)
 
 
 @pytest.mark.parametrize(
@@ -391,11 +344,11 @@ def test_review_policy_rejects_unsafe_configuration(
     message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        parse_manifest_bytes(_schema_seven_review_policy().replace(old, new))
+        parse_manifest_bytes(_manifest_with_review_policy().replace(old, new))
 
 
 def test_review_policy_rejects_unknown_fields() -> None:
-    content = _schema_seven_review_policy().replace(
+    content = _manifest_with_review_policy().replace(
         b"[pull_request.review_policy]\n",
         b"[pull_request.review_policy]\nallow_self_approval = true\n",
     )
@@ -405,7 +358,7 @@ def test_review_policy_rejects_unknown_fields() -> None:
 
 
 def test_review_policy_requires_transition_actors_for_exemptions() -> None:
-    content = _schema_seven_review_policy().replace(
+    content = _manifest_with_review_policy().replace(
         b'transition_actors = ["release-automation[bot]"]\n',
         b"",
     )
@@ -415,7 +368,7 @@ def test_review_policy_requires_transition_actors_for_exemptions() -> None:
 
 
 def test_review_policy_rejects_transition_actors_without_exemptions() -> None:
-    content = _schema_seven_review_policy().replace(
+    content = _manifest_with_review_policy().replace(
         b'transition_exemptions = ["dev-preview"]',
         b"transition_exemptions = []",
     )

@@ -38,5 +38,5 @@ CATEGORIES = (
 )
 
 
-def taxonomy(category_id: RuleCategoryId, topic_id: str) -> RuleTaxonomy:
-    return RuleTaxonomy(category_id=category_id, topic_id=topic_id)
+def taxonomy(category_id: RuleCategoryId, topic: str) -> RuleTaxonomy:
+    return RuleTaxonomy(category_id=category_id, topic=topic)

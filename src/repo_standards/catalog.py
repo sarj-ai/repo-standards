@@ -533,7 +533,7 @@ def _rule_descriptor(rule: Rule, source_path: str) -> RuleDescriptor:
         rule_version=rule.version,
         title=rule.title,
         category_id=rule.taxonomy.category_id,
-        topic_id=rule.taxonomy.topic_id,
+        topic_id=rule.taxonomy.topic,
         default_severity=rule.default_severity,
         description=rule.description,
         why=rule.why,

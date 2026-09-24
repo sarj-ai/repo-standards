@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date, timedelta
 import re
 import tomllib
-from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
@@ -11,22 +10,14 @@ from pydantic import TypeAdapter
 from .canonical import canonical_path
 from .errors import ConfigurationError
 from .models import (
-    ActiveConfiguration,
-    AuthorityId,
     Baseline,
     CommitMessageConfig,
     CommitMessageEnforcement,
     Component,
     ComponentId,
-    ConfigurationFormat,
-    DeliveryConfig,
-    Dependency,
-    DeploymentAuthority,
-    DeploymentAuthorityRole,
     DocumentationConfig,
     ExceptionRecord,
     Manifest,
-    MigrationPath,
     PolicyId,
     PullRequestCommitHistoryConfig,
     PullRequestCommitHistoryTransition,
@@ -43,22 +34,10 @@ if TYPE_CHECKING:
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_SCHEMA_VERSION_LINE = re.compile(
-    rb"(?m)^schema_version(?P<spacing>[ \t]*=[ \t]*)"
-    rb"(?P<version>[234567])(?P<tail>[ \t]*(?:#.*)?\r?)$"
-)
 _MAX_EXCEPTION_DURATION = timedelta(days=90)
 _MAX_INPUT_BYTES = 1_048_576
 _MAX_COMPONENTS = 10_000
-_MAX_MIGRATIONS = 10_000
 _MAX_EXCEPTIONS = 1_000
-_MANIFEST_SCHEMA_VERSION = 7
-_REVIEW_POLICY_SCHEMA_VERSION = 7
-_COMMIT_MESSAGE_SCHEMA_VERSION = 6
-_PULL_REQUEST_SCHEMA_VERSION = 5
-_RULE_ACTIVATION_SCHEMA_VERSION = 4
-_REPOSITORY_EVIDENCE_SCHEMA_VERSION = 3
-_LEGACY_MANIFEST_SCHEMA_VERSION = 2
 _BASELINE_SCHEMA_VERSION = 2
 _DEFAULT_MAXIMUM_COMMITS = 5
 _MAXIMUM_COMMITS = 9_999
@@ -72,14 +51,6 @@ _MAXIMUM_LOGICAL_REF_BYTES = 1_024
 _ASCII_CONTROL_LIMIT = 32
 _ASCII_DELETE = 127
 _OBJECT_MAPPING = TypeAdapter(dict[str, object])
-_CONFIG_SUFFIXES = MappingProxyType(
-    {
-        ConfigurationFormat.DOTENV: (".env",),
-        ConfigurationFormat.JSON: (".json",),
-        ConfigurationFormat.TOML: (".toml",),
-        ConfigurationFormat.YAML: (".yaml", ".yml"),
-    }
-)
 
 
 def _read_bounded(path: Path, kind: str) -> bytes:
@@ -176,15 +147,6 @@ def _logical_branch_ref(value: str, context: str) -> str:
     return value
 
 
-def parse_dependency(value: object, context: str) -> Dependency:
-    data = _mapping(value, context)
-    _strict_keys(data, {"target", "type"}, {"target", "type"}, context)
-    return Dependency(
-        target=ComponentId(_identifier(_string(data, "target", context), f"{context}.target")),
-        kind=_identifier(_string(data, "type", context), f"{context}.type"),
-    )
-
-
 def parse_component(value: object, index: int) -> Component:
     context = f"components[{index}]"
     data = _mapping(value, context)
@@ -195,13 +157,8 @@ def parse_component(value: object, index: int) -> Component:
         "owner",
         "product",
         "capability",
-        "legacy",
-        "dependencies",
     }
     _strict_keys(data, allowed, {"id", "kind", "path", "owner"}, context)
-    legacy = data.get("legacy", False)
-    if not isinstance(legacy, bool):
-        ConfigurationError.fail(f"{context}.legacy must be a boolean")
     product = data.get("product")
     capability = data.get("capability")
     if product is not None and not isinstance(product, str):
@@ -212,12 +169,6 @@ def parse_component(value: object, index: int) -> Component:
         ConfigurationError.fail(f"{context}.capability must be a string")
     if isinstance(capability, str) and not capability:
         ConfigurationError.fail(f"{context}.capability must not be empty")
-    dependencies = tuple(
-        parse_dependency(item, f"{context}.dependencies[{dependency_index}]")
-        for dependency_index, item in enumerate(
-            _list(data.get("dependencies", []), f"{context}.dependencies")
-        )
-    )
     return Component(
         component_id=ComponentId(_identifier(_string(data, "id", context), f"{context}.id")),
         kind=_identifier(_string(data, "kind", context), f"{context}.kind"),
@@ -225,21 +176,6 @@ def parse_component(value: object, index: int) -> Component:
         owner=_string(data, "owner", context),
         product=_identifier(product, f"{context}.product") if product else None,
         capability=_identifier(capability, f"{context}.capability") if capability else None,
-        legacy=legacy,
-        dependencies=dependencies,
-    )
-
-
-def parse_migration(value: object, index: int) -> MigrationPath:
-    context = f"migration_paths[{index}]"
-    data = _mapping(value, context)
-    _strict_keys(data, {"component_id", "from", "to"}, {"component_id", "from", "to"}, context)
-    return MigrationPath(
-        component_id=ComponentId(
-            _identifier(_string(data, "component_id", context), f"{context}.component_id")
-        ),
-        old_path=canonical_path(_string(data, "from", context)),
-        new_path=canonical_path(_string(data, "to", context)),
     )
 
 
@@ -296,53 +232,6 @@ def _string_list(value: object, context: str) -> list[str]:
     return [item for item in values if isinstance(item, str)]
 
 
-def parse_deployment_authority(value: object, index: int) -> DeploymentAuthority:
-    context = f"delivery.authorities[{index}]"
-    data = _mapping(value, context)
-    fields = {"id", "component_id", "environment", "mechanism", "path", "authority", "delegates"}
-    _strict_keys(
-        data,
-        fields,
-        {"id", "component_id", "environment", "mechanism", "path", "authority"},
-        context,
-    )
-    role_value = _string(data, "authority", context)
-    if role_value not in {"primary", "recovery"}:
-        ConfigurationError.fail(f"{context}.authority must be 'primary' or 'recovery'")
-    role: DeploymentAuthorityRole = "primary" if role_value == "primary" else "recovery"
-    path = canonical_path(_string(data, "path", context))
-    delegates = tuple(
-        canonical_path(item)
-        for item in _string_list(data.get("delegates", []), f"{context}.delegates")
-    )
-    if len(delegates) != len(set(delegates)) or path in delegates:
-        ConfigurationError.fail(f"{context}.delegates must be unique subordinate paths")
-    return DeploymentAuthority(
-        authority_id=AuthorityId(_identifier(_string(data, "id", context), f"{context}.id")),
-        component_id=ComponentId(
-            _identifier(_string(data, "component_id", context), f"{context}.component_id")
-        ),
-        environment=_identifier(_string(data, "environment", context), f"{context}.environment"),
-        mechanism=_identifier(_string(data, "mechanism", context), f"{context}.mechanism"),
-        path=path,
-        authority=role,
-        delegates=delegates,
-    )
-
-
-def parse_delivery(value: object) -> DeliveryConfig:
-    data = _mapping(value, "delivery")
-    _strict_keys(data, {"authorities"}, set(), "delivery")
-    authorities = tuple(
-        parse_deployment_authority(item, index)
-        for index, item in enumerate(_list(data.get("authorities", []), "delivery.authorities"))
-    )
-    ids = tuple(item.authority_id for item in authorities)
-    if len(ids) != len(set(ids)):
-        ConfigurationError.fail("delivery.authorities must have unique IDs")
-    return DeliveryConfig(authorities=authorities)
-
-
 def parse_documentation(value: object) -> DocumentationConfig:
     data = _mapping(value, "documentation")
     _strict_keys(
@@ -378,28 +267,6 @@ def parse_documentation(value: object) -> DocumentationConfig:
         entrypoints=entrypoints,
         maximum_added_pages=maximum_added_pages,
         addition_exemptions=addition_exemptions,
-    )
-
-
-def parse_active_configuration(value: object, index: int) -> ActiveConfiguration:
-    context = f"active_configuration[{index}]"
-    data = _mapping(value, context)
-    fields = {"component_id", "path", "format"}
-    _strict_keys(data, fields, fields, context)
-    path = canonical_path(_string(data, "path", context))
-    format_value = _string(data, "format", context)
-    try:
-        configuration_format = ConfigurationFormat(format_value)
-    except ValueError:
-        ConfigurationError.fail(f"{context}.format must be dotenv, json, toml, or yaml")
-    if not path.casefold().endswith(_CONFIG_SUFFIXES[configuration_format]):
-        ConfigurationError.fail(f"{context}.path does not match its declared format")
-    return ActiveConfiguration(
-        component_id=ComponentId(
-            _identifier(_string(data, "component_id", context), f"{context}.component_id")
-        ),
-        path=path,
-        format=configuration_format,
     )
 
 
@@ -668,27 +535,19 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
     except OSError, RecursionError, UnicodeError, ValueError, tomllib.TOMLDecodeError:
         ConfigurationError.fail("cannot read manifest")
     fields = {
-        "schema_version",
         "repository_id",
         "components",
         "enabled_rules",
-        "migration_paths",
         "exceptions",
-        "delivery",
         "documentation",
-        "active_configuration",
         "pull_request",
         "commit_message",
     }
     required = {"repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
-    schema_version = _validate_manifest_schema(data)
     raw_components = _list(data["components"], "manifest.components")
     if len(raw_components) > _MAX_COMPONENTS:
         ConfigurationError.fail(f"manifest may contain at most {_MAX_COMPONENTS} components")
-    raw_migrations = _list(data.get("migration_paths", []), "migration_paths")
-    if len(raw_migrations) > _MAX_MIGRATIONS:
-        ConfigurationError.fail(f"manifest may contain at most {_MAX_MIGRATIONS} migration paths")
     raw_exceptions = _list(data.get("exceptions", []), "exceptions")
     if len(raw_exceptions) > _MAX_EXCEPTIONS:
         ConfigurationError.fail(f"manifest may contain at most {_MAX_EXCEPTIONS} exceptions")
@@ -696,23 +555,6 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
     component_ids = [item.component_id for item in components]
     if len(component_ids) != len(set(component_ids)):
         ConfigurationError.fail("manifest contains duplicate component IDs")
-    active_configuration = tuple(
-        parse_active_configuration(item, index)
-        for index, item in enumerate(
-            _list(data.get("active_configuration", []), "active_configuration")
-        )
-    )
-    active_paths = tuple(item.path.casefold() for item in active_configuration)
-    if len(active_paths) != len(set(active_paths)):
-        ConfigurationError.fail("active_configuration paths must be unique")
-    known_components = set(component_ids)
-    if any(item.component_id not in known_components for item in active_configuration):
-        ConfigurationError.fail("active_configuration references an unknown component")
-    delivery = parse_delivery(data["delivery"]) if "delivery" in data else None
-    if delivery is not None and any(
-        item.component_id not in known_components for item in delivery.authorities
-    ):
-        ConfigurationError.fail("delivery.authorities references an unknown component")
     enabled_rules = tuple(_string_list(data.get("enabled_rules", []), "enabled_rules"))
     if len(enabled_rules) != len(set(enabled_rules)):
         ConfigurationError.fail("enabled_rules must be unique")
@@ -722,102 +564,19 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         ),
         components=components,
         enabled_rules=enabled_rules,
-        migration_paths=tuple(
-            parse_migration(item, index) for index, item in enumerate(raw_migrations)
-        ),
         exceptions=tuple(parse_exception(item, index) for index, item in enumerate(raw_exceptions)),
-        delivery=delivery,
         documentation=parse_documentation(data["documentation"])
         if "documentation" in data
         else None,
-        active_configuration=active_configuration,
         pull_request=parse_pull_request(data["pull_request"]) if "pull_request" in data else None,
-        commit_message=(
-            parse_commit_message(data["commit_message"])
-            if "commit_message" in data
-            else CommitMessageConfig()
-            if schema_version >= _COMMIT_MESSAGE_SCHEMA_VERSION
-            else None
-        ),
+        commit_message=parse_commit_message(data["commit_message"])
+        if "commit_message" in data
+        else CommitMessageConfig(),
     )
-
-
-def _validate_manifest_schema(data: dict[str, object]) -> int:
-    schema_version = data.get("schema_version", _MANIFEST_SCHEMA_VERSION)
-    supported_versions = {
-        _LEGACY_MANIFEST_SCHEMA_VERSION,
-        _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
-        _RULE_ACTIVATION_SCHEMA_VERSION,
-        _PULL_REQUEST_SCHEMA_VERSION,
-        _COMMIT_MESSAGE_SCHEMA_VERSION,
-        _MANIFEST_SCHEMA_VERSION,
-    }
-    if (
-        isinstance(schema_version, bool)
-        or not isinstance(schema_version, int)
-        or schema_version not in supported_versions
-    ):
-        ConfigurationError.fail("manifest.schema_version must be 2, 3, 4, 5, 6, or 7")
-    if schema_version == _LEGACY_MANIFEST_SCHEMA_VERSION and not data.keys().isdisjoint(
-        {"documentation", "active_configuration", "delivery"}
-    ):
-        ConfigurationError.fail("manifest schema version 3 is required for repository evidence")
-    if (
-        schema_version
-        in {
-            _LEGACY_MANIFEST_SCHEMA_VERSION,
-            _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
-        }
-        and "enabled_rules" in data
-    ):
-        ConfigurationError.fail("manifest schema version 4 is required for enabled_rules")
-    if (
-        schema_version
-        in {
-            _LEGACY_MANIFEST_SCHEMA_VERSION,
-            _REPOSITORY_EVIDENCE_SCHEMA_VERSION,
-            _RULE_ACTIVATION_SCHEMA_VERSION,
-        }
-        and "pull_request" in data
-    ):
-        ConfigurationError.fail("manifest schema version 5 is required for pull_request")
-    if schema_version < _COMMIT_MESSAGE_SCHEMA_VERSION and "commit_message" in data:
-        ConfigurationError.fail("manifest schema version 6 is required for commit_message")
-    pull_request = data.get("pull_request")
-    if (
-        schema_version < _REVIEW_POLICY_SCHEMA_VERSION
-        and isinstance(pull_request, dict)
-        and "review_policy" in pull_request
-    ):
-        ConfigurationError.fail("manifest schema version 7 is required for review_policy")
-    return schema_version
 
 
 def load_manifest(path: Path) -> Manifest:
     return parse_manifest_bytes(_read_bounded(path, "manifest"))
-
-
-def enable_commit_message_policy_bytes(content: bytes) -> bytes:
-    parse_manifest_bytes(content)
-    matches = tuple(_SCHEMA_VERSION_LINE.finditer(content))
-    if not matches:
-        return content
-    if len(matches) != 1:
-        ConfigurationError.fail("manifest must contain one canonical schema_version assignment")
-    match = matches[0]
-    if match.group("version") in {b"6", b"7"}:
-        return content
-    migrated = content[: match.start("version")] + b"6" + content[match.end("version") :]
-    parse_manifest_bytes(migrated)
-    return migrated
-
-
-def create_commit_message_policy_manifest(repository_id: str) -> bytes:
-    content = f'schema_version = 6\nrepository_id = "{repository_id}"\ncomponents = []\n'.encode()
-    parsed = parse_manifest_bytes(content)
-    if str(parsed.repository_id) != repository_id:
-        ConfigurationError.fail("repository_id did not round-trip through the canonical manifest")
-    return content
 
 
 def parse_baseline_bytes(content: bytes) -> Baseline:
