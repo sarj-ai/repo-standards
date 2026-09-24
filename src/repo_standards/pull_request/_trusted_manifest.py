@@ -70,8 +70,18 @@ def load_trusted_base_manifest(root: Path, base_sha: GitObjectId) -> TrustedBase
         ConfigurationError.fail("trusted manifest exceeds the 1 MiB safety limit")
     return TrustedBaseManifest(
         base_sha=base_sha,
-        manifest=parse_manifest_bytes(content),
+        manifest=parse_manifest_bytes(_without_v6_base_marker(content)),
     )
+
+
+def _without_v6_base_marker(content: bytes) -> bytes:
+    lines = content.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith(b"["):
+            break
+        if re.fullmatch(rb"[ \t]*schema_version[ \t]*=[ \t]*6[ \t]*(?:#.*)?(?:\r?\n)?", line):
+            return b"".join((*lines[:index], *lines[index + 1 :]))
+    return content
 
 
 def _git(
@@ -99,7 +109,7 @@ def _git(
             timeout=_GIT_TIMEOUT.total_seconds(),
             env=_GIT_ENVIRONMENT,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         ConfigurationError.fail("Git could not load trusted pull-request policy")
     if completed.returncode != 0:
         if absent_ok:

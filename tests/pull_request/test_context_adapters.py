@@ -196,6 +196,36 @@ def test_trusted_manifest_is_loaded_from_exact_base_not_worktree(tmp_path: Path)
     assert trusted.manifest.repository_id == "trusted-base"
 
 
+@pytest.mark.parametrize("marker", ["schema_version = 6\n", "schema_version = 6 # v5 manifest\n"])
+def test_trusted_base_accepts_v6_manifest_marker_during_format_transition(
+    tmp_path: Path, marker: str
+) -> None:
+    _git(tmp_path, "init", "--quiet")
+    manifest_path = tmp_path / ".repo-standards" / "repository.toml"
+    manifest_path.parent.mkdir()
+    manifest_path.write_text(marker + _manifest("trusted-base"), encoding="utf-8")
+    base = _commit(tmp_path, "base policy")
+    manifest_path.write_text(_manifest("new-head"), encoding="utf-8")
+    _commit(tmp_path, "remove schema marker")
+
+    trusted = load_trusted_base_manifest(tmp_path, GitObjectId(base))
+
+    assert trusted.manifest is not None
+    assert trusted.manifest.repository_id == "trusted-base"
+
+
+@pytest.mark.parametrize("marker", ["schema_version = 5\n", "schema_version = 7\n"])
+def test_trusted_base_rejects_other_schema_markers(tmp_path: Path, marker: str) -> None:
+    _git(tmp_path, "init", "--quiet")
+    manifest_path = tmp_path / ".repo-standards" / "repository.toml"
+    manifest_path.parent.mkdir()
+    manifest_path.write_text(marker + _manifest("trusted-base"), encoding="utf-8")
+    base = _commit(tmp_path, "base policy")
+
+    with pytest.raises(ConfigurationError, match="schema_version"):
+        load_trusted_base_manifest(tmp_path, GitObjectId(base))
+
+
 def test_github_input_orchestration_combines_event_with_base_manifest(tmp_path: Path) -> None:
     _git(tmp_path, "init", "--quiet")
     manifest_path = tmp_path / ".repo-standards" / "repository.toml"
