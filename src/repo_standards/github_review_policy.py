@@ -14,7 +14,7 @@ import sys
 import tempfile
 import time
 import tomllib
-from typing import Any, Final
+from typing import Any, Final, NamedTuple, NewType
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -35,6 +35,20 @@ _MERGE_GROUP_REF = re.compile(
     r"refs/heads/gh-readonly-queue/(?P<base_ref>.+)/"
     r"pr-(?P<number>[1-9][0-9]*)-(?P<parent_sha>[0-9a-f]{40})\Z"
 )
+GitHubUserId = NewType("GitHubUserId", int)
+GitHubRepositoryId = NewType("GitHubRepositoryId", int)
+
+
+class MergeGroupPullRequest(NamedTuple):
+    base_ref: str
+    number: int
+    parent_sha: str
+
+
+@dataclass(frozen=True, slots=True)
+class FinalPolicyDecision:
+    passed: bool
+    reason: str | None
 
 
 class ReconciliationError(RuntimeError):
@@ -50,11 +64,11 @@ class PullRequestSnapshot:
     head_ref: str
     body: str
     author: str
-    author_id: int
+    author_id: GitHubUserId
     author_type: str
     head_repository: str
-    base_repository_id: int
-    head_repository_id: int
+    base_repository_id: GitHubRepositoryId
+    head_repository_id: GitHubRepositoryId
     draft: bool
     state: str
 
@@ -227,11 +241,11 @@ def pull_request_snapshot(client: GitHubClient, number: int) -> PullRequestSnaps
         head_ref=_string(head.get("ref"), "head ref"),
         body=body if isinstance(body, str) else "",
         author=_string(user.get("login"), "pull request author"),
-        author_id=_integer(user.get("id"), "pull request author id"),
+        author_id=GitHubUserId(_integer(user.get("id"), "pull request author id")),
         author_type=_string(user.get("type"), "pull request author type"),
         head_repository=_string(head_repo.get("full_name"), "pull request head repository"),
-        base_repository_id=_integer(base_repo.get("id"), "base repository id"),
-        head_repository_id=_integer(head_repo.get("id"), "head repository id"),
+        base_repository_id=GitHubRepositoryId(_integer(base_repo.get("id"), "base repository id")),
+        head_repository_id=GitHubRepositoryId(_integer(head_repo.get("id"), "head repository id")),
         draft=_boolean(value.get("draft"), "pull request draft"),
         state=_string(value.get("state"), "pull request state"),
     )
@@ -498,17 +512,19 @@ def latest_human_reviews(
         review_id = review.get("id")
         if not isinstance(review_id, int):
             raise ReconciliationError("review id must be an integer")
-        commit_sha = review.get("commit_id")
-        if commit_sha is not None and (
-            not isinstance(commit_sha, str) or _OBJECT_ID.fullmatch(commit_sha) is None
-        ):
-            raise ReconciliationError("review commit_id must be an exact SHA or null")
+        commit_sha = _review_commit_sha(review.get("commit_id"))
         value = {"reviewer": f"{user_id}:{login}", "state": state, "commit_sha": commit_sha}
         key = user_id
         ordering = (submitted_key, review_id)
         if key not in latest or ordering > latest[key][0]:
             latest[key] = (ordering, value)
     return tuple(latest[key][1] for key in sorted(latest))
+
+
+def _review_commit_sha(value: object) -> str | None:
+    if value is not None and (not isinstance(value, str) or _OBJECT_ID.fullmatch(value) is None):
+        raise ReconciliationError("review commit_id must be an exact SHA or null")
+    return value
 
 
 def collect_threads_resolved(client: GitHubClient, number: int) -> bool:
@@ -747,13 +763,13 @@ def review_policy_status_passed(
     client: GitHubClient,
     statuses: Sequence[Any],
     *,
-    head_sha: str,
     workflow_path: str,
 ) -> bool:
     matching: list[Mapping[str, Any]] = []
     for raw in statuses:
         status = _mapping(raw, "commit status")
-        if status.get("context") == _STATUS_CONTEXT and status.get("sha") == head_sha:
+        # The statuses endpoint is scoped to the exact commit; its items omit "sha".
+        if status.get("context") == _STATUS_CONTEXT:
             matching.append(status)
     if not matching:
         return False
@@ -792,11 +808,11 @@ def _completed_run(client: GitHubClient, run_id: int) -> Mapping[str, Any]:
         time.sleep(_RUN_COMPLETION_POLL_SECONDS)
 
 
-def merge_group_pull_request(head_ref: str) -> tuple[str, int, str]:
+def merge_group_pull_request(head_ref: str) -> MergeGroupPullRequest:
     match = _MERGE_GROUP_REF.fullmatch(head_ref)
     if match is None:
         raise ReconciliationError("merge-group-head-ref must be an exact merge-queue ref")
-    return (
+    return MergeGroupPullRequest(
         match.group("base_ref"),
         int(match.group("number")),
         match.group("parent_sha"),
@@ -872,7 +888,6 @@ def reconcile_merge_group(
     passed = review_policy_status_passed(
         client,
         statuses,
-        head_sha=snapshot.head_sha,
         workflow_path=workflow_path,
     )
     refreshed = pull_request_snapshot(client, snapshot.number)
@@ -930,18 +945,18 @@ def final_policy_decision(
     same_repository: bool,
     author_is_bot: bool,
     draft: bool,
-) -> tuple[bool, str | None]:
+) -> FinalPolicyDecision:
     if not policy_passed or tier != 0:
-        return policy_passed, None
+        return FinalPolicyDecision(passed=policy_passed, reason=None)
     if not lane_enabled:
-        return False, "review_optional_lane_disabled"
+        return FinalPolicyDecision(passed=False, reason="review_optional_lane_disabled")
     if not same_repository:
-        return False, "review_optional_fork_blocked"
+        return FinalPolicyDecision(passed=False, reason="review_optional_fork_blocked")
     if author_is_bot:
-        return False, "review_optional_bot_author_blocked"
+        return FinalPolicyDecision(passed=False, reason="review_optional_bot_author_blocked")
     if draft:
-        return False, "review_optional_draft_blocked"
-    return True, None
+        return FinalPolicyDecision(passed=False, reason="review_optional_draft_blocked")
+    return FinalPolicyDecision(passed=True, reason=None)
 
 
 def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-statements] - orchestration stays linear and auditable
@@ -951,16 +966,7 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
     github_token = os.environ.get("GITHUB_TOKEN", "")
     client = GitHubClient(token=github_token, repository=repository, api_url=api_url)
     if args.merge_group_head_sha:
-        if args.pr_number is not None:
-            raise ReconciliationError("pr-number and merge-group-head-sha are mutually exclusive")
-        if args.merge_group_head_ref is None:
-            raise ReconciliationError("merge-group-head-ref is required in merge-group mode")
-        return reconcile_merge_group(
-            client=client,
-            head_sha=args.merge_group_head_sha,
-            head_ref=args.merge_group_head_ref,
-            workflow_path=args.policy_workflow_path,
-        )
+        return _reconcile_merge_group_args(args, client)
     if args.merge_group_head_ref is not None:
         raise ReconciliationError("merge-group-head-ref requires merge-group-head-sha")
     if args.pr_number is None:
@@ -1065,7 +1071,7 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
     tier = summary.get("tier")
     policy_passed = command.returncode == 0 and summary.get("merge_ready") is True
     same_repository = snapshot.head_repository_id == snapshot.base_repository_id
-    final_passed, operational_reason = final_policy_decision(
+    decision = final_policy_decision(
         policy_passed=policy_passed,
         tier=tier,
         lane_enabled=args.review_optional_enabled,
@@ -1073,6 +1079,8 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
         author_is_bot=author_is_bot,
         draft=snapshot.draft,
     )
+    final_passed = decision.passed
+    operational_reason = decision.reason
     comment = render_comment(
         receipt,
         final_passed=final_passed,
@@ -1117,6 +1125,19 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
     _write_output("tier", str(tier))
     _write_output("merge-ready", str(final_passed).lower())
     return 0 if final_passed else 1
+
+
+def _reconcile_merge_group_args(args: argparse.Namespace, client: GitHubClient) -> int:
+    if args.pr_number is not None:
+        raise ReconciliationError("pr-number and merge-group-head-sha are mutually exclusive")
+    if args.merge_group_head_ref is None:
+        raise ReconciliationError("merge-group-head-ref is required in merge-group mode")
+    return reconcile_merge_group(
+        client=client,
+        head_sha=args.merge_group_head_sha,
+        head_ref=args.merge_group_head_ref,
+        workflow_path=args.policy_workflow_path,
+    )
 
 
 def _write_step_summary(comment: str) -> None:

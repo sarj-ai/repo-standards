@@ -10,6 +10,8 @@ import pytest
 from repo_standards.github_review_policy import (
     CollectedEvidence,
     GitHubClient,
+    GitHubRepositoryId,
+    GitHubUserId,
     PullRequestSnapshot,
     ReconciliationError,
     check_conclusion,
@@ -69,39 +71,39 @@ def test_tier_zero_runtime_gate(
     draft: bool,
     expected: tuple[bool, str | None],
 ) -> None:
-    assert (
-        final_policy_decision(
-            policy_passed=True,
-            tier=0,
-            lane_enabled=lane_enabled,
-            same_repository=same_repository,
-            author_is_bot=author_is_bot,
-            draft=draft,
-        )
-        == expected
+    decision = final_policy_decision(
+        policy_passed=True,
+        tier=0,
+        lane_enabled=lane_enabled,
+        same_repository=same_repository,
+        author_is_bot=author_is_bot,
+        draft=draft,
     )
+    assert (decision.passed, decision.reason) == expected
 
 
 def test_non_tier_zero_runtime_gate_ignores_optional_lane() -> None:
-    assert final_policy_decision(
+    decision = final_policy_decision(
         policy_passed=True,
         tier=1,
         lane_enabled=False,
         same_repository=False,
         author_is_bot=True,
         draft=True,
-    ) == (True, None)
+    )
+    assert (decision.passed, decision.reason) == (True, None)
 
 
 def test_failed_policy_stays_blocked_when_optional_lane_is_enabled() -> None:
-    assert final_policy_decision(
+    decision = final_policy_decision(
         policy_passed=False,
         tier=0,
         lane_enabled=True,
         same_repository=True,
         author_is_bot=False,
         draft=False,
-    ) == (False, None)
+    )
+    assert (decision.passed, decision.reason) == (False, None)
 
 
 @pytest.mark.parametrize("manifest_path", ["", "/absolute.toml", "../escape.toml", "a/../b.toml"])
@@ -285,11 +287,11 @@ def test_complete_evidence_fingerprint_detects_body_drift() -> None:
         head_ref="feature",
         body="original",
         author="author",
-        author_id=10,
+        author_id=GitHubUserId(10),
         author_type="User",
         head_repository="owner/repo",
-        base_repository_id=1,
-        head_repository_id=1,
+        base_repository_id=GitHubRepositoryId(1),
+        head_repository_id=GitHubRepositoryId(1),
         draft=False,
         state="open",
     )
@@ -301,18 +303,15 @@ def test_complete_evidence_fingerprint_detects_body_drift() -> None:
 
 
 def test_merge_group_requires_latest_actions_status_for_exact_head() -> None:
-    head = "a" * 40
     statuses = [
         {
             "id": 1,
-            "sha": head,
             "context": "Review Policy",
             "state": "success",
             "creator": {"login": "github-actions[bot]", "type": "Bot"},
         },
         {
             "id": 2,
-            "sha": head,
             "context": "Review Policy",
             "state": "failure",
             "creator": {"login": "github-actions[bot]", "type": "Bot"},
@@ -323,17 +322,14 @@ def test_merge_group_requires_latest_actions_status_for_exact_head() -> None:
     assert not review_policy_status_passed(
         client,
         statuses,
-        head_sha=head,
         workflow_path=".github/workflows/review-policy.yml",
     )
 
 
 def test_merge_group_rejects_spoofed_success_status() -> None:
-    head = "a" * 40
     statuses = [
         {
             "id": 1,
-            "sha": head,
             "context": "Review Policy",
             "state": "success",
             "creator": {"login": "person", "type": "User"},
@@ -344,18 +340,15 @@ def test_merge_group_rejects_spoofed_success_status() -> None:
     assert not review_policy_status_passed(
         client,
         statuses,
-        head_sha=head,
         workflow_path=".github/workflows/review-policy.yml",
     )
 
 
 def test_merge_group_accepts_configured_successful_actions_run() -> None:
-    head = "a" * 40
     client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     statuses = [
         {
             "id": 1,
-            "sha": head,
             "context": "Review Policy",
             "state": "success",
             "target_url": "https://github.com/owner/repo/actions/runs/123",
@@ -376,16 +369,14 @@ def test_merge_group_accepts_configured_successful_actions_run() -> None:
     assert review_policy_status_passed(
         client,
         statuses,
-        head_sha=head,
         workflow_path=".github/workflows/review-policy.yml",
     )
 
 
-def _successful_status(head: str) -> list[dict[str, object]]:
+def _successful_status() -> list[dict[str, object]]:
     return [
         {
             "id": 1,
-            "sha": head,
             "context": "Review Policy",
             "state": "success",
             "target_url": "https://github.com/owner/repo/actions/runs/123",
@@ -397,7 +388,6 @@ def _successful_status(head: str) -> list[dict[str, object]]:
 def test_merge_group_waits_for_the_status_run_to_complete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    head = "a" * 40
     client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     runs = iter(
         [
@@ -419,8 +409,7 @@ def test_merge_group_waits_for_the_status_run_to_complete(
 
     assert review_policy_status_passed(
         client,
-        _successful_status(head),
-        head_sha=head,
+        _successful_status(),
         workflow_path=".github/workflows/review-policy.yml",
     )
     assert sleeps == [5]
@@ -429,7 +418,6 @@ def test_merge_group_waits_for_the_status_run_to_complete(
 def test_merge_group_rejects_a_status_run_that_never_completes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    head = "a" * 40
     client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     clock = iter([0.0, 100.0, 200.0, 300.0])
     sleeps: list[float] = []
@@ -448,8 +436,7 @@ def test_merge_group_rejects_a_status_run_that_never_completes(
 
     assert not review_policy_status_passed(
         client,
-        _successful_status(head),
-        head_sha=head,
+        _successful_status(),
         workflow_path=".github/workflows/review-policy.yml",
     )
     assert sleeps == [5, 5]
@@ -503,7 +490,6 @@ def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None
         return [
             {
                 "id": 1,
-                "sha": pull_head,
                 "context": "Review Policy",
                 "state": "success",
                 "target_url": "https://github.com/owner/repo/actions/runs/123",
