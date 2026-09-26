@@ -4,9 +4,13 @@ import shutil
 import subprocess
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter
+import pytest
 from typer.testing import CliRunner
 
 from repo_standards.cli import app
+from repo_standards.core.errors import ConfigurationError
+from repo_standards.core.pull_request_documentation import analyze_pull_request_documentation
 
 
 if TYPE_CHECKING:
@@ -80,13 +84,49 @@ def test_documentation_budget_rejects_any_new_page_by_default(tmp_path: Path) ->
     assert '"docs/one.md"' in result.stdout
 
 
+@pytest.mark.parametrize("output_format", ["json", "text"])
+def test_cli_rejects_added_readme_content_without_new_pages(
+    tmp_path: Path, output_format: str
+) -> None:
+    base = _repository(tmp_path)
+    (tmp_path / "README.md").write_text("# Fixture\nnew content\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["pull-request", "documentation", str(tmp_path), "--base", base, "--format", output_format],
+    )
+
+    assert result.exit_code == 1
+    if output_format == "json":
+        payload = TypeAdapter(dict[str, object]).validate_json(result.stdout)
+        assert payload["content_findings"] == ["README.md"]
+        assert payload["summary"] == {
+            "satisfied": False,
+            "added_pages": 0,
+            "exempt_pages": 0,
+            "added_content_files": 1,
+        }
+        assert payload["policy"] == {
+            "maximum_added_pages": 0,
+            "maximum_added_content_files": 0,
+            "source": base,
+        }
+        assert payload["findings"] == []
+    else:
+        assert "Added Markdown pages: 0/0" in result.stdout
+        assert "README/docs files with added content: 1/0\n  README.md\n" in result.stdout
+        assert (
+            "Remove the added documentation; express behavior in code, tests and CLI help."
+            in result.stdout
+        )
+
+
 def test_documentation_budget_uses_trusted_base_policy_and_exact_exemptions(
     tmp_path: Path,
 ) -> None:
-    base = _repository(tmp_path, maximum=0, exemptions=("docs/contract.md",))
-    docs = tmp_path / "docs"
-    docs.mkdir()
-    (docs / "contract.md").write_text("# Contract\n", encoding="utf-8")
+    base = _repository(tmp_path, maximum=0, exemptions=("CONTRACT.md",))
+    (tmp_path / "CONTRACT.md").write_text("# Contract\n", encoding="utf-8")
     _commit(tmp_path)
 
     result = runner.invoke(
@@ -97,6 +137,320 @@ def test_documentation_budget_uses_trusted_base_policy_and_exact_exemptions(
     assert result.exit_code == 0
     assert '"added_pages":0' in result.stdout
     assert '"exempt_pages":1' in result.stdout
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "README.md",
+        "nested/readme.MD",
+        "docs/guide.txt",
+        "nested/DoCs/api.json",
+        'docs/odd\tname\n".txt',
+        "docs/:(glob)*.txt",
+    ],
+)
+def test_content_additions_are_rejected_in_existing_scoped_files(tmp_path: Path, path: str) -> None:
+    _repository(tmp_path)
+    target = tmp_path / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("existing\n", encoding="utf-8")
+    base = _commit(tmp_path)
+    target.write_text("existing\nnew content\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.added_content_paths == (path,)
+    assert not result.satisfied
+
+
+@pytest.mark.parametrize("content", ["", "existing\n", "\nexisting\n\t\nsecond\n\u2003\n"])
+def test_deletions_and_blank_additions_are_allowed(tmp_path: Path, content: str) -> None:
+    _repository(tmp_path)
+    target = tmp_path / "README.md"
+    target.write_text("existing\nsecond\n", encoding="utf-8")
+    base = _commit(tmp_path)
+    target.write_text(content, encoding="utf-8")
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.added_content_paths == ()
+    assert result.satisfied
+
+
+@pytest.mark.parametrize("path", ["nested/README.md", "docs/new.md"])
+def test_content_ban_is_independent_of_page_exemptions(tmp_path: Path, path: str) -> None:
+    base = _repository(tmp_path, maximum=100, exemptions=(path,))
+    target = tmp_path / path
+    target.parent.mkdir(parents=True)
+    target.write_text("new content\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.exempt_pages == (path,)
+    assert result.added_content_paths == (path,)
+    assert not result.satisfied
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"replacement\n",
+        b"existing\nexisting\n",
+        b"existing\x00hidden",
+        b"existing\n\xff",
+        b"existing\v",
+    ],
+)
+def test_replacements_duplicates_and_binary_content_are_rejected(
+    tmp_path: Path, content: bytes
+) -> None:
+    _repository(tmp_path)
+    target = tmp_path / "README.md"
+    target.write_bytes(b"existing\n")
+    base = _commit(tmp_path)
+    target.write_bytes(content)
+    _commit(tmp_path)
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
+        "README.md",
+    )
+
+
+@pytest.mark.parametrize("source", ["source.txt", "docs/old.txt"])
+@pytest.mark.parametrize("copy", [False, True])
+def test_moves_and_copies_cannot_import_content_into_docs(
+    tmp_path: Path, source: str, copy: bool
+) -> None:
+    _repository(tmp_path)
+    original = tmp_path / source
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_text("existing content\n", encoding="utf-8")
+    base = _commit(tmp_path)
+    destination = tmp_path / "docs/new.txt"
+    destination.parent.mkdir(exist_ok=True)
+    if copy:
+        destination.write_bytes(original.read_bytes())
+    else:
+        _git(tmp_path, "mv", source, "docs/new.txt")
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    expected = () if source.startswith("docs/") and not copy else ("docs/new.txt",)
+    assert result.added_content_paths == expected
+
+
+def test_attributes_cannot_hide_readme_content_changes(tmp_path: Path) -> None:
+    base = _repository(tmp_path)
+    (tmp_path / ".gitattributes").write_text("README.md -diff\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Fixture\nnew content\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
+        "README.md",
+    )
+
+
+def test_diff_drivers_and_uncommitted_files_cannot_replace_exact_tree_evidence(
+    tmp_path: Path,
+) -> None:
+    _repository(tmp_path)
+    (tmp_path / ".gitattributes").write_text("README.md diff=hidden\n", encoding="utf-8")
+    base = _commit(tmp_path)
+    _git(tmp_path, "config", "diff.hidden.command", "nonexistent-diff-driver")
+    _git(tmp_path, "config", "diff.hidden.textconv", "nonexistent-textconv-driver")
+    (tmp_path / "README.md").write_text("# Fixture\nnew content\n", encoding="utf-8")
+    _commit(tmp_path)
+    (tmp_path / "README.md").write_text("# Fixture\n", encoding="utf-8")
+    _git(tmp_path, "add", "README.md")
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.added_content_paths == ("README.md",)
+
+
+def test_content_ban_cannot_be_disabled_by_head_manifest(tmp_path: Path) -> None:
+    base = _repository(tmp_path)
+    manifest = tmp_path / ".repo-standards/repository.toml"
+    manifest.write_text('repository_id = "fixture"\ncomponents = []\n', encoding="utf-8")
+    (tmp_path / "README.md").write_text("new content\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.added_content_paths == ("README.md",)
+    assert not result.satisfied
+
+
+def test_binary_deletion_and_blank_only_new_files_are_allowed(tmp_path: Path) -> None:
+    _repository(tmp_path)
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    binary = docs / "image.bin"
+    binary.write_bytes(b"existing\0binary")
+    base = _commit(tmp_path)
+    binary.unlink()
+    (docs / "blank.txt").write_text("\t\n\u2003\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.added_content_paths == ()
+    assert result.satisfied
+
+
+def test_unrelated_changes_preserve_existing_documentation(tmp_path: Path) -> None:
+    base = _repository(tmp_path)
+    (tmp_path / "source.py").write_text("value = 1\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.added_content_paths == ()
+    assert result.satisfied
+
+
+def test_non_blob_content_evidence_fails_closed(tmp_path: Path) -> None:
+    base = _repository(tmp_path)
+    _git(tmp_path, "update-index", "--add", "--cacheinfo", f"160000,{base},docs/module")
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=Repository Standards",
+        "-c",
+        "user.email=standards@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "fixture",
+    )
+
+    with pytest.raises(ConfigurationError, match="documentation blob evidence"):
+        analyze_pull_request_documentation(tmp_path, base=base)
+
+
+def test_gitmodules_cannot_hide_changed_documentation_gitlinks(tmp_path: Path) -> None:
+    initial = _repository(tmp_path)
+    _git(tmp_path, "update-index", "--add", "--cacheinfo", f"160000,{initial},docs/module")
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=Repository Standards",
+        "-c",
+        "user.email=standards@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "fixture",
+    )
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    (tmp_path / ".gitmodules").write_text(
+        '[submodule "docs/module"]\n'
+        "path = docs/module\nurl = https://example.invalid/module\nignore = all\n",
+        encoding="utf-8",
+    )
+    _git(tmp_path, "add", ".gitmodules")
+    _git(tmp_path, "update-index", "--cacheinfo", f"160000,{base},docs/module")
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=Repository Standards",
+        "-c",
+        "user.email=standards@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "fixture",
+    )
+    assert _git(tmp_path, "rev-parse", "HEAD:docs/module") == base
+
+    with pytest.raises(ConfigurationError, match="documentation blob evidence"):
+        analyze_pull_request_documentation(tmp_path, base=base)
+
+
+@pytest.mark.parametrize("path", ["docs", "nested/DoCs"])
+def test_docs_directory_gitlinks_fail_closed(tmp_path: Path, path: str) -> None:
+    base = _repository(tmp_path)
+    _git(tmp_path, "update-index", "--add", "--cacheinfo", f"160000,{base},{path}")
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=Repository Standards",
+        "-c",
+        "user.email=standards@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "fixture",
+    )
+
+    with pytest.raises(ConfigurationError, match="documentation blob evidence"):
+        analyze_pull_request_documentation(tmp_path, base=base)
+
+
+@pytest.mark.parametrize("path", ["docs", "nested/DoCs"])
+@pytest.mark.parametrize("link_target", ["existing-directory", " "])
+def test_docs_directory_symlink_introductions_are_rejected(
+    tmp_path: Path, path: str, link_target: str
+) -> None:
+    base = _repository(tmp_path)
+    target = tmp_path / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(link_target)
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.added_content_paths == (path,)
+    assert not result.satisfied
+
+
+@pytest.mark.parametrize("path", ["docs", "nested/DoCs"])
+def test_docs_symlink_target_changes_cannot_appear_as_content_deletions(
+    tmp_path: Path, path: str
+) -> None:
+    _repository(tmp_path)
+    target = tmp_path / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to("existing\nother")
+    base = _commit(tmp_path)
+    target.unlink()
+    target.symlink_to("existing")
+    _commit(tmp_path)
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (path,)
+
+
+def test_readme_regular_file_cannot_turn_into_symlink_with_same_blob(tmp_path: Path) -> None:
+    _repository(tmp_path)
+    target = tmp_path / "README.md"
+    target.write_text("outside-content", encoding="utf-8")
+    base = _commit(tmp_path)
+    target.unlink()
+    target.symlink_to("outside-content")
+    _commit(tmp_path)
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
+        "README.md",
+    )
+
+
+@pytest.mark.parametrize("path", ["docs", "nested/DoCs"])
+def test_ordinary_files_named_docs_are_not_directory_content(tmp_path: Path, path: str) -> None:
+    base = _repository(tmp_path)
+    target = tmp_path / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("ordinary file content\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.added_content_paths == ()
+    assert result.satisfied
 
 
 def test_documentation_budget_does_not_count_pure_renames(tmp_path: Path) -> None:

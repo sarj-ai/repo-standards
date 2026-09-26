@@ -581,7 +581,7 @@ def pull_request_documentation_command(
     head: Annotated[str, typer.Option(help="Head revision to compare with the base.")] = "HEAD",
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
 ) -> None:
-    """Limit newly added Markdown pages using policy from the trusted base tree."""
+    """Reject new README/docs content and enforce the trusted Markdown page budget."""
     if not base:
         _emit_command_error(
             "pull-request documentation",
@@ -619,13 +619,19 @@ def _pull_request_documentation_payload(
             "pull-request documentation",
             provenance={"kind": "git-revisions", "base": result.base, "head": result.head},
         ),
-        "policy": {"maximum_added_pages": result.maximum_added_pages, "source": result.base},
+        "policy": {
+            "maximum_added_pages": result.maximum_added_pages,
+            "maximum_added_content_files": 0,
+            "source": result.base,
+        },
         "summary": {
             "satisfied": result.satisfied,
             "added_pages": len(result.added_pages),
             "exempt_pages": len(result.exempt_pages),
+            "added_content_files": len(result.added_content_paths),
         },
         "findings": list(result.added_pages),
+        "content_findings": list(result.added_content_paths),
         "exemptions": list(result.exempt_pages),
     }
 
@@ -635,12 +641,14 @@ def _render_pull_request_documentation(result: PullRequestDocumentation) -> str:
         f"Added Markdown pages: {len(result.added_pages)}/{result.maximum_added_pages}",
     ]
     lines.extend(f"  {path}" for path in result.added_pages)
+    lines.append(f"README/docs files with added content: {len(result.added_content_paths)}/0")
+    lines.extend(f"  {path}" for path in result.added_content_paths)
     if result.exempt_pages:
         lines.append(f"Explicitly exempt pages: {len(result.exempt_pages)}")
         lines.extend(f"  {path}" for path in result.exempt_pages)
     if not result.satisfied:
         lines.append(
-            "Remove or consolidate new pages; durable documentation belongs in the existing graph."
+            "Remove the added documentation; express behavior in code, tests and CLI help."
         )
     return "\n".join(lines) + "\n"
 
