@@ -96,9 +96,7 @@ def test_publish_build_disables_setup_uv_cache() -> None:
     build_job = OBJECT_MAP.validate_python(jobs["build"], strict=True)
     steps = OBJECT_LIST.validate_python(build_job["steps"], strict=True)
     setup_uv_steps = [
-        step
-        for step in steps
-        if str(step.get("uses", "")).startswith("astral-sh/setup-uv@")
+        step for step in steps if str(step.get("uses", "")).startswith("astral-sh/setup-uv@")
     ]
 
     assert len(setup_uv_steps) == 1
@@ -132,17 +130,21 @@ def test_public_tree_contains_only_public_identity_references() -> None:
             for match in ORGANIZATION_REFERENCE.finditer(content)
             if match.group(1).casefold() not in ALLOWED_REPOSITORIES
         )
-        for line_number, line in enumerate(content.splitlines(), start=1):
-            for match in EMAIL_ADDRESS.finditer(line):
-                candidate = match.group().casefold().lstrip("/")
-                if candidate.endswith("@example.invalid"):
-                    continue
-                if candidate in ALLOWED_URL_USERINFO:
-                    continue
-                violations.append(f"{relative_path}:{line_number}: non-example email address")
+        violations.extend(_non_example_email_locations(content, relative_path))
         if PERSONAL_HOME_PATH.search(content):
             violations.append(f"{relative_path}: personal home path")
     assert not violations, "\n".join(violations)
+
+
+def _non_example_email_locations(content: str, relative_path: Path) -> list[str]:
+    violations: list[str] = []
+    for line_number, line in enumerate(content.splitlines(), start=1):
+        for match in EMAIL_ADDRESS.finditer(line):
+            candidate = match.group().casefold().lstrip("/")
+            if candidate.endswith("@example.invalid") or candidate in ALLOWED_URL_USERINFO:
+                continue
+            violations.append(f"{relative_path}:{line_number}: non-example email address")
+    return violations
 
 
 def test_public_corpus_selection_has_public_provenance() -> None:

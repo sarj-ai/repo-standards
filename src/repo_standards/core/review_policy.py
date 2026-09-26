@@ -68,15 +68,10 @@ class ReviewPolicyConfig:
     one_review_maximum_lines: int = ONE_REVIEW_MAXIMUM_LINES
     migration_review_floor: RequiredReviewCount = MIGRATION_REVIEW_FLOOR
     migration_roots: tuple[str, ...] = ()
-    accepted_check_conclusions: frozenset[CheckConclusion] = frozenset(
-        {CheckConclusion.SUCCESS}
-    )
+    accepted_check_conclusions: frozenset[CheckConclusion] = frozenset({CheckConclusion.SUCCESS})
 
     def __post_init__(self) -> None:
-        if (
-            isinstance(self.zero_review_below_lines, bool)
-            or self.zero_review_below_lines <= 0
-        ):
+        if isinstance(self.zero_review_below_lines, bool) or self.zero_review_below_lines <= 0:
             message = "zero-review threshold must be a positive integer"
             raise ValueError(message)
         if (
@@ -136,10 +131,7 @@ class ReviewPolicyEvidence:
     threads_resolved: bool | None
 
     def __post_init__(self) -> None:
-        if (
-            isinstance(self.counted_lines, bool)
-            or self.counted_lines < 0
-        ):
+        if isinstance(self.counted_lines, bool) or self.counted_lines < 0:
             message = "counted lines must be a non-negative integer"
             raise ValueError(message)
         if _OBJECT_ID.fullmatch(self.evaluated_head_sha) is None:
@@ -195,13 +187,13 @@ def evaluate_review_policy(
             accepted=config.accepted_check_conclusions,
         )
     )
-    review_reasons, approvals = _review_reasons(
+    review_assessment = _review_reasons(
         evidence.latest_human_reviews,
         expected_head=evidence.evaluated_head_sha,
         required_reviews=required_reviews,
         head_matches=head_matches,
     )
-    reasons.extend(review_reasons)
+    reasons.extend(review_assessment.reasons)
 
     if evidence.threads_resolved is None:
         reasons.append(ReviewPolicyReason.THREAD_EVIDENCE_MISSING)
@@ -216,7 +208,7 @@ def evaluate_review_policy(
     }
     return ReviewPolicyResult(
         required_human_reviews=required_reviews,
-        current_human_approvals=approvals,
+        current_human_approvals=review_assessment.approvals,
         touches_migration=touches_migration,
         merge_ready=not any(reason in blocking for reason in reasons),
         reasons=tuple(reasons),
@@ -282,27 +274,31 @@ def _check_reasons(
     return tuple(reasons)
 
 
+@dataclass(frozen=True, slots=True)
+class _ReviewAssessment:
+    reasons: tuple[ReviewPolicyReason, ...]
+    approvals: int
+
+
 def _review_reasons(
     reviews: tuple[HumanReviewEvidence, ...] | None,
     *,
     expected_head: GitObjectId,
     required_reviews: RequiredReviewCount,
     head_matches: bool,
-) -> tuple[tuple[ReviewPolicyReason, ...], int]:
+) -> _ReviewAssessment:
     if reviews is None:
-        return (ReviewPolicyReason.REVIEW_EVIDENCE_MISSING,), 0
+        return _ReviewAssessment((ReviewPolicyReason.REVIEW_EVIDENCE_MISSING,), 0)
     reviewers = tuple(review.reviewer.casefold() for review in reviews)
     if len(reviewers) != len(set(reviewers)):
-        return (ReviewPolicyReason.REVIEW_EVIDENCE_AMBIGUOUS,), 0
+        return _ReviewAssessment((ReviewPolicyReason.REVIEW_EVIDENCE_AMBIGUOUS,), 0)
 
     stale_approval = any(
         review.state is ReviewState.APPROVED and review.commit_sha != expected_head
         for review in reviews
     )
     approvals = sum(
-        review.state is ReviewState.APPROVED
-        and review.commit_sha == expected_head
-        and head_matches
+        review.state is ReviewState.APPROVED and review.commit_sha == expected_head and head_matches
         for review in reviews
     )
     reasons: list[ReviewPolicyReason] = []
@@ -312,4 +308,4 @@ def _review_reasons(
         reasons.append(ReviewPolicyReason.CHANGES_REQUESTED)
     if approvals < required_reviews:
         reasons.append(ReviewPolicyReason.APPROVALS_MISSING)
-    return tuple(reasons), approvals
+    return _ReviewAssessment(tuple(reasons), approvals)
