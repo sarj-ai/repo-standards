@@ -16,7 +16,7 @@ from typing import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
 
 type Language = Literal["artifact", "python", "typescript", "java", "go", "rust"]
@@ -339,9 +339,7 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
         key=lambda item: item.capability_id,
     )
 )
-_CAPABILITY_BY_ID = MappingProxyType(
-    {item.capability_id: item for item in _CAPABILITIES}
-)
+_CAPABILITY_BY_ID = MappingProxyType({item.capability_id: item for item in _CAPABILITIES})
 
 _PYTHON_DEPENDENCIES = MappingProxyType(
     {
@@ -487,15 +485,15 @@ def _detect_file(tracked: TrackedFile, basename: str) -> tuple[EvidenceTriple, .
             _requirements_dependencies(tracked.content), _PYTHON_DEPENDENCIES
         )
     elif basename == "pom.xml":
-        springdoc = sorted(
-            item for item in _pom_dependencies(tracked.content) if item.startswith("org.springdoc:")
+        result = _springdoc_evidence(
+            sorted(
+                item
+                for item in _pom_dependencies(tracked.content)
+                if item.startswith("org.springdoc:")
+            )
         )
-        result = tuple(("springdoc", "manifest-dependency", item) for item in springdoc)
     elif basename in {"build.gradle", "build.gradle.kts"}:
-        result = tuple(
-            ("springdoc", "manifest-dependency", item)
-            for item in _gradle_dependencies(tracked.content)
-        )
+        result = _springdoc_evidence(_gradle_dependencies(tracked.content))
     elif basename == "go.mod":
         result = _mapped_dependencies(_go_dependencies(tracked.content), _GO_DEPENDENCIES)
     elif basename == "cargo.toml":
@@ -503,6 +501,10 @@ def _detect_file(tracked: TrackedFile, basename: str) -> tuple[EvidenceTriple, .
     else:
         result = ()
     return result
+
+
+def _springdoc_evidence(dependencies: Iterable[str]) -> tuple[EvidenceTriple, ...]:
+    return tuple(("springdoc", "manifest-dependency", item) for item in dependencies)
 
 
 def _mapped_dependencies(

@@ -14,6 +14,8 @@ from release_reconciliation import (
     RegistrySide,
     ReleaseState,
     ReleaseStateError,
+    parse_github_registry_side,
+    parse_pypi_registry_side,
     reconciliation_plan,
     render_release_readme,
     verify_distribution_release_identity,
@@ -108,8 +110,7 @@ def test_incomplete_or_extra_artifact_sets_are_refused() -> None:
         reconciliation_plan(_state(github=RegistrySide((WHEEL,), TAG_SHA)))
 
 
-def test_release_readme_is_rendered_to_exact_source_and_version(tmp_path: Path) -> None:
-    del tmp_path
+def test_release_readme_is_rendered_to_exact_source_and_version() -> None:
     source = """steps:
       - uses: sarj-ai/repo-standards@1111111111111111111111111111111111111111 # v2.0.0
 """
@@ -217,3 +218,99 @@ def test_installed_distribution_verifier_rejects_wrong_installed_version(
             checksum_path=tmp_path / "SHA256SUMS",
             run_command=lambda command: "9.9.9\n" if command[-1] == "--version" else "",
         )
+
+
+def test_github_snapshot_preserves_source_sorted_artifacts_and_ignores_other_named_assets() -> None:
+    document: dict[str, object] = {
+        "target_commitish": TAG_SHA,
+        "assets": [
+            {
+                "name": WHEEL.name,
+                "digest": f"sha256:{WHEEL.sha256}",
+                "browser_download_url": "wheel",
+            },
+            {"name": "SHA256SUMS"},
+            {"name": "unrelated.txt"},
+            {
+                "name": SDIST.name,
+                "digest": f"sha256:{SDIST.sha256}",
+                "browser_download_url": "sdist",
+            },
+        ],
+    }
+    assert parse_github_registry_side(document, VERSION) == RegistrySide(
+        tuple(
+            sorted(
+                (
+                    Artifact(WHEEL.name, WHEEL.sha256, "wheel"),
+                    Artifact(SDIST.name, SDIST.sha256, "sdist"),
+                )
+            )
+        ),
+        TAG_SHA,
+    )
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    [
+        ({"assets": []}, "target is missing"),
+        ({"target_commitish": TAG_SHA}, "assets are missing"),
+        ({"target_commitish": TAG_SHA, "assets": [None]}, "malformed asset"),
+        ({"target_commitish": TAG_SHA, "assets": [dict[str, object]()]}, "malformed asset"),
+        ({"target_commitish": TAG_SHA, "assets": []}, "missing SHA256SUMS"),
+        ({"target_commitish": TAG_SHA, "assets": [{"name": WHEEL.name}]}, "digest is unavailable"),
+        (
+            {"target_commitish": TAG_SHA, "assets": [{"name": WHEEL.name, "digest": "sha256:123"}]},
+            "URL is unavailable",
+        ),
+    ],
+)
+def test_github_snapshot_rejects_incomplete_publication_evidence(
+    document: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ReleaseStateError, match=message):
+        parse_github_registry_side(document, VERSION)
+
+
+def test_pypi_snapshot_preserves_source_sorted_artifacts_and_ignores_unrelated_files() -> None:
+    document: dict[str, object] = {
+        "info": {"description": f"- uses: sarj-ai/repo-standards@{TAG_SHA} # v{VERSION}\n"},
+        "urls": [
+            None,
+            {},
+            {"filename": "unrelated.txt"},
+            {"filename": WHEEL.name, "digests": {"sha256": WHEEL.sha256}, "url": "wheel"},
+            {"filename": SDIST.name, "digests": {"sha256": SDIST.sha256}, "url": "sdist"},
+        ],
+    }
+    assert parse_pypi_registry_side(document, VERSION) == RegistrySide(
+        tuple(
+            sorted(
+                (
+                    Artifact(WHEEL.name, WHEEL.sha256, "wheel"),
+                    Artifact(SDIST.name, SDIST.sha256, "sdist"),
+                )
+            )
+        ),
+        TAG_SHA,
+    )
+
+
+@pytest.mark.parametrize(
+    ("artifact", "message"),
+    [
+        ({"filename": WHEEL.name}, "digest is unavailable"),
+        ({"filename": WHEEL.name, "digests": {}}, "digest is unavailable"),
+        ({"filename": WHEEL.name, "digests": {"sha256": WHEEL.sha256}}, "URL is unavailable"),
+    ],
+)
+def test_pypi_snapshot_rejects_incomplete_artifact_evidence(
+    artifact: dict[str, object], message: str
+) -> None:
+    document: dict[str, object] = {
+        "info": {"description": f"- uses: sarj-ai/repo-standards@{TAG_SHA} # v{VERSION}\n"},
+        "urls": [artifact],
+    }
+    with pytest.raises(ReleaseStateError, match=message):
+        parse_pypi_registry_side(document, VERSION)

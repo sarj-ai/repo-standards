@@ -465,3 +465,194 @@ def test_documentation_budget_does_not_count_pure_renames(tmp_path: Path) -> Non
 
     assert result.exit_code == 0
     assert '"added_pages":0' in result.stdout
+
+
+@pytest.mark.parametrize("filename", ["package.json", "package-lock.json"])
+def test_existing_docs_app_dependency_metadata_updates_are_not_documentation(
+    tmp_path: Path, filename: str
+) -> None:
+    base = _docs_package(tmp_path)
+    package = tmp_path / "apps/docs/package.json"
+    target = package.with_name(filename)
+    target.write_text(
+        target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1"), encoding="utf-8"
+    )
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.added_content_paths == ()
+    assert result.satisfied
+
+
+def _docs_package(tmp_path: Path) -> str:
+    _repository(tmp_path)
+    package = tmp_path / "apps/docs/package.json"
+    package.parent.mkdir(parents=True)
+    package.write_text(
+        '{"name":"docs-app","private":true,"dependencies":{"site-framework":"^1.0.0"}}\n',
+        encoding="utf-8",
+    )
+    lock = package.with_name("package-lock.json")
+    lock.write_text(
+        '{"name":"docs-app","lockfileVersion":3,"packages":'
+        '{"":{"name":"docs-app","dependencies":{"site-framework":"^1.0.0"}},'
+        '"node_modules/site-framework":{"version":"1.0.0"}}}\n',
+        encoding="utf-8",
+    )
+    return _commit(tmp_path)
+
+
+@pytest.mark.parametrize("filename", ["package.json", "package-lock.json"])
+def test_overflowed_json_numbers_cannot_qualify_for_metadata_maintenance(
+    tmp_path: Path, filename: str
+) -> None:
+    _docs_package(tmp_path)
+    target = tmp_path / "apps/docs" / filename
+    target.write_text(
+        target.read_text(encoding="utf-8").replace(
+            '"name":"docs-app"', '"name":"docs-app","config":{"limit":1e999}'
+        ),
+        encoding="utf-8",
+    )
+    base = _commit(tmp_path)
+    target.write_text(
+        target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1"), encoding="utf-8"
+    )
+    _commit(tmp_path)
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
+        f"apps/docs/{filename}",
+    )
+
+
+@pytest.mark.parametrize(
+    ("filename", "original", "replacement"),
+    [
+        ("package.json", '"private":true', '"private":false'),
+        ("package.json", '"private":true', '"private":1'),
+        ("package.json", '"private":true', '"private":true,"description":"new prose"'),
+        ("package.json", '"private":true', '"private":true,"scripts":{"build":"changed"}'),
+        ("package.json", '"^1.0.0"', '{"description":"prose"}'),
+        ("package.json", '"name":"docs-app"', '"name":"docs-app","name":"docs-app"'),
+        ("package.json", '"private":true', '"private":NaN'),
+        ("package-lock.json", '"lockfileVersion":3', '"lockfileVersion":3.0'),
+        ("package-lock.json", '"lockfileVersion":3', '"lockfileVersion":3,"description":"prose"'),
+        ("package-lock.json", '"name":"docs-app"', '"name":"other-app"'),
+        ("package-lock.json", '"version":"1.0.0"', '"version":"1.0.0","version":"1.0.1"'),
+    ],
+)
+def test_metadata_exception_does_not_allow_prose_config_or_ambiguous_json_changes(
+    tmp_path: Path, filename: str, original: str, replacement: str
+) -> None:
+    base = _docs_package(tmp_path)
+    target = tmp_path / "apps/docs" / filename
+    target.write_text(
+        target.read_text(encoding="utf-8").replace(original, replacement), encoding="utf-8"
+    )
+    _commit(tmp_path)
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
+        f"apps/docs/{filename}",
+    )
+
+
+@pytest.mark.parametrize("operation", ["add", "rename", "symlink", "executable"])
+def test_metadata_exception_does_not_exempt_new_moved_or_changed_file_types(
+    tmp_path: Path, operation: str
+) -> None:
+    base = _docs_package(tmp_path)
+    target = tmp_path / "apps/docs/package.json"
+    match operation:
+        case "add":
+            target = tmp_path / "apps/docs/nested/package.json"
+            target.parent.mkdir()
+            target.write_text(
+                '{"name":"new-app","dependencies":{"framework":"1.0.0"}}\n', encoding="utf-8"
+            )
+        case "rename":
+            target.parent.joinpath("nested").mkdir()
+            _git(tmp_path, "mv", "apps/docs/package.json", "apps/docs/nested/package.json")
+            target = target.parent / "nested/package.json"
+            target.write_text(
+                target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1"), encoding="utf-8"
+            )
+        case "symlink":
+            target.unlink()
+            target.symlink_to("../../README.md")
+        case _:
+            target.chmod(0o755)
+            target.write_text(
+                target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1"), encoding="utf-8"
+            )
+    _commit(tmp_path)
+
+    assert (
+        target.relative_to(tmp_path).as_posix()
+        in analyze_pull_request_documentation(tmp_path, base=base).added_content_paths
+    )
+
+
+def test_lockfile_exception_uses_exact_head_package_identity_not_worktree(tmp_path: Path) -> None:
+    base = _docs_package(tmp_path)
+    package = tmp_path / "apps/docs/package.json"
+    original = package.read_text(encoding="utf-8")
+    package.write_text(original.replace("docs-app", "renamed-app"), encoding="utf-8")
+    lock = package.with_name("package-lock.json")
+    lock.write_text(lock.read_text(encoding="utf-8").replace("1.0.0", "1.0.1"), encoding="utf-8")
+    _commit(tmp_path)
+    package.write_text(original, encoding="utf-8")
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
+        "apps/docs/package-lock.json",
+        "apps/docs/package.json",
+    )
+
+
+def test_lockfile_exception_uses_merge_base_package_identity(tmp_path: Path) -> None:
+    initial = _docs_package(tmp_path)
+    lock = tmp_path / "apps/docs/package-lock.json"
+    lock.write_text(lock.read_text(encoding="utf-8").replace("1.0.0", "1.0.1"), encoding="utf-8")
+    head = _commit(tmp_path)
+    _git(tmp_path, "checkout", "--quiet", "--detach", initial)
+    package = tmp_path / "apps/docs/package.json"
+    package.write_text(
+        package.read_text(encoding="utf-8").replace("docs-app", "new-main-app"), encoding="utf-8"
+    )
+    base = _commit(tmp_path)
+
+    assert (
+        analyze_pull_request_documentation(tmp_path, base=base, head=head).added_content_paths == ()
+    )
+
+
+def test_lockfile_exception_rejects_nonobject_legacy_resolution_entries(tmp_path: Path) -> None:
+    base = _docs_package(tmp_path)
+    lock = tmp_path / "apps/docs/package-lock.json"
+    source = lock.read_text(encoding="utf-8").replace('"lockfileVersion":3', '"lockfileVersion":2')
+    lock.write_text(source, encoding="utf-8")
+    base = _commit(tmp_path)
+    lock.write_text(
+        source.replace('"packages":', '"dependencies":{"prose":"added content"},"packages":'),
+        encoding="utf-8",
+    )
+    _commit(tmp_path)
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
+        "apps/docs/package-lock.json",
+    )
+
+
+@pytest.mark.parametrize("filename", ["package.json", "package-lock.json"])
+def test_dependency_metadata_exception_rejects_binary_json_encodings(
+    tmp_path: Path, filename: str
+) -> None:
+    base = _docs_package(tmp_path)
+    target = tmp_path / "apps/docs" / filename
+    content = target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1")
+    target.write_bytes(content.encode("utf-16"))
+    _commit(tmp_path)
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
+        f"apps/docs/{filename}",
+    )

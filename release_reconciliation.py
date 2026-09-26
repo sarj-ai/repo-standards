@@ -149,9 +149,7 @@ def render_release_readme(readme: str, *, source_sha: str, version: str) -> str:
     return rendered
 
 
-def verify_distribution_release_identity(
-    directory: Path, *, source_sha: str, version: str
-) -> None:
+def verify_distribution_release_identity(directory: Path, *, source_sha: str, version: str) -> None:
     expected = f"uses: sarj-ai/repo-standards@{source_sha} # v{version}"
     wheel = _exact_file(directory, f"repo_standards-{version}-py3-none-any.whl")
     sdist = _exact_file(directory, f"repo_standards-{version}.tar.gz")
@@ -217,9 +215,7 @@ def _exact_file(directory: Path, name: str) -> Path:
     return path
 
 
-def inspect_release(  # ruff: ignore[too-many-branches,too-many-locals,too-many-statements] -- one registry snapshot
-    *, version: str, repository: str, head_sha: str
-) -> ReleaseState:
+def inspect_release(*, version: str, repository: str, head_sha: str) -> ReleaseState:
     _validate_version(version)
     _validate_sha(head_sha, "head")
     # This dependency-free bootstrap runs before the project environment exists.
@@ -232,80 +228,93 @@ def inspect_release(  # ruff: ignore[too-many-branches,too-many-locals,too-many-
         else _nested_string(tag_document, object_key="object", value_key="sha")
     )
     release_document = _request_json(f"{api}/releases/tags/v{version}", token=token)
-    github = None
-    if release_document is not None:
-        target = release_document.get("target_commitish")
-        if not isinstance(target, str):
-            msg = "GitHub release target is missing"
-            raise ReleaseStateError(msg)
-        assets = release_document.get("assets")
-        if not isinstance(assets, list):
-            msg = "GitHub release assets are missing"
-            raise ReleaseStateError(msg)
-        package_assets: list[Artifact] = []
-        checksum_present = False
-        for raw_object in cast("list[object]", assets):
-            raw = cast("dict[str, object]", raw_object) if isinstance(raw_object, dict) else None
-            name_object = None if raw is None else raw.get("name")
-            if raw is None or not isinstance(name_object, str):
-                msg = "GitHub release contains malformed asset metadata"
-                raise ReleaseStateError(msg)
-            name = name_object
-            checksum_present = checksum_present or name == "SHA256SUMS"
-            if name not in expected_artifact_names(version):
-                continue
-            digest = raw.get("digest")
-            url = raw.get("browser_download_url")
-            if not isinstance(digest, str) or not digest.startswith("sha256:"):
-                msg = "GitHub release asset digest is unavailable"
-                raise ReleaseStateError(msg)
-            if not isinstance(url, str):
-                msg = "GitHub release asset URL is unavailable"
-                raise ReleaseStateError(msg)
-            package_assets.append(Artifact(name, digest.removeprefix("sha256:"), url))
-        if not checksum_present:
-            msg = "GitHub release is missing SHA256SUMS"
-            raise ReleaseStateError(msg)
-        github = RegistrySide(tuple(sorted(package_assets)), target)
-
+    github = (
+        None if release_document is None else parse_github_registry_side(release_document, version)
+    )
     pypi_document = _request_json(f"https://pypi.org/pypi/repo-standards/{version}/json")
-    pypi = None
-    if pypi_document is not None:
-        info_object = pypi_document.get("info")
-        urls = pypi_document.get("urls")
-        if not isinstance(info_object, dict) or not isinstance(urls, list):
-            msg = "PyPI release metadata is malformed"
-            raise ReleaseStateError(msg)
-        info = cast("dict[str, object]", info_object)
-        description = info.get("description")
-        if not isinstance(description, str):
-            msg = "PyPI release description is missing"
-            raise ReleaseStateError(msg)
-        pypi_source = _source_sha_from_readme(description, version)
-        package_files: list[Artifact] = []
-        for raw_object in cast("list[object]", urls):
-            raw = cast("dict[str, object]", raw_object) if isinstance(raw_object, dict) else None
-            if raw is None:
-                continue
-            filename = raw.get("filename")
-            if not isinstance(filename, str) or filename not in expected_artifact_names(version):
-                continue
-            digests_object = raw.get("digests")
-            url = raw.get("url")
-            if not isinstance(digests_object, dict):
-                msg = "PyPI artifact digest is unavailable"
-                raise ReleaseStateError(msg)
-            digests = cast("dict[str, object]", digests_object)
-            sha256 = digests.get("sha256")
-            if not isinstance(sha256, str):
-                msg = "PyPI artifact digest is unavailable"
-                raise ReleaseStateError(msg)
-            if not isinstance(url, str):
-                msg = "PyPI artifact URL is unavailable"
-                raise ReleaseStateError(msg)
-            package_files.append(Artifact(filename, sha256, url))
-        pypi = RegistrySide(tuple(sorted(package_files)), pypi_source)
+    pypi = None if pypi_document is None else parse_pypi_registry_side(pypi_document, version)
     return ReleaseState(version, head_sha, tag_sha, github, pypi)
+
+
+def parse_github_registry_side(document: dict[str, object], version: str) -> RegistrySide:
+    target = document.get("target_commitish")
+    if not isinstance(target, str):
+        msg = "GitHub release target is missing"
+        raise ReleaseStateError(msg)
+    assets = document.get("assets")
+    if not isinstance(assets, list):
+        msg = "GitHub release assets are missing"
+        raise ReleaseStateError(msg)
+    package_assets: list[Artifact] = []
+    checksum_present = False
+    for raw_object in cast("list[object]", assets):
+        if not isinstance(raw_object, dict):
+            msg = "GitHub release contains malformed asset metadata"
+            raise ReleaseStateError(msg)
+        raw = cast("dict[str, object]", raw_object)
+        name = raw.get("name")
+        if not isinstance(name, str):
+            msg = "GitHub release contains malformed asset metadata"
+            raise ReleaseStateError(msg)
+        checksum_present = checksum_present or name == "SHA256SUMS"
+        if name in expected_artifact_names(version):
+            package_assets.append(_github_artifact(raw, name))
+    if not checksum_present:
+        msg = "GitHub release is missing SHA256SUMS"
+        raise ReleaseStateError(msg)
+    return RegistrySide(tuple(sorted(package_assets)), target)
+
+
+def _github_artifact(raw: dict[str, object], name: str) -> Artifact:
+    digest = raw.get("digest")
+    url = raw.get("browser_download_url")
+    if not isinstance(digest, str) or not digest.startswith("sha256:"):
+        msg = "GitHub release asset digest is unavailable"
+        raise ReleaseStateError(msg)
+    if not isinstance(url, str):
+        msg = "GitHub release asset URL is unavailable"
+        raise ReleaseStateError(msg)
+    return Artifact(name, digest.removeprefix("sha256:"), url)
+
+
+def parse_pypi_registry_side(document: dict[str, object], version: str) -> RegistrySide:
+    info_object = document.get("info")
+    urls = document.get("urls")
+    if not isinstance(info_object, dict) or not isinstance(urls, list):
+        msg = "PyPI release metadata is malformed"
+        raise ReleaseStateError(msg)
+    info = cast("dict[str, object]", info_object)
+    description = info.get("description")
+    if not isinstance(description, str):
+        msg = "PyPI release description is missing"
+        raise ReleaseStateError(msg)
+    pypi_source = _source_sha_from_readme(description, version)
+    package_files: list[Artifact] = []
+    for raw_object in cast("list[object]", urls):
+        if not isinstance(raw_object, dict):
+            continue
+        raw = cast("dict[str, object]", raw_object)
+        filename = raw.get("filename")
+        if isinstance(filename, str) and filename in expected_artifact_names(version):
+            package_files.append(_pypi_artifact(raw, filename))
+    return RegistrySide(tuple(sorted(package_files)), pypi_source)
+
+
+def _pypi_artifact(raw: dict[str, object], filename: str) -> Artifact:
+    digests_object = raw.get("digests")
+    url = raw.get("url")
+    if not isinstance(digests_object, dict):
+        msg = "PyPI artifact digest is unavailable"
+        raise ReleaseStateError(msg)
+    digests = cast("dict[str, object]", digests_object)
+    sha256 = digests.get("sha256")
+    if not isinstance(sha256, str):
+        msg = "PyPI artifact digest is unavailable"
+        raise ReleaseStateError(msg)
+    if not isinstance(url, str):
+        msg = "PyPI artifact URL is unavailable"
+        raise ReleaseStateError(msg)
+    return Artifact(filename, sha256, url)
 
 
 def _request_json(url: str, *, token: str | None = None) -> dict[str, object] | None:
@@ -341,9 +350,7 @@ def _source_sha_from_readme(document: str, version: str) -> str:
     return line.group("sha")
 
 
-def _nested_string(
-    document: dict[str, object], *, object_key: str, value_key: str
-) -> str:
+def _nested_string(document: dict[str, object], *, object_key: str, value_key: str) -> str:
     nested_object = document.get(object_key)
     if not isinstance(nested_object, dict):
         msg = "GitHub tag response is malformed"

@@ -281,8 +281,11 @@ def verify_distributions(
     sdists = tuple(directory.glob("*.tar.gz"))
     if len(wheels) != 1 or len(sdists) != 1:
         return ["distribution directory must contain exactly one wheel and one source distribution"]
+    return [*_verify_wheel(wheels[0]), *_verify_sdist(sdists[0])]
 
-    wheel_members = _wheel_members(wheels[0])
+
+def _verify_wheel(path: Path) -> list[str]:
+    wheel_members = _wheel_members(path)
     wheel_metadata = _wheel_metadata(wheel_members)
     wheel_names = {str(member.path) for member in wheel_members}
     allowed_wheel_names = {
@@ -295,7 +298,7 @@ def verify_distributions(
         f"{wheel_metadata.dist_info}/{name}" for name in WHEEL_METADATA_FILES
     )
     violations = [
-        f"{wheels[0].name}:{name}: unexpected wheel member"
+        f"{path.name}:{name}: unexpected wheel member"
         for name in sorted(wheel_names - allowed_wheel_names)
     ]
     violations.extend(
@@ -305,13 +308,15 @@ def verify_distributions(
             f"{wheel_metadata.dist_info}/licenses/LICENSE",
         )
     )
-    violations.extend(_verify_common(wheel_members, wheels[0].name))
+    violations.extend(_verify_common(wheel_members, path.name))
+    return violations
 
-    sdist_members = _sdist_members(sdists[0])
+
+def _verify_sdist(path: Path) -> list[str]:
+    sdist_members = _sdist_members(path)
     roots = {member.path.parts[0] for member in sdist_members}
     if len(roots) != 1:
-        violations.append("source distribution must contain exactly one root directory")
-        return violations
+        return ["source distribution must contain exactly one root directory"]
     sdist_root = next(iter(roots))
     sdist_names = {str(member.path) for member in sdist_members}
     allowed_sdist_names = {
@@ -321,10 +326,10 @@ def verify_distributions(
         and (name.endswith(".py") or name == f"{sdist_root}/src/repo_standards/py.typed")
     }
     allowed_sdist_names.update(f"{sdist_root}/{name}" for name in SDIST_ROOT_FILES)
-    violations.extend(
-        f"{sdists[0].name}:{name}: unexpected source distribution member"
+    violations = [
+        f"{path.name}:{name}: unexpected source distribution member"
         for name in sorted(sdist_names - allowed_sdist_names)
-    )
+    ]
     package_info = next(
         (member.content for member in sdist_members if member.path.name == "PKG-INFO"), None
     )
@@ -333,7 +338,7 @@ def verify_distributions(
     else:
         sdist_metadata = _metadata_values(package_info)
         violations.extend(_verify_license(sdist_metadata, sdist_names, f"{sdist_root}/LICENSE"))
-    violations.extend(_verify_common(sdist_members, sdists[0].name))
+    violations.extend(_verify_common(sdist_members, path.name))
     return violations
 
 
@@ -454,12 +459,7 @@ def _verify_site_semantics(directory: Path) -> list[str]:
         parser.feed(path.read_text(encoding="utf-8"))
         if relative == "git-policies/index.html":
             violations.extend(_verify_git_policy_reference(parser))
-        if parser.main_count != 1:
-            violations.append(f"site:{relative}: expected exactly one main landmark")
-        if parser.h1_count != 1 or not "".join(parser.h1_text).strip():
-            violations.append(f"site:{relative}: expected exactly one nonempty h1")
-        if not "".join(parser.title_text).strip() or not parser.description:
-            violations.append(f"site:{relative}: title and description are required")
+        violations.extend(_verify_page_landmarks(relative, parser))
         if parser.rule_id is None:
             if relative.startswith("rules/categories/") and (
                 parser.breadcrumbs != 1 or parser.current_crumbs != 1
@@ -469,6 +469,17 @@ def _verify_site_semantics(directory: Path) -> list[str]:
         violations.extend(verify_rule_page(relative, parser, expected_rules, observed_rules))
     if observed_rules != set(expected_rules):
         violations.append("site: rendered rule routes differ from the catalog")
+    return violations
+
+
+def _verify_page_landmarks(relative: str, parser: PageSemantics) -> list[str]:
+    violations: list[str] = []
+    if parser.main_count != 1:
+        violations.append(f"site:{relative}: expected exactly one main landmark")
+    if parser.h1_count != 1 or not "".join(parser.h1_text).strip():
+        violations.append(f"site:{relative}: expected exactly one nonempty h1")
+    if not "".join(parser.title_text).strip() or not parser.description:
+        violations.append(f"site:{relative}: title and description are required")
     return violations
 
 

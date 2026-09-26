@@ -424,194 +424,203 @@ def _repository_artifact_diagnostics(
     )
     diagnostics: list[Diagnostic] = []
     for tracked in snapshot.inspection.tracked_files:
-        path = tracked.path
-        component = _nearest_component(path, snapshot.manifest.components)
-        if path.casefold().endswith(_TFVARS_EXAMPLE_SUFFIXES):
-            diagnostics.append(
-                _repository_diagnostic(
-                    rule_id=RuleId("repository/artifacts/terraform-examples"),
-                    component=component,
-                    subject_kind="tracked-terraform-example",
-                    observed=path,
-                    expected="no tracked .tfvars example, sample, or template filename",
-                    message="tracked Terraform example variable file is prohibited",
-                    path=path,
-                    remediation=Remediation(
-                        summary=(
-                            "Remove the example file and keep one authoritative input contract."
-                        ),
-                        steps=(
-                            "Delete the tracked .tfvars example, sample, or template file.",
-                            "Describe inputs and validation in variables.tf.",
-                        ),
-                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
-                    ),
-                )
-            )
-        basename = PurePosixPath(path).name.casefold()
-        is_derived_env_artifact = basename in _DERIVED_ENV_BASENAMES or (
-            (basename == ".env" or basename.startswith(".env."))
-            and basename.endswith((*_ENV_EXAMPLE_SUFFIXES, *_ENV_SCHEMA_SUFFIXES))
-        )
-        is_derived_backend_artifact = basename in _DERIVED_BACKEND_BASENAMES
-        if is_derived_backend_artifact or is_derived_env_artifact:
-            diagnostics.append(
-                _repository_diagnostic(
-                    rule_id=RuleId("repository/artifacts/schema-derived-config-examples"),
-                    component=component,
-                    subject_kind="tracked-schema-derived-config-example",
-                    observed=path,
-                    expected="no tracked schema-derived configuration example basename",
-                    message="tracked configuration artifact duplicates source settings",
-                    path=path,
-                    remediation=Remediation(
-                        summary="Generate configuration guidance from source settings.",
-                        steps=(
-                            "Delete the derived example or schema artifact.",
-                            (
-                                "Generate developer-facing configuration directly from Terraform "
-                                "declarations, Zod settings, Pydantic settings, or the "
-                                "deployment schema."
-                            ),
-                        ),
-                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
-                    ),
-                )
-            )
-        is_terraform_path = _is_terraform_artifact_path(path, snapshot.inspection.terraform_modules)
-        is_github_automation_path = _is_github_automation_path(path)
-        is_operational_path = is_terraform_path or _is_operational_path(
-            path,
-            component=component,
-            terraform_modules=snapshot.inspection.terraform_modules,
-        )
-        is_owned_verifier = _is_owned_verifier_path(path, component, package_test_roots)
-        is_owned_tool_source = path.startswith("tools/") and is_owned_verifier
-        is_operational_script_test = (
-            _is_script_test(basename)
-            and is_operational_path
-            and (
-                is_terraform_path
-                or is_github_automation_path
-                or not _is_owned_tool_test(path, component, package_test_roots)
+        diagnostics.extend(
+            _tracked_artifact_diagnostics(
+                snapshot, tracked.path, package_test_roots, document_package_roots
             )
         )
-        is_bespoke_verifier = basename in _RETIRED_IAC_VERIFIER_NAMES or (
-            _is_verifier_script(basename)
-            and (
-                is_terraform_path
-                or is_github_automation_path
-                or (is_operational_path and not is_owned_tool_source)
-                or not is_owned_verifier
-            )
-        )
-        if is_bespoke_verifier:
-            diagnostics.append(
-                _repository_diagnostic(
-                    rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
-                    component=component,
-                    subject_kind="tracked-bespoke-iac-verifier",
-                    observed=path,
-                    expected="no retired, operational, or unowned verifier artifact",
-                    message="tracked retired, operational, or unowned verifier is prohibited",
-                    path=path,
-                    remediation=Remediation(
-                        summary=("Remove the operational verifier instead of relocating it."),
-                        steps=(
-                            "Delete the verifier and every workflow invocation.",
-                            (
-                                "Express durable safety in Terraform, shared policy, provider "
-                                "state, or runtime behavior."
-                            ),
-                        ),
-                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
-                    ),
-                )
-            )
-        elif is_operational_script_test:
-            diagnostics.append(
-                _repository_diagnostic(
-                    rule_id=RuleId("repository/artifacts/operational-script-tests"),
-                    component=component,
-                    subject_kind="tracked-operational-script-test",
-                    observed=path,
-                    expected="no tracked operational script test artifact",
-                    message="tracked operational script test creates a parallel contract",
-                    path=path,
-                    remediation=Remediation(
-                        summary="Remove the operational test instead of relocating it.",
-                        steps=(
-                            "Delete the test and every workflow invocation.",
-                            (
-                                "Express durable safety in Terraform, shared policy, provider "
-                                "state, or runtime behavior."
-                            ),
-                        ),
-                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
-                    ),
-                )
-            )
-        if path.casefold().endswith(_TERRAFORM_TEST_SUFFIXES):
-            diagnostics.append(
-                _repository_diagnostic(
-                    rule_id=RuleId("repository/artifacts/terraform-test-files"),
-                    component=component,
-                    subject_kind="tracked-terraform-test-file",
-                    observed=path,
-                    expected="no tracked .tftest.hcl or .tftest.json filename",
-                    message="tracked native Terraform test file is prohibited by repository policy",
-                    path=path,
-                    remediation=Remediation(
-                        summary="Move the assertion into the shared validation path.",
-                        steps=(
-                            "Delete the tracked Terraform-native test file.",
-                            (
-                                "Validate the behavior through a rendered plan, provider, or "
-                                "runtime contract."
-                            ),
-                        ),
-                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
-                    ),
-                )
-            )
-        if path.casefold().endswith(".md") and not _markdown_path_is_owned(
-            path,
-            package_roots=document_package_roots,
-            component=component,
-            terraform_modules=snapshot.inspection.terraform_modules,
-            documentation_entrypoints=(
-                snapshot.manifest.documentation.entrypoints
-                if snapshot.manifest.documentation is not None
-                else ()
-            ),
-        ):
-            diagnostics.append(
-                _repository_diagnostic(
-                    rule_id=RuleId("repository/documentation/placement"),
-                    component=component,
-                    subject_kind="tracked-markdown",
-                    observed=path,
-                    expected="a root, durable docs, package, generated, GitHub, or agent path",
-                    message="tracked Markdown is outside an approved owned location",
-                    path=path,
-                    remediation=Remediation(
-                        summary=(
-                            "Move durable guidance to an owned documentation surface or remove it."
-                        ),
-                        steps=(
-                            "Move durable guidance beneath docs, architecture, or adr.",
-                            (
-                                "Delete transient plans, handoffs, summaries, and "
-                                "implementation notes."
-                            ),
-                        ),
-                        validation=("Inspect the selected Git tree and rerun repo-standards.",),
-                    ),
-                )
-            )
     return tuple(
         sorted(diagnostics, key=lambda item: (item.path, item.rule_id, item.manifest_anchor))
     )
+
+
+def _tracked_artifact_diagnostics(
+    snapshot: RepositorySnapshot,
+    path: str,
+    package_test_roots: frozenset[str],
+    document_package_roots: _DocumentPackageRoots,
+) -> list[Diagnostic]:
+    diagnostics: list[Diagnostic] = []
+    component = _nearest_component(path, snapshot.manifest.components)
+    if path.casefold().endswith(_TFVARS_EXAMPLE_SUFFIXES):
+        diagnostics.append(
+            _repository_diagnostic(
+                rule_id=RuleId("repository/artifacts/terraform-examples"),
+                component=component,
+                subject_kind="tracked-terraform-example",
+                observed=path,
+                expected="no tracked .tfvars example, sample, or template filename",
+                message="tracked Terraform example variable file is prohibited",
+                path=path,
+                remediation=Remediation(
+                    summary=("Remove the example file and keep one authoritative input contract."),
+                    steps=(
+                        "Delete the tracked .tfvars example, sample, or template file.",
+                        "Describe inputs and validation in variables.tf.",
+                    ),
+                    validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                ),
+            )
+        )
+    basename = PurePosixPath(path).name.casefold()
+    is_derived_env_artifact = basename in _DERIVED_ENV_BASENAMES or (
+        (basename == ".env" or basename.startswith(".env."))
+        and basename.endswith((*_ENV_EXAMPLE_SUFFIXES, *_ENV_SCHEMA_SUFFIXES))
+    )
+    is_derived_backend_artifact = basename in _DERIVED_BACKEND_BASENAMES
+    if is_derived_backend_artifact or is_derived_env_artifact:
+        diagnostics.append(
+            _repository_diagnostic(
+                rule_id=RuleId("repository/artifacts/schema-derived-config-examples"),
+                component=component,
+                subject_kind="tracked-schema-derived-config-example",
+                observed=path,
+                expected="no tracked schema-derived configuration example basename",
+                message="tracked configuration artifact duplicates source settings",
+                path=path,
+                remediation=Remediation(
+                    summary="Generate configuration guidance from source settings.",
+                    steps=(
+                        "Delete the derived example or schema artifact.",
+                        (
+                            "Generate developer-facing configuration directly from Terraform "
+                            "declarations, Zod settings, Pydantic settings, or the "
+                            "deployment schema."
+                        ),
+                    ),
+                    validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                ),
+            )
+        )
+    is_terraform_path = _is_terraform_artifact_path(path, snapshot.inspection.terraform_modules)
+    is_github_automation_path = _is_github_automation_path(path)
+    is_operational_path = is_terraform_path or _is_operational_path(
+        path,
+        component=component,
+        terraform_modules=snapshot.inspection.terraform_modules,
+    )
+    is_owned_verifier = _is_owned_verifier_path(path, component, package_test_roots)
+    is_owned_tool_source = path.startswith("tools/") and is_owned_verifier
+    is_operational_script_test = (
+        _is_script_test(basename)
+        and is_operational_path
+        and (
+            is_terraform_path
+            or is_github_automation_path
+            or not _is_owned_tool_test(path, component, package_test_roots)
+        )
+    )
+    is_bespoke_verifier = basename in _RETIRED_IAC_VERIFIER_NAMES or (
+        _is_verifier_script(basename)
+        and (
+            is_terraform_path
+            or is_github_automation_path
+            or (is_operational_path and not is_owned_tool_source)
+            or not is_owned_verifier
+        )
+    )
+    if is_bespoke_verifier:
+        diagnostics.append(
+            _repository_diagnostic(
+                rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
+                component=component,
+                subject_kind="tracked-bespoke-iac-verifier",
+                observed=path,
+                expected="no retired, operational, or unowned verifier artifact",
+                message="tracked retired, operational, or unowned verifier is prohibited",
+                path=path,
+                remediation=Remediation(
+                    summary=("Remove the operational verifier instead of relocating it."),
+                    steps=(
+                        "Delete the verifier and every workflow invocation.",
+                        (
+                            "Express durable safety in Terraform, shared policy, provider "
+                            "state, or runtime behavior."
+                        ),
+                    ),
+                    validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                ),
+            )
+        )
+    elif is_operational_script_test:
+        diagnostics.append(
+            _repository_diagnostic(
+                rule_id=RuleId("repository/artifacts/operational-script-tests"),
+                component=component,
+                subject_kind="tracked-operational-script-test",
+                observed=path,
+                expected="no tracked operational script test artifact",
+                message="tracked operational script test creates a parallel contract",
+                path=path,
+                remediation=Remediation(
+                    summary="Remove the operational test instead of relocating it.",
+                    steps=(
+                        "Delete the test and every workflow invocation.",
+                        (
+                            "Express durable safety in Terraform, shared policy, provider "
+                            "state, or runtime behavior."
+                        ),
+                    ),
+                    validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                ),
+            )
+        )
+    if path.casefold().endswith(_TERRAFORM_TEST_SUFFIXES):
+        diagnostics.append(
+            _repository_diagnostic(
+                rule_id=RuleId("repository/artifacts/terraform-test-files"),
+                component=component,
+                subject_kind="tracked-terraform-test-file",
+                observed=path,
+                expected="no tracked .tftest.hcl or .tftest.json filename",
+                message="tracked native Terraform test file is prohibited by repository policy",
+                path=path,
+                remediation=Remediation(
+                    summary="Move the assertion into the shared validation path.",
+                    steps=(
+                        "Delete the tracked Terraform-native test file.",
+                        (
+                            "Validate the behavior through a rendered plan, provider, or "
+                            "runtime contract."
+                        ),
+                    ),
+                    validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                ),
+            )
+        )
+    if path.casefold().endswith(".md") and not _markdown_path_is_owned(
+        path,
+        package_roots=document_package_roots,
+        component=component,
+        terraform_modules=snapshot.inspection.terraform_modules,
+        documentation_entrypoints=(
+            snapshot.manifest.documentation.entrypoints
+            if snapshot.manifest.documentation is not None
+            else ()
+        ),
+    ):
+        diagnostics.append(
+            _repository_diagnostic(
+                rule_id=RuleId("repository/documentation/placement"),
+                component=component,
+                subject_kind="tracked-markdown",
+                observed=path,
+                expected="a root, durable docs, package, generated, GitHub, or agent path",
+                message="tracked Markdown is outside an approved owned location",
+                path=path,
+                remediation=Remediation(
+                    summary=(
+                        "Move durable guidance to an owned documentation surface or remove it."
+                    ),
+                    steps=(
+                        "Move durable guidance beneath docs, architecture, or adr.",
+                        ("Delete transient plans, handoffs, summaries, and implementation notes."),
+                    ),
+                    validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                ),
+            )
+        )
+    return diagnostics
 
 
 def _parent_path(path: str) -> str:
@@ -679,50 +688,57 @@ def _owned_package_roots(snapshot: RepositorySnapshot) -> frozenset[str]:
     roots: set[str] = set()
     tracked_files = {item.path: item.substantive for item in snapshot.inspection.tracked_files}
     for project in snapshot.inspection.packages:
-        root = _parent_path(project.path)
-        if not project.name:
-            continue
-        component = _nearest_component(root, snapshot.manifest.components)
-        explicitly_owned = (
-            component is not None
-            and component.path == root
-            and component.kind in _NON_OPERATIONAL_COMPONENT_KINDS
-        )
-        containing_workspaces = tuple(
-            workspace
-            for workspace in snapshot.inspection.workspaces
-            if workspace.ecosystem == project.ecosystem
-            and workspace.path != project.path
-            and _workspace_contains(workspace, project.path)
-        )
-        workspace_owned = any(
-            _workspace_includes(workspace, project.path) for workspace in containing_workspaces
-        )
-        colocated_workspace_owned = any(
-            workspace.ecosystem == project.ecosystem
-            and _parent_path(workspace.path) == root
-            and bool(workspace.member_patterns)
-            for workspace in snapshot.inspection.workspaces
-        )
-        root_project = not root
-        conventional_evidence = (
-            root_project
-            or workspace_owned
-            or colocated_workspace_owned
-            or (
-                not containing_workspaces
-                and _has_standalone_package_evidence(project, root, tracked_files)
-            )
-        )
-        conventionally_owned = conventional_evidence and (
-            colocated_workspace_owned
-            or not _is_operational_path(
-                root, component=component, terraform_modules=snapshot.inspection.terraform_modules
-            )
-        )
-        if explicitly_owned or conventionally_owned:
+        root = _owned_package_root(snapshot, project, tracked_files)
+        if root is not None:
             roots.add(root)
     return frozenset(roots)
+
+
+def _owned_package_root(
+    snapshot: RepositorySnapshot, project: PackageEvidence, tracked_files: dict[str, bool]
+) -> str | None:
+    root = _parent_path(project.path)
+    if not project.name:
+        return None
+    component = _nearest_component(root, snapshot.manifest.components)
+    explicitly_owned = (
+        component is not None
+        and component.path == root
+        and component.kind in _NON_OPERATIONAL_COMPONENT_KINDS
+    )
+    containing_workspaces = tuple(
+        workspace
+        for workspace in snapshot.inspection.workspaces
+        if workspace.ecosystem == project.ecosystem
+        and workspace.path != project.path
+        and _workspace_contains(workspace, project.path)
+    )
+    workspace_owned = any(
+        _workspace_includes(workspace, project.path) for workspace in containing_workspaces
+    )
+    colocated_workspace_owned = any(
+        workspace.ecosystem == project.ecosystem
+        and _parent_path(workspace.path) == root
+        and bool(workspace.member_patterns)
+        for workspace in snapshot.inspection.workspaces
+    )
+    root_project = not root
+    conventional_evidence = (
+        root_project
+        or workspace_owned
+        or colocated_workspace_owned
+        or (
+            not containing_workspaces
+            and _has_standalone_package_evidence(project, root, tracked_files)
+        )
+    )
+    conventionally_owned = conventional_evidence and (
+        colocated_workspace_owned
+        or not _is_operational_path(
+            root, component=component, terraform_modules=snapshot.inspection.terraform_modules
+        )
+    )
+    return root if explicitly_owned or conventionally_owned else None
 
 
 def _has_standalone_package_evidence(

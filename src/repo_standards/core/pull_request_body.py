@@ -40,8 +40,7 @@ def _headings(lines: list[str]) -> tuple[_Heading, ...]:
     index = 0
     while index < len(lines):
         line = lines[index]
-        fence_match = _FENCE.match(line)
-        if fence_match is not None:
+        if (fence_match := _FENCE.match(line)) is not None:
             marks = fence_match.group("marks")
             if fence is None:
                 fence = marks[0]
@@ -52,33 +51,34 @@ def _headings(lines: list[str]) -> tuple[_Heading, ...]:
         if fence is not None:
             index += 1
             continue
-        atx = _ATX_HEADING.match(line)
-        if atx is not None:
-            headings.append(
-                _Heading(
-                    title=_normalized_title(atx.group("title")),
-                    level=len(atx.group("marks")),
-                    content_start=index + 1,
-                    line_index=index,
-                )
-            )
+        heading = _heading_at(lines, index)
+        if heading is None:
             index += 1
             continue
-        if index + 1 < len(lines):
-            setext = _SETEXT_HEADING.match(lines[index + 1])
-            if setext is not None and line.strip():
-                headings.append(
-                    _Heading(
-                        title=_normalized_title(line),
-                        level=1 if setext.group("marks").startswith("=") else 2,
-                        content_start=index + 2,
-                        line_index=index,
-                    )
-                )
-                index += 2
-                continue
-        index += 1
+        headings.append(heading)
+        index = heading.content_start
     return tuple(headings)
+
+
+def _heading_at(lines: list[str], index: int) -> _Heading | None:
+    line = lines[index]
+    if (atx := _ATX_HEADING.match(line)) is not None:
+        return _Heading(
+            title=_normalized_title(atx.group("title")),
+            level=len(atx.group("marks")),
+            content_start=index + 1,
+            line_index=index,
+        )
+    if index + 1 >= len(lines) or not line.strip():
+        return None
+    if (setext := _SETEXT_HEADING.match(lines[index + 1])) is None:
+        return None
+    return _Heading(
+        title=_normalized_title(line),
+        level=1 if setext.group("marks").startswith("=") else 2,
+        content_start=index + 2,
+        line_index=index,
+    )
 
 
 def _has_content(
