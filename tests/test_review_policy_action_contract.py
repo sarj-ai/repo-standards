@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 import re
-import time
 
 import pytest
 
@@ -385,14 +384,20 @@ def _successful_status() -> list[dict[str, object]]:
     ]
 
 
-def test_merge_group_waits_for_the_status_run_to_complete(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+@pytest.mark.parametrize(
+    ("conclusion", "expected"),
+    [
+        pytest.param("success", True, id="successful-run"),
+        pytest.param("failure", False, id="failed-run"),
+        pytest.param("cancelled", False, id="cancelled-run"),
+    ],
+)
+def test_merge_group_waits_for_the_status_run_to_complete(conclusion: str, expected: bool) -> None:
     client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     runs = iter(
         [
             {"status": "in_progress", "conclusion": None},
-            {"status": "completed", "conclusion": "success"},
+            {"status": "completed", "conclusion": conclusion},
         ]
     )
     sleeps: list[float] = []
@@ -405,19 +410,21 @@ def test_merge_group_waits_for_the_status_run_to_complete(
         }
 
     client.request = request  # type: ignore[method-assign]
-    monkeypatch.setattr(time, "sleep", sleeps.append)
 
-    assert review_policy_status_passed(
-        client,
-        _successful_status(),
-        workflow_path=".github/workflows/review-policy.yml",
+    assert (
+        review_policy_status_passed(
+            client,
+            _successful_status(),
+            workflow_path=".github/workflows/review-policy.yml",
+            clock=lambda: 0.0,
+            sleep=sleeps.append,
+        )
+        is expected
     )
     assert sleeps == [5]
 
 
-def test_merge_group_rejects_a_status_run_that_never_completes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_merge_group_rejects_a_status_run_that_never_completes() -> None:
     client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     clock = iter([0.0, 100.0, 200.0, 300.0])
     sleeps: list[float] = []
@@ -431,13 +438,13 @@ def test_merge_group_rejects_a_status_run_that_never_completes(
         }
 
     client.request = request  # type: ignore[method-assign]
-    monkeypatch.setattr(time, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(time, "sleep", sleeps.append)
 
     assert not review_policy_status_passed(
         client,
         _successful_status(),
         workflow_path=".github/workflows/review-policy.yml",
+        clock=lambda: next(clock),
+        sleep=sleeps.append,
     )
     assert sleeps == [5, 5]
 
@@ -504,9 +511,7 @@ def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None
         assert "mergeQueueEntry" in query
         assert variables == {"owner": "owner", "repository": "repo", "number": 42}
         return {
-            "repository": {
-                "pullRequest": {"mergeQueueEntry": {"headCommit": {"oid": merge_head}}}
-            }
+            "repository": {"pullRequest": {"mergeQueueEntry": {"headCommit": {"oid": merge_head}}}}
         }
 
     client.graphql = graphql

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import json
 import os
@@ -764,6 +764,8 @@ def review_policy_status_passed(
     statuses: Sequence[Any],
     *,
     workflow_path: str,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> bool:
     matching: list[Mapping[str, Any]] = []
     for raw in statuses:
@@ -785,7 +787,7 @@ def review_policy_status_passed(
         _string(latest.get("target_url"), "review policy status target URL"),
         repository=client.repository,
     )
-    run = _completed_run(client, run_id)
+    run = _completed_run(client, run_id, clock=clock, sleep=sleep)
     run_path = _string(run.get("path"), "review policy workflow path").split("@", 1)[0]
     return (
         run_path == workflow_path
@@ -796,16 +798,22 @@ def review_policy_status_passed(
     )
 
 
-def _completed_run(client: GitHubClient, run_id: int) -> Mapping[str, Any]:
-    deadline = time.monotonic() + _RUN_COMPLETION_TIMEOUT_SECONDS
+def _completed_run(
+    client: GitHubClient,
+    run_id: int,
+    *,
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
+) -> Mapping[str, Any]:
+    deadline = clock() + _RUN_COMPLETION_TIMEOUT_SECONDS
     while True:
         run = _mapping(
             client.request("GET", f"/repos/{client.repository}/actions/runs/{run_id}"),
             "review policy workflow run",
         )
-        if run.get("status") == "completed" or time.monotonic() >= deadline:
+        if run.get("status") == "completed" or clock() >= deadline:
             return run
-        time.sleep(_RUN_COMPLETION_POLL_SECONDS)
+        sleep(_RUN_COMPLETION_POLL_SECONDS)
 
 
 def merge_group_pull_request(head_ref: str) -> MergeGroupPullRequest:
@@ -881,10 +889,10 @@ def reconcile_merge_group(
     if snapshot.state != "open":
         raise ReconciliationError(f"merge-group pull request {number} is not open")
     if merge_queue_head_sha(client, number) != head_sha:
-        raise ReconciliationError(f"pull request {number} queue entry changed during reconciliation")
-    statuses = client.rest_pages(
-        f"/repos/{client.repository}/commits/{snapshot.head_sha}/statuses"
-    )
+        raise ReconciliationError(
+            f"pull request {number} queue entry changed during reconciliation"
+        )
+    statuses = client.rest_pages(f"/repos/{client.repository}/commits/{snapshot.head_sha}/statuses")
     passed = review_policy_status_passed(
         client,
         statuses,
@@ -896,7 +904,9 @@ def reconcile_merge_group(
             f"pull request {snapshot.number} changed during merge-group reconciliation"
         )
     if merge_queue_head_sha(client, number) != head_sha:
-        raise ReconciliationError(f"pull request {number} queue entry changed during reconciliation")
+        raise ReconciliationError(
+            f"pull request {number} queue entry changed during reconciliation"
+        )
     refreshed_commit = _mapping(
         client.request("GET", f"/repos/{client.repository}/commits/{head_sha}"),
         "refreshed merge group commit",
