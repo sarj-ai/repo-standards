@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from repo_standards.pull_request._trusted_manifest import load_trusted_base_manifest
 
+from ._npm_dependency_metadata import lock_dependency_update, package_dependency_update
 from .errors import ConfigurationError
 from .models import DocumentationConfig, GitObjectId
 
@@ -89,7 +90,7 @@ def analyze_pull_request_documentation(
         maximum_added_pages=policy.maximum_added_pages,
         added_pages=added_pages,
         exempt_pages=exempt_pages,
-        added_content_paths=_added_content_paths(resolved, changes),
+        added_content_paths=_added_content_paths(resolved, changes, base=base_sha, head=head_sha),
     )
 
 
@@ -160,7 +161,9 @@ def _content_scope(path: str, mode: str) -> bool:
     )
 
 
-def _added_content_paths(root: Path, changes: tuple[_ChangedFile, ...]) -> tuple[str, ...]:
+def _added_content_paths(
+    root: Path, changes: tuple[_ChangedFile, ...], *, base: str, head: str
+) -> tuple[str, ...]:
     candidates = tuple(
         change
         for change in changes
@@ -175,16 +178,80 @@ def _added_content_paths(root: Path, changes: tuple[_ChangedFile, ...]) -> tuple
         old for change in candidates if (old := _prior_content_object(change)) is not None
     )
     blobs = _read_blobs(root, tuple(sorted(objects)))
+    metadata_updates = _dependency_metadata_updates(root, candidates, blobs, base=base, head=head)
     return tuple(
         sorted(
             change.path
             for change in candidates
-            if change.new_mode == "120000"
-            or _adds_content(
-                blobs.get(_prior_content_object(change) or "", b""), blobs[change.new_object]
+            if change.path not in metadata_updates
+            and (
+                change.new_mode == "120000"
+                or _adds_content(
+                    blobs.get(_prior_content_object(change) or "", b""), blobs[change.new_object]
+                )
             )
         )
     )
+
+
+def _dependency_metadata_updates(
+    root: Path,
+    changes: tuple[_ChangedFile, ...],
+    blobs: dict[str, bytes],
+    *,
+    base: str,
+    head: str,
+) -> frozenset[str]:
+    # Permit dependency-only maintenance of existing npm metadata, not added docs content.
+    eligible = tuple(
+        change
+        for change in changes
+        if change.status == "M"
+        and change.old_path == change.path
+        and change.old_mode == change.new_mode == "100644"
+    )
+    accepted = {
+        change.path
+        for change in eligible
+        if change.path.rsplit("/", 1)[-1] == "package.json"
+        and package_dependency_update(blobs[change.old_object], blobs[change.new_object])
+    }
+    locks = tuple(
+        change for change in eligible if change.path.rsplit("/", 1)[-1] == "package-lock.json"
+    )
+    if not locks:
+        return frozenset(accepted)
+    merge_base = _git(root, "merge-base", base, head).decode().strip()
+    package_paths = tuple(
+        change.path.removesuffix("package-lock.json") + "package.json" for change in locks
+    )
+    old_packages = _tracked_package_blobs(root, merge_base, package_paths)
+    new_packages = _tracked_package_blobs(root, head, package_paths)
+    for change, package_path in zip(locks, package_paths, strict=True):
+        old_package, new_package = old_packages.get(package_path), new_packages.get(package_path)
+        if (
+            old_package is not None
+            and new_package is not None
+            and lock_dependency_update(
+                blobs[change.old_object], blobs[change.new_object], old_package, new_package
+            )
+        ):
+            accepted.add(change.path)
+    return frozenset(accepted)
+
+
+def _tracked_package_blobs(root: Path, revision: str, paths: tuple[str, ...]) -> dict[str, bytes]:
+    output = _git(root, "ls-tree", "-z", revision, "--", *(f":(literal){path}" for path in paths))
+    objects: dict[str, str] = {}
+    for entry in output.split(b"\0"):
+        if not entry:
+            continue
+        metadata, _, raw_path = entry.partition(b"\t")
+        mode, kind, oid = metadata.split()
+        if mode == b"100644" and kind == b"blob":
+            objects[raw_path.decode("utf-8", errors="surrogateescape")] = oid.decode("ascii")
+    blobs = _read_blobs(root, tuple(sorted(set(objects.values()))))
+    return {path: blobs[oid] for path, oid in objects.items()}
 
 
 def _prior_content_object(change: _ChangedFile) -> str | None:
