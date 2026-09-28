@@ -106,6 +106,7 @@ class PullRequestReviewPolicyConfig:
     transition_exemptions: tuple[str, ...] = ()
     transition_actors: tuple[str, ...] = ()
     accepted_check_conclusions: tuple[str, ...] = ("success",)
+    require_resolved_threads: bool = True
 
 
 @dataclass(frozen=True, slots=True)
