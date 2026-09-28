@@ -119,13 +119,6 @@ def _integer(data: dict[str, object], key: str, context: str, *, default: int) -
     return value
 
 
-def _boolean(data: dict[str, object], key: str, context: str, *, default: bool) -> bool:
-    value = data.get(key, default)
-    if not isinstance(value, bool):
-        ConfigurationError.fail(f"{context}.{key} must be a boolean")
-    return value
-
-
 def _logical_branch_ref(value: str, context: str) -> str:
     invalid_character = any(
         ord(character) < _ASCII_CONTROL_LIMIT
@@ -468,6 +461,13 @@ def parse_pull_request_review_policy(
         accepted_check_conclusions=accepted_check_conclusions,
         require_resolved_threads=_boolean(data, "require_resolved_threads", context, default=True),
     )
+
+
+def _boolean(data: dict[str, object], key: str, context: str, *, default: bool) -> bool:
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        ConfigurationError.fail(f"{context}.{key} must be a boolean")
+    return value
 
 
 def _review_policy_transition_actors(
