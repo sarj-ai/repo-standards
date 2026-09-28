@@ -770,6 +770,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                 accepted_check_conclusions=frozenset(
                     CheckConclusion(item) for item in configured.accepted_check_conclusions
                 ),
+                require_resolved_threads=configured.require_resolved_threads,
             ),
         )
     except (ConfigurationError, OSError, ValidationError, ValueError) as error:
@@ -910,6 +911,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             "migration_roots": list(configured.migration_roots),
             "required_checks": list(configured.required_checks),
             "accepted_check_conclusions": list(configured.accepted_check_conclusions),
+            "require_resolved_threads": configured.require_resolved_threads,
             "required_body_sections": list(configured.required_body_sections),
             "transition_exemptions": list(configured.transition_exemptions),
             "transition_actors": list(configured.transition_actors),

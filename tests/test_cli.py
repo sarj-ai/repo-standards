@@ -188,7 +188,7 @@ def test_pull_request_size_errors_have_command_specific_remediation(tmp_path: Pa
     assert "Fetch and verify" in str(invalid_issue["remediation"])
 
 
-def _review_policy_fixture(repository: Path) -> str:
+def _review_policy_fixture(repository: Path, *, require_resolved_threads: bool = True) -> str:
     _git(repository, "init", "--quiet")
     policy = repository / ".repo-standards"
     policy.mkdir()
@@ -215,7 +215,8 @@ required_body_sections = ["What & why", "QA impact / blast radius"]
 accepted_check_conclusions = ["success"]
 transition_exemptions = ["promote"]
 transition_actors = ["release-automation[bot]"]
-""".lstrip(),
+""".lstrip()
+        + f"require_resolved_threads = {str(require_resolved_threads).lower()}\n",
         encoding="utf-8",
     )
     (repository / "README.md").write_text("base\n", encoding="utf-8")
@@ -237,6 +238,7 @@ def _review_policy_evidence(  # ruff: ignore[too-many-arguments] - focused fixtu
     current_head: str | None = None,
     head_repository_id: int = 123,
     check_head: str | None = None,
+    threads_resolved: bool = True,
 ) -> Path:
     evidence = repository / "evidence.json"
     evidence.write_text(
@@ -263,7 +265,7 @@ def _review_policy_evidence(  # ruff: ignore[too-many-arguments] - focused fixtu
                 "reviews_complete": True,
                 "latest_human_reviews": reviews or [],
                 "threads_complete": True,
-                "threads_resolved": True,
+                "threads_resolved": threads_resolved,
                 "body": body,
             }
         ),
@@ -332,6 +334,42 @@ def test_pull_request_review_policy_emits_ready_tier_zero_receipt(tmp_path: Path
         "README.md",
         "tests/test_large.py",
     ]
+
+
+@pytest.mark.parametrize(
+    ("require_resolved_threads", "merge_ready"),
+    [(True, False), (False, True)],
+)
+def test_pull_request_review_policy_thread_resolution_follows_manifest(
+    tmp_path: Path,
+    *,
+    require_resolved_threads: bool,
+    merge_ready: bool,
+) -> None:
+    base = _review_policy_fixture(tmp_path, require_resolved_threads=require_resolved_threads)
+    (tmp_path / "README.md").write_text("base\nsmall correction\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(tmp_path, head=head, threads_resolved=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    payload = _json_object(result.stdout)
+    assert _object(payload["policy"])["require_resolved_threads"] is require_resolved_threads
+    assert _object(payload["summary"])["merge_ready"] is merge_ready
 
 
 def test_pull_request_review_policy_migration_floor_blocks_without_approval(

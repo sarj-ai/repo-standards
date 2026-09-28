@@ -69,6 +69,7 @@ class ReviewPolicyConfig:
     migration_review_floor: RequiredReviewCount = MIGRATION_REVIEW_FLOOR
     migration_roots: tuple[str, ...] = ()
     accepted_check_conclusions: frozenset[CheckConclusion] = frozenset({CheckConclusion.SUCCESS})
+    require_resolved_threads: bool = True
 
     def __post_init__(self) -> None:
         if isinstance(self.zero_review_below_lines, bool) or self.zero_review_below_lines <= 0:
@@ -195,10 +196,11 @@ def evaluate_review_policy(
     )
     reasons.extend(review_assessment.reasons)
 
-    if evidence.threads_resolved is None:
-        reasons.append(ReviewPolicyReason.THREAD_EVIDENCE_MISSING)
-    elif not evidence.threads_resolved:
-        reasons.append(ReviewPolicyReason.THREADS_UNRESOLVED)
+    if config.require_resolved_threads:
+        if evidence.threads_resolved is None:
+            reasons.append(ReviewPolicyReason.THREAD_EVIDENCE_MISSING)
+        elif not evidence.threads_resolved:
+            reasons.append(ReviewPolicyReason.THREADS_UNRESOLVED)
 
     blocking = frozenset(ReviewPolicyReason) - {
         ReviewPolicyReason.ZERO_REVIEW_THRESHOLD,

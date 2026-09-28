@@ -262,6 +262,20 @@ def test_thread_evidence_fails_closed(
     assert reason in result.reasons
 
 
+@pytest.mark.parametrize("threads_resolved", [None, False])
+def test_thread_evidence_is_ignored_when_resolution_is_not_required(
+    threads_resolved: bool | None,
+) -> None:
+    result = evaluate_review_policy(
+        _evidence(threads_resolved=threads_resolved),
+        ReviewPolicyConfig(require_resolved_threads=False),
+    )
+
+    assert result.merge_ready
+    assert ReviewPolicyReason.THREAD_EVIDENCE_MISSING not in result.reasons
+    assert ReviewPolicyReason.THREADS_UNRESOLVED not in result.reasons
+
+
 def test_zero_review_lane_still_blocks_a_change_request() -> None:
     review = HumanReviewEvidence("reviewer", ReviewState.CHANGES_REQUESTED, HEAD)
 

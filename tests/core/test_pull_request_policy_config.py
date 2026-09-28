@@ -273,6 +273,26 @@ def test_review_policy_can_accept_skipped_routed_checks() -> None:
     )
 
 
+def test_review_policy_requires_resolved_threads_by_default() -> None:
+    manifest = parse_manifest_bytes(_manifest_with_review_policy())
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.review_policy is not None
+    assert manifest.pull_request.review_policy.require_resolved_threads
+
+
+def test_review_policy_can_stop_requiring_resolved_threads() -> None:
+    manifest = parse_manifest_bytes(
+        _manifest_with_review_policy(
+            review_policy=_REVIEW_POLICY + b"require_resolved_threads = false\n"
+        )
+    )
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.review_policy is not None
+    assert not manifest.pull_request.review_policy.require_resolved_threads
+
+
 def test_pull_request_behavior_without_review_policy() -> None:
     manifest = parse_manifest_bytes(
         b"""
@@ -335,6 +355,11 @@ advisory_base_ref = "dev"
             b'accepted_check_conclusions = ["success"]',
             b'accepted_check_conclusions = ["success", "neutral"]',
             "supports success and optional skipped",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            b'accepted_check_conclusions = ["success"]\nrequire_resolved_threads = "no"',
+            "require_resolved_threads must be a boolean",
         ),
     ],
 )

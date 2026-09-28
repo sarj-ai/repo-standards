@@ -365,6 +365,7 @@ def parse_pull_request_review_policy(
         "transition_exemptions",
         "transition_actors",
         "accepted_check_conclusions",
+        "require_resolved_threads",
     }
     required = {
         "zero_review_below_counted_lines",
@@ -458,7 +459,15 @@ def parse_pull_request_review_policy(
             transition_exemptions=transition_exemptions,
         ),
         accepted_check_conclusions=accepted_check_conclusions,
+        require_resolved_threads=_boolean(data, "require_resolved_threads", context, default=True),
     )
+
+
+def _boolean(data: dict[str, object], key: str, context: str, *, default: bool) -> bool:
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        ConfigurationError.fail(f"{context}.{key} must be a boolean")
+    return value
 
 
 def _review_policy_transition_actors(
