@@ -12,7 +12,7 @@
     "lint": "npm run catalog && eslint . --max-warnings 0",
     "preview": "astro preview",
     "test": "node --test ./scripts/verify-deployment.test.ts",
-    "typecheck": "astro check && node ./node_modules/@typescript/native/bin/tsc --project tsconfig.node.json",
+    "typecheck": "astro check && tsc --project tsconfig.node.json",
     "verify:deployment": "node ./scripts/verify-deployment.ts"
   },
   "dependencies": {

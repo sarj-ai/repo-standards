@@ -54,6 +54,8 @@ jobs:
         run: |
           uv sync --locked --python 3.14
           npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund
+      - name: Verify native TypeScript compiler
+        run: test "$(npm --prefix apps/docs exec --offline -- tsc --version)" = 'Version 7.0.2'
       - name: Lint and build generated reference
         env:
           WORKERS_CI_COMMIT_SHA: ${{ github.sha }}
