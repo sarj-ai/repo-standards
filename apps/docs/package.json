@@ -32,7 +32,7 @@
     "jiti": "2.7.0",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "typescript-eslint": "8.70.0",
-    "wrangler": "4.130.0"
+    "wrangler": "4.145.0"
   },
   "engines": {
     "node": ">=24.12.0"
