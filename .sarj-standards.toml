@@ -1,19 +1,28 @@
 # Managed by `code-standards setup`; commit this file.
-schema = 4
-bundle = "8.6.1"
+bundle = "8.13.3"
 rule_profile = "all"
+schema = 4
 
 [capabilities]
-disable = ["eslint", "swiftformat", "swiftlint", "ktlint", "detekt", "mobile-security"]
+disable = [
+  "eslint",
+  "swiftformat",
+  "swiftlint",
+  "ktlint",
+  "detekt",
+  "mobile-security",
+  "zizmor",
+  "checkov",
+]
 
 [artifacts]
 durable = [".github/**"]
 
 [dest]
-python = "."
-typescript = "apps/docs"
-swift = "."
 kotlin = "."
+python = "."
+swift = "."
+typescript = "apps/docs"
 
 [hooks]
 manager = "pre-commit"
