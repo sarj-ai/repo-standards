@@ -227,7 +227,7 @@ jobs:
         run: uv sync --locked
       - name: Run standards
         env:
-          SARJ_STANDARDS_BASE: ${{ github.event.before }}
+          SARJ_STANDARDS_BASE: 7d7ca3239509f6d135787e1e736c1bd5fdfb1986
         run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards check --trust-repository-code --format github
 
   tiny:
