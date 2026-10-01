@@ -1,0 +1,242 @@
+name: Experiment runner A/B
+
+on:
+  push:
+    branches: [exp/blacksmith-runner-ab]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate / Python 3.14 [${{ matrix.v.runner }} harden=${{ matrix.v.harden }}]
+    strategy:
+      fail-fast: false
+      matrix:
+        v:
+          - {runner: ubuntu-24.04, harden: true}
+          - {runner: blacksmith-2vcpu-ubuntu-2404, harden: true}
+          - {runner: blacksmith-2vcpu-ubuntu-2404, harden: false}
+          - {runner: blacksmith-4vcpu-ubuntu-2404, harden: false}
+    runs-on: ${{ matrix.v.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: Harden the runner
+        if: matrix.v.harden
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Check out tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.12.12'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install locked environment
+        run: uv sync --locked --python 3.14
+      - name: Test
+        run: uv run --python 3.14 pytest
+
+  package:
+    name: Build and install artifacts [${{ matrix.v.runner }} harden=${{ matrix.v.harden }}]
+    strategy:
+      fail-fast: false
+      matrix:
+        v:
+          - {runner: ubuntu-24.04, harden: true}
+          - {runner: blacksmith-2vcpu-ubuntu-2404, harden: true}
+          - {runner: blacksmith-2vcpu-ubuntu-2404, harden: false}
+          - {runner: blacksmith-4vcpu-ubuntu-2404, harden: false}
+    runs-on: ${{ matrix.v.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: Harden the runner
+        if: matrix.v.harden
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Check out tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Self-test pull-request commit action
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        uses: ./pull-request-commits
+      - name: Self-test documentation budget action
+        if: github.event_name == 'pull_request'
+        uses: ./documentation
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.12.12'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Build distribution
+        run: uv build --no-sources --out-dir dist/repo-standards
+      - name: Validate pre-commit hook manifest
+        run: uv run --locked pre-commit validate-manifest .pre-commit-hooks.yaml
+      - name: Verify public distribution boundary
+        run: >-
+          uv run --frozen python -m repo_standards.verify_release_artifacts
+          --distributions dist/repo-standards
+      - name: Install wheels into a clean environment
+        env:
+          SMOKE_ENV: ${{ runner.temp }}/repo-standards-smoke
+        run: |
+          uv venv --python 3.14 "$SMOKE_ENV"
+          uv pip install --python "$SMOKE_ENV/bin/python" \
+            dist/repo-standards/repo_standards-*.whl
+      - name: Smoke-test installed interfaces
+        env:
+          FIXTURE_ROOT: ${{ runner.temp }}/repo-standards-fixture
+          REPORT_PATH: ${{ runner.temp }}/repo-standards-report.json
+          SMOKE_ENV: ${{ runner.temp }}/repo-standards-smoke
+        run: |
+          "$SMOKE_ENV/bin/repo-standards" --help
+          "$SMOKE_ENV/bin/repo-standards" --version
+          "$SMOKE_ENV/bin/repo-standards" capabilities
+          "$SMOKE_ENV/bin/repo-standards" pull-request commits --help
+          "$SMOKE_ENV/bin/repo-standards" pull-request documentation --help
+          "$SMOKE_ENV/bin/repo-standards" pull-request size --help
+          "$SMOKE_ENV/bin/repo-standards" schema
+          "$SMOKE_ENV/bin/repo-standards" rest --help
+          "$SMOKE_ENV/bin/python" -c \
+            'import repo_standards, repo_standards.catalog, repo_standards.pull_request, repo_standards.repository'
+          mkdir -p "$FIXTURE_ROOT/.repo-standards"
+          cp tests/fixtures/smoke/.repo-standards/repository.toml \
+            "$FIXTURE_ROOT/.repo-standards/repository.toml"
+          git -C "$FIXTURE_ROOT" init --quiet
+          git -C "$FIXTURE_ROOT" add .
+          git -C "$FIXTURE_ROOT" -c user.name='Repository Lint' \
+            -c user.email='repository-lint@example.invalid' commit --quiet -m fixture
+          "$SMOKE_ENV/bin/repo-standards" report "$FIXTURE_ROOT" \
+            --format json > "$REPORT_PATH"
+          "$SMOKE_ENV/bin/python" -c \
+            'import json, os; from importlib.metadata import version; p=json.load(open(os.environ["REPORT_PATH"])); assert p["completion"] == "complete"; assert p["tool"]["version"] == version("repo-standards")'
+      - name: Add consumer action size fixture
+        env:
+          FIXTURE_ROOT: ${{ runner.temp }}/repo-standards-fixture
+        run: |
+          mkdir -p "$FIXTURE_ROOT/tests"
+          printf 'assert True\n' > "$FIXTURE_ROOT/tests/test_fixture.py"
+          printf 'value = 1\n' > "$FIXTURE_ROOT/production.py"
+          git -C "$FIXTURE_ROOT" add .
+          git -C "$FIXTURE_ROOT" -c user.name='Repository Lint' \
+            -c user.email='repository-lint@example.invalid' commit --quiet -m size-fixture
+      - name: Smoke-test pull-request size action
+        id: size-action
+        uses: ./
+        with:
+          root: ${{ runner.temp }}/repo-standards-fixture
+          base: HEAD^
+          head: HEAD
+      - name: Verify pull-request size action output
+        env:
+          COUNTED_LINES: ${{ steps.size-action.outputs.counted-lines }}
+          EXCLUDED_LINES: ${{ steps.size-action.outputs.excluded-lines }}
+          TOTAL_LINES: ${{ steps.size-action.outputs.total-lines }}
+        run: |
+          test "$COUNTED_LINES" = 1
+          test "$EXCLUDED_LINES" = 1
+          test "$TOTAL_LINES" = 2
+
+  docs:
+    name: Build documentation [${{ matrix.v.runner }} harden=${{ matrix.v.harden }}]
+    strategy:
+      fail-fast: false
+      matrix:
+        v:
+          - {runner: ubuntu-24.04, harden: true}
+          - {runner: blacksmith-2vcpu-ubuntu-2404, harden: true}
+          - {runner: blacksmith-2vcpu-ubuntu-2404, harden: false}
+          - {runner: blacksmith-4vcpu-ubuntu-2404, harden: false}
+    runs-on: ${{ matrix.v.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Harden the runner
+        if: matrix.v.harden
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Check out tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.12.12'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/docs/package-lock.json
+      - name: Install locked toolchains
+        run: |
+          uv sync --locked --python 3.14
+          npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund
+      - name: Verify native TypeScript compiler
+        run: test "$(npm --prefix apps/docs exec --offline -- tsc --version)" = 'Version 7.0.2'
+      - name: Verify generated reference
+        env:
+          WORKERS_CI_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          npm --prefix apps/docs run lint
+          npm --prefix apps/docs test
+          npm --prefix apps/docs run build
+          uv run python -m repo_standards.verify_release_artifacts --site apps/docs/dist
+
+  standards:
+    name: standards [${{ matrix.v.runner }} harden=${{ matrix.v.harden }}]
+    strategy:
+      fail-fast: false
+      matrix:
+        v:
+          - {runner: ubuntu-latest, harden: true}
+          - {runner: blacksmith-2vcpu-ubuntu-2404, harden: false}
+          - {runner: blacksmith-4vcpu-ubuntu-2404, harden: false}
+    runs-on: ${{ matrix.v.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Harden the runner
+        if: matrix.v.harden
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.18'
+          enable-cache: true
+          cache-dependency-glob: |
+            .sarj-standards.toml
+            **/uv.lock
+      - name: Install Python dependencies
+        run: uv sync --locked
+      - name: Run standards
+        env:
+          SARJ_STANDARDS_BASE: ${{ github.event.before }}
+        run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards check --trust-repository-code --format github
+
+  tiny:
+    name: tiny [${{ matrix.runner }}]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, blacksmith-2vcpu-ubuntu-2404]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 2
+    steps:
+      - run: test success = success
