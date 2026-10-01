@@ -26,3 +26,6 @@ typescript = "apps/docs"
 
 [hooks]
 manager = "pre-commit"
+
+[ci]
+runner = "blacksmith-2vcpu-ubuntu-2404"
