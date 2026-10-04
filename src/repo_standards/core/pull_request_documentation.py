@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import PurePosixPath
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git queries
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING
 from repo_standards.pull_request._trusted_manifest import load_trusted_base_manifest
 
 from ._npm_dependency_metadata import lock_dependency_update, package_dependency_update
+from .canonical import workspace_pattern_matches
 from .errors import ConfigurationError
 from .models import DocumentationConfig, GitObjectId
 
@@ -81,9 +83,8 @@ def analyze_pull_request_documentation(
             if change.status in {"A", "C"} and change.path.casefold().endswith((".md", ".mdx"))
         )
     )
-    exemptions = frozenset(policy.addition_exemptions)
-    exempt_pages = tuple(path for path in additions if path in exemptions)
-    added_pages = tuple(path for path in additions if path not in exemptions)
+    exempt_pages = tuple(path for path in additions if _is_exempt(path, policy.addition_exemptions))
+    added_pages = tuple(path for path in additions if path not in exempt_pages)
     return PullRequestDocumentation(
         base=base_sha,
         head=head_sha,
@@ -92,6 +93,12 @@ def analyze_pull_request_documentation(
         exempt_pages=exempt_pages,
         added_content_paths=_added_content_paths(resolved, changes, base=base_sha, head=head_sha),
     )
+
+
+def _is_exempt(path: str, patterns: tuple[str, ...]) -> bool:
+    # Exact paths match themselves; `*` stays within one segment and `**` spans directories.
+    relative = PurePosixPath(path)
+    return any(workspace_pattern_matches(relative, pattern) for pattern in patterns)
 
 
 def _resolve_revision(root: Path, revision: str) -> GitObjectId:
