@@ -140,6 +140,34 @@ def test_documentation_budget_uses_trusted_base_policy_and_exact_exemptions(
 
 
 @pytest.mark.parametrize(
+    ("pattern", "path", "exempt"),
+    [
+        (".claude/skills/**/*.md", ".claude/skills/release/SKILL.md", True),
+        (".claude/skills/**/*.md", ".claude/skills/release/references/rollback.md", True),
+        (".claude/skills/**/*.md", ".claude/skills/SKILL.md", True),
+        (".claude/skills/*/SKILL.md", ".claude/skills/release/SKILL.md", True),
+        (".claude/skills/*/SKILL.md", ".claude/skills/release/nested/SKILL.md", False),
+        (".claude/skills/**/*.md", ".claude/agents/reviewer.md", False),
+        (".claude/skills/**/*.md", "tools/.claude/skills/release/SKILL.md", False),
+    ],
+)
+def test_documentation_exemptions_match_glob_patterns(
+    tmp_path: Path, pattern: str, path: str, *, exempt: bool
+) -> None:
+    base = _repository(tmp_path, maximum=0, exemptions=(pattern,))
+    page = tmp_path / path
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text("# Page\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    result = analyze_pull_request_documentation(tmp_path, base=base)
+
+    assert result.exempt_pages == ((path,) if exempt else ())
+    assert result.added_pages == (() if exempt else (path,))
+    assert result.satisfied is exempt
+
+
+@pytest.mark.parametrize(
     "path",
     [
         "README.md",
