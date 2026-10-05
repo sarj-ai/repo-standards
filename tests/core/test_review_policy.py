@@ -198,7 +198,6 @@ def test_policy_can_explicitly_accept_other_github_passing_states(
             (_approval("same"), _approval("SAME")),
             ReviewPolicyReason.REVIEW_EVIDENCE_AMBIGUOUS,
         ),
-        ((_approval(commit_sha=OTHER_HEAD),), ReviewPolicyReason.STALE_APPROVAL),
         (
             (HumanReviewEvidence("reviewer", ReviewState.CHANGES_REQUESTED, HEAD),),
             ReviewPolicyReason.CHANGES_REQUESTED,
@@ -213,6 +212,26 @@ def test_review_evidence_fails_closed(
 
     assert not result.merge_ready
     assert reason in result.reasons
+
+
+def test_stale_approval_is_reported_without_blocking() -> None:
+    reviews = (_approval("early", commit_sha=OTHER_HEAD), _approval("a"), _approval("b"))
+
+    result = evaluate_review_policy(_evidence(counted_lines=801, latest_human_reviews=reviews))
+
+    assert result.current_human_approvals == 2
+    assert result.merge_ready
+    assert ReviewPolicyReason.STALE_APPROVAL in result.reasons
+
+
+def test_stale_approval_does_not_count_toward_required_reviews() -> None:
+    result = evaluate_review_policy(
+        _evidence(counted_lines=200, latest_human_reviews=(_approval(commit_sha=OTHER_HEAD),))
+    )
+
+    assert result.current_human_approvals == 0
+    assert not result.merge_ready
+    assert ReviewPolicyReason.APPROVALS_MISSING in result.reasons
 
 
 def test_insufficient_exact_head_approvals_fail_closed() -> None:
