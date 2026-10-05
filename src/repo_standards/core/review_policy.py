@@ -207,6 +207,7 @@ def evaluate_review_policy(
         ReviewPolicyReason.ONE_REVIEW_THRESHOLD,
         ReviewPolicyReason.TWO_REVIEW_THRESHOLD,
         ReviewPolicyReason.MIGRATION_REVIEW_FLOOR,
+        ReviewPolicyReason.STALE_APPROVAL,
     }
     return ReviewPolicyResult(
         required_human_reviews=required_reviews,
