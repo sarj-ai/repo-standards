@@ -1,0 +1,11 @@
+{
+  "name": "@sarj/repo-standards-docs-deploy",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "wrangler": "4.130.0"
+  },
+  "engines": {
+    "node": ">=24.12.0"
+  }
+}

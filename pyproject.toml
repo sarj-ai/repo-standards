@@ -1,6 +1,6 @@
 [project]
 name = "repo-standards"
-version = "6.3.1"
+version = "6.3.2"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
@@ -81,3 +81,7 @@ extend-select = ["B", "E", "F", "I", "PERF", "PL", "RUF", "S", "SIM", "UP"]
 # This dependency-free release bootstrap has typed validation around its
 # standard-library CLI, environment, HTTP, and JSON boundaries.
 "release_reconciliation.py" = ["banned-api"]
+
+# The dependency-free artifact bootstrap validates provider JSON and archive
+# provenance before the project's Python environment is available.
+"ci_artifacts.py" = ["too-many-locals", "too-many-return-statements"]

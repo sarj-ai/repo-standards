@@ -15,7 +15,7 @@ concurrency:
 jobs:
   detect:
     name: Detect unpublished version
-    if: vars.PACKAGE_PUBLISH_ENABLED == 'true'
+    if: vars.PACKAGE_PUBLISH_ENABLED == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -78,39 +78,64 @@ jobs:
     needs: [detect, anchor]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Harden the runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
+      - name: Check out trusted main artifact tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: main
+      - name: Reuse packages tested by exact main CI
+        id: reuse
+        if: needs.detect.outputs.artifact_source == 'build'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.detect.outputs.source_sha }}
+        run: >-
+          python ci_artifacts.py --repository "$GITHUB_REPOSITORY" --sha "$SOURCE_SHA"
+          --kind packages --destination "$RUNNER_TEMP/tested-repo-standards"
+          --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
       - name: Check out release revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ needs.detect.outputs.source_sha }}
+      - name: Restore verified tested bytes after source checkout
+        if: steps.reuse.outputs.reused == 'true'
+        run: |
+          mkdir -p dist/packages/repo-standards
+          cp "$RUNNER_TEMP/tested-repo-standards/"* dist/packages/repo-standards/
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: '0.12.12'
+          version: '0.12.18'
+          # Recovery may check out an older immutable source: never populate
+          # default-branch caches from that revision. Normal CI caches safely.
           enable-cache: false
       - name: Verify source
-        if: needs.detect.outputs.artifact_source == 'build'
+        if: needs.detect.outputs.artifact_source == 'build' && steps.reuse.outputs.reused != 'true'
         run: |
           uv sync --locked --python 3.14
-          uv audit --locked --preview-features audit-command
+          uv audit --locked
           uv run pytest
           uv run ruff check .
           uv run basedpyright
       - name: Render exact release identity
-        if: needs.detect.outputs.artifact_source == 'build'
+        if: needs.detect.outputs.artifact_source == 'build' && steps.reuse.outputs.reused != 'true'
         run: >-
           python release_reconciliation.py prepare-readme
           --readme README.md
           --version "${{ needs.detect.outputs.version }}"
           --source-sha "${{ needs.detect.outputs.source_sha }}"
       - name: Build publishable artifacts
-        if: needs.detect.outputs.artifact_source == 'build'
+        if: needs.detect.outputs.artifact_source == 'build' && steps.reuse.outputs.reused != 'true'
         run: uv build --no-sources --out-dir dist/packages/repo-standards
       - name: Reuse surviving registry artifacts
         if: needs.detect.outputs.artifact_source != 'build'
@@ -151,10 +176,45 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  safety:
+    name: Require successful exact main validation
+    if: needs.detect.outputs.prepare_artifacts == 'true'
+    needs: detect
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require successful latest own-repository push checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ needs.detect.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 840))
+          for workflow in ci.yml standards.yml; do
+            while (( SECONDS < deadline )); do
+              response="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs" -f head_sha="$TARGET_SHA" -f event=push -f per_page=100)"
+              run="$(jq -c --arg sha "$TARGET_SHA" --arg repo "$GITHUB_REPOSITORY" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .head_branch == "main" and .head_repository.full_name == $repo)] | max_by(.id) // empty' <<< "$response")"
+              conclusion="$(jq -r '.conclusion // empty' <<< "${run:-null}")"
+              if [[ "$conclusion" == success ]]; then
+                echo "$workflow succeeded at $TARGET_SHA"
+                break
+              fi
+              if [[ -n "$conclusion" ]]; then
+                echo "::error::$workflow concluded $conclusion at $TARGET_SHA"
+                exit 1
+              fi
+              sleep 3
+            done
+            (( SECONDS < deadline )) || { echo "::error::exact main checks timed out"; exit 1; }
+          done
+
   publish_primary:
     name: Publish repo-standards to PyPI
     if: needs.detect.outputs.publish_primary == 'true'
-    needs: [detect, build]
+    needs: [detect, build, safety]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: pypi-release
@@ -193,8 +253,9 @@ jobs:
       always() &&
       needs.detect.outputs.release == 'true' &&
       needs.build.result == 'success' &&
+      needs.safety.result == 'success' &&
       (needs.publish_primary.result == 'success' || needs.publish_primary.result == 'skipped')
-    needs: [detect, build, publish_primary]
+    needs: [detect, build, publish_primary, safety]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

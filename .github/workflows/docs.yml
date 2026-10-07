@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: docs-${{ github.ref }}
@@ -33,25 +34,38 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Reuse site verified by exact main CI
+        if: github.event_name == 'push'
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python ci_artifacts.py --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
+          --kind site --destination apps/docs/dist --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        if: steps.reuse.outputs.reused != 'true'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: '0.12.12'
+          version: '0.12.18'
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Install Node.js
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: apps/docs/package-lock.json
       - name: Install locked toolchains
+        if: steps.reuse.outputs.reused != 'true'
         run: |
           uv sync --locked --python 3.14
           npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund
       - name: Verify native TypeScript compiler
+        if: steps.reuse.outputs.reused != 'true'
         run: test "$(npm --prefix apps/docs exec --offline -- tsc --version)" = 'Version 7.0.2'
       - name: Lint and build generated reference
+        if: steps.reuse.outputs.reused != 'true'
         env:
           WORKERS_CI_COMMIT_SHA: ${{ github.sha }}
         run: |
@@ -59,6 +73,7 @@ jobs:
           npm --prefix apps/docs test
           npm --prefix apps/docs run build
       - name: Verify public site artifacts
+        if: steps.reuse.outputs.reused != 'true'
         run: uv run python -m repo_standards.verify_release_artifacts --site apps/docs/dist
       - name: Upload immutable site
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
@@ -97,14 +112,14 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: apps/docs/package-lock.json
+          cache-dependency-path: .github/deploy/package-lock.json
       - name: Download immutable site
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: repo-standards-site
           path: apps/docs/dist
       - name: Install locked deployment toolchain
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        run: npm --prefix ../../.github/deploy ci --ignore-scripts --no-audit --no-fund
       - name: Verify production credentials
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -116,8 +131,8 @@ jobs:
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: npm run deploy
+        run: ../../.github/deploy/node_modules/.bin/wrangler deploy --config wrangler.jsonc
       - name: Verify deployed revision and catalog
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
-        run: npm run verify:deployment
+        run: node scripts/verify-deployment.ts
