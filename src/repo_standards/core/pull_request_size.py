@@ -236,9 +236,58 @@ def analyze_pull_request_size(
         ConfigurationError.fail("repository root must be a directory")
     if not generated_attribute or any(char.isspace() for char in generated_attribute):
         ConfigurationError.fail("generated attribute must be one non-empty Git attribute name")
-    records = _numstat(resolved, base=base, head=head)
-    generated = _generated_paths(
+    return _classified_size(
         resolved,
+        base=base,
+        head=head,
+        records=_numstat(resolved, f"{base}...{head}"),
+        generated_attribute=generated_attribute,
+    )
+
+
+def analyze_size_since_review(
+    root: Path,
+    *,
+    reviewed: str,
+    base: str,
+    head: str,
+    generated_attribute: str = "pr-size-excluded",
+) -> PullRequestSize | None:
+    resolved = root.resolve(strict=True)
+    try:
+        reviewed_base = _git(resolved, "merge-base", base, reviewed).decode().strip()
+        head_base = _git(resolved, "merge-base", base, head).decode().strip()
+        merged = _git(
+            resolved,
+            "merge-tree",
+            "--write-tree",
+            f"--merge-base={reviewed_base}",
+            head_base,
+            reviewed,
+            accepted_exit_codes=(0, 1),
+        )
+        replayed = merged.decode().split("\n", 1)[0].strip()
+        return _classified_size(
+            resolved,
+            base=replayed,
+            head=head,
+            records=_numstat(resolved, replayed, head),
+            generated_attribute=generated_attribute,
+        )
+    except ConfigurationError:
+        return None
+
+
+def _classified_size(
+    root: Path,
+    *,
+    base: str,
+    head: str,
+    records: tuple[tuple[int, int, str, bool], ...],
+    generated_attribute: str,
+) -> PullRequestSize:
+    generated = _generated_paths(
+        root,
         base=base,
         paths=tuple(record[2] for record in records),
         attribute=generated_attribute,
@@ -273,7 +322,7 @@ def analyze_pull_request_size(
     )
 
 
-def _numstat(root: Path, *, base: str, head: str) -> tuple[tuple[int, int, str, bool], ...]:
+def _numstat(root: Path, *revisions: str) -> tuple[tuple[int, int, str, bool], ...]:
     output = _git(
         root,
         "diff",
@@ -282,7 +331,7 @@ def _numstat(root: Path, *, base: str, head: str) -> tuple[tuple[int, int, str, 
         "--numstat",
         "-z",
         "--no-renames",
-        f"{base}...{head}",
+        *revisions,
         "--",
     )
     records: list[tuple[int, int, str, bool]] = []
@@ -338,7 +387,12 @@ def _generated_paths(
     return frozenset(generated)
 
 
-def _git(root: Path, *arguments: str, input_bytes: bytes | None = None) -> bytes:
+def _git(
+    root: Path,
+    *arguments: str,
+    input_bytes: bytes | None = None,
+    accepted_exit_codes: tuple[int, ...] = (0,),
+) -> bytes:
     executable = shutil.which("git")
     if executable is None:
         ConfigurationError.fail("Git is required for pull-request size analysis")
@@ -353,6 +407,6 @@ def _git(root: Path, *arguments: str, input_bytes: bytes | None = None) -> bytes
         )
     except (OSError, subprocess.TimeoutExpired):
         ConfigurationError.fail("Git could not complete pull-request size analysis")
-    if completed.returncode != 0:
+    if completed.returncode not in accepted_exit_codes:
         ConfigurationError.fail("Git could not resolve the requested pull-request revisions")
     return completed.stdout

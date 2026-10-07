@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -16,11 +18,13 @@ from repo_standards.github_review_policy import (
     check_conclusion,
     collect_required_checks,
     eligible_reviewer_ids,
+    fetch_reviewed_commits,
     final_policy_decision,
     latest_human_reviews,
     merge_group_pull_request,
     merge_queue_head_sha,
     reconcile_merge_group,
+    render_comment,
     require_unchanged_evidence,
     required_check_names,
     review_policy_status_passed,
@@ -561,3 +565,95 @@ def test_merge_group_requires_current_queue_entry(
             merge_queue_head_sha(client, 42)
     else:
         assert merge_queue_head_sha(client, 42) == "d" * 40
+
+
+def _receipt(earlier_approvals: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "summary": {"tier": 1, "current_human_approvals": 1, "reasons": []},
+        "size": {"counted_lines": 300, "excluded_lines": 0},
+        "provenance": {"evaluated_head": "a" * 40},
+        "earlier_approvals": earlier_approvals,
+    }
+
+
+def test_comment_explains_each_earlier_approval() -> None:
+    comment = render_comment(
+        _receipt(
+            [
+                {
+                    "reviewer": "20:carried",
+                    "commit_sha": "b" * 40,
+                    "counted_lines_since_review": 12,
+                    "carried_forward": True,
+                },
+                {
+                    "reviewer": "21:stale",
+                    "commit_sha": "c" * 40,
+                    "counted_lines_since_review": None,
+                    "carried_forward": False,
+                },
+            ]
+        ),
+        final_passed=True,
+        lane_enabled=False,
+        operational_reason=None,
+    )
+
+    assert (
+        f"- Earlier approval by @carried on `{'b' * 12}`: 12 counted lines since, "
+        "**carried forward**\n"
+    ) in comment
+    assert (
+        f"- Earlier approval by @stale on `{'c' * 12}`: not measurable, **needs re-approval**\n"
+    ) in comment
+
+
+def _git(repository: Path, *arguments: str) -> str:
+    executable = shutil.which("git")
+    assert executable is not None
+    completed = subprocess.run(
+        [executable, "-C", str(repository), *arguments],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return completed.stdout.strip()
+
+
+def _commit(repository: Path, name: str) -> str:
+    (repository / name).write_text(f"{name}\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        name,
+    )
+    return _git(repository, "rev-parse", "HEAD")
+
+
+def test_force_pushed_approved_commit_is_fetched_by_object_id(tmp_path: Path) -> None:
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "--quiet")
+    _git(origin, "config", "uploadpack.allowAnySHA1InWant", "true")
+    base = _commit(origin, "base")
+    reviewed = _commit(origin, "reviewed")
+    _git(origin, "reset", "--quiet", "--hard", base)
+    head = _commit(origin, "rewritten")
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", "--quiet", "--no-local", str(origin), str(clone))
+    reviews = (
+        {"reviewer": "20:reviewer", "state": "approved", "commit_sha": reviewed},
+        {"reviewer": "21:missing", "state": "approved", "commit_sha": "f" * 40},
+    )
+
+    fetch_reviewed_commits(clone, reviews, head_sha=head)
+
+    assert _git(clone, "cat-file", "-t", reviewed) == "commit"

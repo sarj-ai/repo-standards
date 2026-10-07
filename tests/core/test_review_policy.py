@@ -13,6 +13,7 @@ from repo_standards.pull_request import (
     ReviewPolicyEvidence,
     ReviewPolicyReason,
     ReviewState,
+    SinceReviewEvidence,
     evaluate_review_policy,
 )
 
@@ -54,8 +55,21 @@ def _approval(
     reviewer: str = "reviewer",
     *,
     commit_sha: GitObjectId | None = HEAD,
+    since_review: SinceReviewEvidence | None = None,
 ) -> HumanReviewEvidence:
-    return HumanReviewEvidence(reviewer, ReviewState.APPROVED, commit_sha)
+    return HumanReviewEvidence(reviewer, ReviewState.APPROVED, commit_sha, since_review)
+
+
+def _earlier_approval(
+    lines: int,
+    paths: tuple[str, ...] = ("README.md",),
+    reviewer: str = "reviewer",
+) -> HumanReviewEvidence:
+    return _approval(
+        reviewer,
+        commit_sha=OTHER_HEAD,
+        since_review=SinceReviewEvidence(counted_lines=lines, changed_paths=paths),
+    )
 
 
 @pytest.mark.parametrize(
@@ -234,6 +248,106 @@ def test_stale_approval_does_not_count_toward_required_reviews() -> None:
     assert ReviewPolicyReason.APPROVALS_MISSING in result.reasons
 
 
+@pytest.mark.parametrize("lines", [0, 199])
+def test_approval_carries_forward_below_zero_review_threshold(lines: int) -> None:
+    result = evaluate_review_policy(
+        _evidence(counted_lines=500, latest_human_reviews=(_earlier_approval(lines),))
+    )
+
+    assert result.current_human_approvals == 1
+    assert result.merge_ready
+    assert ReviewPolicyReason.APPROVAL_CARRIED_FORWARD in result.reasons
+    assert ReviewPolicyReason.STALE_APPROVAL not in result.reasons
+
+
+def test_approval_goes_stale_at_zero_review_threshold() -> None:
+    result = evaluate_review_policy(
+        _evidence(counted_lines=500, latest_human_reviews=(_earlier_approval(200),))
+    )
+
+    assert result.current_human_approvals == 0
+    assert not result.merge_ready
+    assert ReviewPolicyReason.STALE_APPROVAL in result.reasons
+    assert ReviewPolicyReason.APPROVAL_CARRIED_FORWARD not in result.reasons
+
+
+def test_carry_forward_follows_configured_zero_review_threshold() -> None:
+    policy = ReviewPolicyConfig(zero_review_below_lines=10, one_review_maximum_lines=20)
+
+    result = evaluate_review_policy(
+        _evidence(counted_lines=15, latest_human_reviews=(_earlier_approval(10),)),
+        policy,
+    )
+
+    assert not result.merge_ready
+    assert ReviewPolicyReason.STALE_APPROVAL in result.reasons
+
+
+def test_migration_change_since_review_does_not_carry_forward() -> None:
+    since_paths = ("products/platform/datastores/postgres/migrations/0002.sql",)
+
+    result = evaluate_review_policy(
+        _evidence(
+            counted_lines=500,
+            latest_human_reviews=(_earlier_approval(1, since_paths),),
+        ),
+        PLATFORM_POLICY,
+    )
+
+    assert result.current_human_approvals == 0
+    assert not result.merge_ready
+    assert ReviewPolicyReason.STALE_APPROVAL in result.reasons
+
+
+def test_unmeasured_change_since_review_does_not_carry_forward() -> None:
+    result = evaluate_review_policy(
+        _evidence(counted_lines=500, latest_human_reviews=(_approval(commit_sha=OTHER_HEAD),))
+    )
+
+    assert result.current_human_approvals == 0
+    assert not result.merge_ready
+    assert ReviewPolicyReason.APPROVAL_CARRIED_FORWARD not in result.reasons
+
+
+def test_carried_and_exact_approvals_together_meet_two_review_tier() -> None:
+    result = evaluate_review_policy(
+        _evidence(
+            counted_lines=801,
+            latest_human_reviews=(_earlier_approval(5, reviewer="early"), _approval("late")),
+        )
+    )
+
+    assert result.current_human_approvals == 2
+    assert result.carried_forward_reviewers == ("early",)
+    assert result.merge_ready
+
+
+def test_head_mismatch_never_carries_an_approval_forward() -> None:
+    result = evaluate_review_policy(
+        _evidence(
+            counted_lines=500,
+            current_head_sha=OTHER_HEAD,
+            latest_human_reviews=(_earlier_approval(0),),
+        )
+    )
+
+    assert result.current_human_approvals == 0
+    assert ReviewPolicyReason.APPROVAL_CARRIED_FORWARD not in result.reasons
+
+
+def test_carried_approval_does_not_clear_a_change_request() -> None:
+    reviews = (
+        _earlier_approval(0, reviewer="early"),
+        HumanReviewEvidence("blocker", ReviewState.CHANGES_REQUESTED, OTHER_HEAD),
+    )
+
+    result = evaluate_review_policy(_evidence(counted_lines=500, latest_human_reviews=reviews))
+
+    assert result.current_human_approvals == 1
+    assert not result.merge_ready
+    assert ReviewPolicyReason.CHANGES_REQUESTED in result.reasons
+
+
 def test_insufficient_exact_head_approvals_fail_closed() -> None:
     result = evaluate_review_policy(
         _evidence(counted_lines=801, latest_human_reviews=(_approval(),))
@@ -351,6 +465,10 @@ def test_invalid_scalar_and_path_inputs_are_rejected() -> None:
         _evidence(current_head_sha=GitObjectId("short"))
     with pytest.raises(ValueError, match="object ID"):
         HumanReviewEvidence("reviewer", ReviewState.APPROVED, GitObjectId("short"))
+    with pytest.raises(ValueError, match="since review"):
+        SinceReviewEvidence(counted_lines=-1, changed_paths=())
+    with pytest.raises(ValueError, match="since review"):
+        SinceReviewEvidence(counted_lines=0, changed_paths=("/absolute",))
 
 
 def test_thresholds_and_migration_floor_are_configurable() -> None:

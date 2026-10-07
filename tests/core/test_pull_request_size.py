@@ -8,7 +8,11 @@ from typing import NamedTuple
 import pytest
 
 from repo_standards.core.errors import ConfigurationError
-from repo_standards.core.pull_request_size import analyze_pull_request_size, is_test_path
+from repo_standards.core.pull_request_size import (
+    analyze_pull_request_size,
+    analyze_size_since_review,
+    is_test_path,
+)
 
 
 class RepositoryFixture(NamedTuple):
@@ -172,3 +176,143 @@ def test_invalid_revision_is_incomplete(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="could not resolve"):
         analyze_pull_request_size(repository, base="missing", head="HEAD")
+
+
+class ReviewedBranch(NamedTuple):
+    path: Path
+    base_revision: str
+    reviewed: str
+
+
+def _reviewed_branch(tmp_path: Path) -> ReviewedBranch:
+    repository, _base = _repository(tmp_path)
+    (repository / "src" / "other.py").write_text("other = 1\n", encoding="utf-8")
+    _commit(repository, "second base file")
+    _git(repository, "branch", "-M", "dev")
+    _git(repository, "switch", "--quiet", "-c", "feature")
+    (repository / "src" / "app.py").write_text("value = 1\nfeature = 1\n", encoding="utf-8")
+    reviewed = _commit(repository, "feature")
+    _git(repository, "switch", "--quiet", "dev")
+    (repository / "src" / "other.py").write_text(
+        "other = 2\n" + "drift = 1\n" * 300, encoding="utf-8"
+    )
+    base = _commit(repository, "base drift")
+    _git(repository, "switch", "--quiet", "feature")
+    return ReviewedBranch(repository, base, reviewed)
+
+
+def _rebase_onto_dev(repository: Path) -> str:
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "rebase",
+        "--quiet",
+        "dev",
+    )
+    return _git(repository, "rev-parse", "HEAD")
+
+
+def _since_review(branch: ReviewedBranch, head: str) -> int | None:
+    result = analyze_size_since_review(
+        branch.path, reviewed=branch.reviewed, base=branch.base_revision, head=head
+    )
+    return None if result is None else result.counted_lines
+
+
+def test_pure_rebase_changes_nothing_since_review(tmp_path: Path) -> None:
+    branch = _reviewed_branch(tmp_path)
+
+    head = _rebase_onto_dev(branch.path)
+
+    assert head != branch.reviewed
+    assert _since_review(branch, head) == 0
+
+
+def test_rebase_counts_only_the_edit_and_not_base_drift(tmp_path: Path) -> None:
+    branch = _reviewed_branch(tmp_path)
+    _rebase_onto_dev(branch.path)
+    (branch.path / "src" / "app.py").write_text("value = 1\nfeature = 2\n", encoding="utf-8")
+
+    head = _commit(branch.path, "address review")
+
+    assert _since_review(branch, head) == 2
+
+
+def test_commits_added_without_rebase_are_counted(tmp_path: Path) -> None:
+    branch = _reviewed_branch(tmp_path)
+    (branch.path / "src" / "new.py").write_text("added = 1\n" * 5, encoding="utf-8")
+
+    head = _commit(branch.path, "follow-up")
+
+    assert _since_review(branch, head) == 5
+
+
+def test_merging_the_base_branch_changes_nothing_since_review(tmp_path: Path) -> None:
+    branch = _reviewed_branch(tmp_path)
+    _git(
+        branch.path,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "merge",
+        "--quiet",
+        "--no-edit",
+        "dev",
+    )
+
+    assert _since_review(branch, _git(branch.path, "rev-parse", "HEAD")) == 0
+
+
+def test_conflict_resolution_is_counted_since_review(tmp_path: Path) -> None:
+    branch = _reviewed_branch(tmp_path)
+    _git(branch.path, "switch", "--quiet", "dev")
+    (branch.path / "src" / "app.py").write_text("value = 9\n", encoding="utf-8")
+    base = _commit(branch.path, "conflicting base change")
+    _git(branch.path, "switch", "--quiet", "--detach", base)
+    (branch.path / "src" / "app.py").write_text("value = 9\nfeature = 1\n", encoding="utf-8")
+    head = _commit(branch.path, "rebased by hand")
+
+    result = analyze_size_since_review(branch.path, reviewed=branch.reviewed, base=base, head=head)
+
+    assert result is not None
+    assert result.counted_lines > 0
+    assert [item.path for item in result.files] == ["src/app.py"]
+
+
+def test_test_edits_since_review_are_excluded(tmp_path: Path) -> None:
+    branch = _reviewed_branch(tmp_path)
+    (branch.path / "tests").mkdir()
+    (branch.path / "tests" / "test_app.py").write_text("assert True\n" * 40, encoding="utf-8")
+
+    head = _commit(branch.path, "more tests")
+    result = analyze_size_since_review(
+        branch.path, reviewed=branch.reviewed, base=branch.base_revision, head=head
+    )
+
+    assert result is not None
+    assert result.counted_lines == 0
+    assert result.excluded_lines == 40
+
+
+def test_exclusion_policy_since_review_is_loaded_from_reviewed_change(tmp_path: Path) -> None:
+    branch = _reviewed_branch(tmp_path)
+    (branch.path / ".gitattributes").write_text("** pr-size-excluded\n", encoding="utf-8")
+    (branch.path / "src" / "new.py").write_text("review_me = True\n", encoding="utf-8")
+
+    head = _commit(branch.path, "attempt policy bypass")
+
+    assert _since_review(branch, head) == 3
+
+
+def test_unavailable_reviewed_commit_cannot_be_measured(tmp_path: Path) -> None:
+    branch = _reviewed_branch(tmp_path)
+
+    result = analyze_size_since_review(
+        branch.path, reviewed="f" * 40, base=branch.base_revision, head="HEAD"
+    )
+
+    assert result is None
