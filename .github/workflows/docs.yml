@@ -1,13 +1,8 @@
 name: documentation
 
 on:
-  pull_request:
-    paths:
-      - 'apps/docs/**'
-      - 'src/repo_standards/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/docs.yml'
+  # CI's unconditional docs lane already lints, tests, builds, and verifies the
+  # public boundary on every PR. This workflow owns post-merge publication.
   push:
     branches: [main]
     paths:
