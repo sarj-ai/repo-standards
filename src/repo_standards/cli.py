@@ -424,7 +424,17 @@ def pull_request_size_command(  # ruff: ignore[too-many-arguments,too-many-posit
     ] = None,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
 ) -> None:
-    """Calculate review-sized churn while excluding tests and declared generated artifacts."""
+    """Calculate review-sized churn while excluding tests and declared generated artifacts.
+
+    Exclusion classifies paths, not test quality. Review excluded test churn:
+    each case should protect a distinct contract, regression, boundary, interaction,
+    or lifecycle. Consolidate equivalent cases into readable named tables and reuse
+    owned fixtures; preserve independent oracles, case isolation, and safety checks.
+    Coverage percentages and test counts alone do not justify another case.
+
+    Source-semantic test-quality checks belong to Code Standards. Do not infer
+    quality from a test filename, file length, or the excluded-line count.
+    """
     if not base:
         _emit_command_error(
             "pull-request size",
