@@ -56,6 +56,7 @@ class ReviewPolicyReason(StrEnum):
     REVIEW_EVIDENCE_MISSING = "review_evidence_missing"
     REVIEW_EVIDENCE_AMBIGUOUS = "review_evidence_ambiguous"
     STALE_APPROVAL = "stale_approval"
+    APPROVAL_CARRIED_FORWARD = "approval_carried_forward"
     CHANGES_REQUESTED = "changes_requested"
     APPROVALS_MISSING = "approvals_missing"
     THREAD_EVIDENCE_MISSING = "thread_evidence_missing"
@@ -107,10 +108,23 @@ class RequiredCheckEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class SinceReviewEvidence:
+    counted_lines: int
+    changed_paths: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if isinstance(self.counted_lines, bool) or self.counted_lines < 0:
+            message = "counted lines since review must be a non-negative integer"
+            raise ValueError(message)
+        _validate_paths(self.changed_paths, "changed path since review")
+
+
+@dataclass(frozen=True, slots=True)
 class HumanReviewEvidence:
     reviewer: str
     state: ReviewState
     commit_sha: GitObjectId | None
+    since_review: SinceReviewEvidence | None = None
 
     def __post_init__(self) -> None:
         if not self.reviewer or self.reviewer != self.reviewer.strip():
@@ -154,6 +168,7 @@ class ReviewPolicyResult:
     touches_migration: bool
     merge_ready: bool
     reasons: tuple[ReviewPolicyReason, ...]
+    carried_forward_reviewers: tuple[str, ...] = ()
 
 
 def evaluate_review_policy(
@@ -193,6 +208,7 @@ def evaluate_review_policy(
         expected_head=evidence.evaluated_head_sha,
         required_reviews=required_reviews,
         head_matches=head_matches,
+        config=config,
     )
     reasons.extend(review_assessment.reasons)
 
@@ -208,6 +224,7 @@ def evaluate_review_policy(
         ReviewPolicyReason.TWO_REVIEW_THRESHOLD,
         ReviewPolicyReason.MIGRATION_REVIEW_FLOOR,
         ReviewPolicyReason.STALE_APPROVAL,
+        ReviewPolicyReason.APPROVAL_CARRIED_FORWARD,
     }
     return ReviewPolicyResult(
         required_human_reviews=required_reviews,
@@ -215,6 +232,7 @@ def evaluate_review_policy(
         touches_migration=touches_migration,
         merge_ready=not any(reason in blocking for reason in reasons),
         reasons=tuple(reasons),
+        carried_forward_reviewers=review_assessment.carried_forward_reviewers,
     )
 
 
@@ -281,6 +299,7 @@ def _check_reasons(
 class _ReviewAssessment:
     reasons: tuple[ReviewPolicyReason, ...]
     approvals: int
+    carried_forward_reviewers: tuple[str, ...] = ()
 
 
 def _review_reasons(
@@ -289,6 +308,7 @@ def _review_reasons(
     expected_head: GitObjectId,
     required_reviews: RequiredReviewCount,
     head_matches: bool,
+    config: ReviewPolicyConfig,
 ) -> _ReviewAssessment:
     if reviews is None:
         return _ReviewAssessment((ReviewPolicyReason.REVIEW_EVIDENCE_MISSING,), 0)
@@ -296,19 +316,37 @@ def _review_reasons(
     if len(reviewers) != len(set(reviewers)):
         return _ReviewAssessment((ReviewPolicyReason.REVIEW_EVIDENCE_AMBIGUOUS,), 0)
 
-    stale_approval = any(
-        review.state is ReviewState.APPROVED and review.commit_sha != expected_head
-        for review in reviews
+    approved = tuple(review for review in reviews if review.state is ReviewState.APPROVED)
+    exact = sum(review.commit_sha == expected_head and head_matches for review in approved)
+    earlier = tuple(review for review in approved if review.commit_sha != expected_head)
+    carried = tuple(
+        review.reviewer
+        for review in earlier
+        if head_matches and _carries_forward(review.since_review, config=config)
     )
-    approvals = sum(
-        review.state is ReviewState.APPROVED and review.commit_sha == expected_head and head_matches
-        for review in reviews
-    )
+    approvals = exact + len(carried)
     reasons: list[ReviewPolicyReason] = []
-    if stale_approval:
+    if len(carried) < len(earlier):
         reasons.append(ReviewPolicyReason.STALE_APPROVAL)
+    if carried:
+        reasons.append(ReviewPolicyReason.APPROVAL_CARRIED_FORWARD)
     if any(review.state is ReviewState.CHANGES_REQUESTED for review in reviews):
         reasons.append(ReviewPolicyReason.CHANGES_REQUESTED)
     if approvals < required_reviews:
         reasons.append(ReviewPolicyReason.APPROVALS_MISSING)
-    return _ReviewAssessment(tuple(reasons), approvals)
+    return _ReviewAssessment(tuple(reasons), approvals, carried)
+
+
+def _carries_forward(
+    since_review: SinceReviewEvidence | None,
+    *,
+    config: ReviewPolicyConfig,
+) -> bool:
+    return (
+        since_review is not None
+        and since_review.counted_lines < config.zero_review_below_lines
+        and not _touches_migration(
+            changed_paths=since_review.changed_paths,
+            migration_roots=config.migration_roots,
+        )
+    )

@@ -308,6 +308,35 @@ def ensure_git_objects(root: Path, snapshot: PullRequestSnapshot) -> None:
         _run_git(root, "cat-file", "-e", f"{revision}^{{commit}}")
 
 
+def fetch_reviewed_commits(
+    root: Path,
+    reviews: Sequence[Mapping[str, str | None]],
+    *,
+    head_sha: str,
+) -> None:
+    reviewed = sorted(
+        {
+            commit_sha
+            for review in reviews
+            if review.get("state") == "approved"
+            and (commit_sha := review.get("commit_sha")) is not None
+            and commit_sha != head_sha
+        }
+    )
+    for revision in reviewed:
+        present = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed executable and exact provider SHA
+            ("git", "-C", str(root), "cat-file", "-e", f"{revision}^{{commit}}"),
+            check=False,
+            capture_output=True,
+        )
+        if present.returncode != 0:
+            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed executable and exact provider SHA
+                ("git", "-C", str(root), "fetch", "--no-tags", "origin", revision),
+                check=False,
+                capture_output=True,
+            )
+
+
 def trusted_manifest(
     root: Path,
     base_sha: str,
@@ -682,6 +711,11 @@ def render_comment(
         reason_items.append(operational_reason)
     reason_text = ", ".join(reason_items)
     lane = "enabled" if lane_enabled else "disabled"
+    earlier = receipt.get("earlier_approvals")
+    earlier_lines = "".join(
+        _earlier_approval_line(_mapping(item, "earlier approval"))
+        for item in (earlier if isinstance(earlier, list) else ())
+    )
     return (
         f"{_COMMENT_MARKER}\n"
         "### Review policy\n\n"
@@ -691,11 +725,21 @@ def render_comment(
         "current human approval(s)\n"
         f"- Counted size: **{size.get('counted_lines', '?')}** lines "
         f"({size.get('excluded_lines', '?')} excluded)\n"
+        f"{earlier_lines}"
         f"- Migration: **{'yes' if summary.get('touches_migration') else 'no'}**\n"
         f"- Review-optional lane: **{lane}**\n"
         f"- Reasons: `{reason_text}`\n\n"
         f"Evaluated head `{receipt.get('provenance', {}).get('evaluated_head', 'unknown')}`.\n"
     )
+
+
+def _earlier_approval_line(approval: Mapping[str, object]) -> str:
+    reviewer = str(approval.get("reviewer", "unknown")).rpartition(":")[2]
+    commit = str(approval.get("commit_sha", ""))[:12]
+    lines = approval.get("counted_lines_since_review")
+    measured = "not measurable" if lines is None else f"{lines} counted lines since"
+    outcome = "carried forward" if approval.get("carried_forward") is True else "needs re-approval"
+    return f"- Earlier approval by @{reviewer} on `{commit}`: {measured}, **{outcome}**\n"
 
 
 def render_incomplete_comment(receipt: Mapping[str, Any]) -> str:
@@ -1014,6 +1058,7 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
         )
         if collected.snapshot != snapshot:
             raise ReconciliationError("pull request changed before evidence collection completed")
+        fetch_reviewed_commits(root, collected.reviews, head_sha=snapshot.head_sha)
         evidence = {
             "schema_version": 1,
             "evaluated_head_sha": snapshot.head_sha,

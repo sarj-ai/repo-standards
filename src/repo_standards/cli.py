@@ -63,7 +63,11 @@ from repo_standards.core.pull_request_documentation import (
     PullRequestDocumentation,
     analyze_pull_request_documentation,
 )
-from repo_standards.core.pull_request_size import PullRequestSize, analyze_pull_request_size
+from repo_standards.core.pull_request_size import (
+    PullRequestSize,
+    analyze_pull_request_size,
+    analyze_size_since_review,
+)
 from repo_standards.core.render import render_text, report_dict
 from repo_standards.core.review_policy import (
     CheckConclusion,
@@ -73,6 +77,7 @@ from repo_standards.core.review_policy import (
     ReviewPolicyEvidence,
     ReviewPolicyResult,
     ReviewState,
+    SinceReviewEvidence,
     evaluate_review_policy,
 )
 from repo_standards.core.rule_reviews import RuleVersion, activated_rule_ids
@@ -741,6 +746,21 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
             counted_lines = configured.zero_review_below_counted_lines
             changed_paths = ()
             missing_sections = ()
+        reviews = tuple(
+            HumanReviewEvidence(
+                reviewer=item.reviewer,
+                state=item.state,
+                commit_sha=GitObjectId(item.commit_sha) if item.commit_sha is not None else None,
+                since_review=_since_review_evidence(
+                    resolved_root,
+                    item=item,
+                    base=base,
+                    head=head,
+                    generated_attribute=generated_attribute,
+                ),
+            )
+            for item in provider.latest_human_reviews
+        )
         result = evaluate_review_policy(
             ReviewPolicyEvidence(
                 counted_lines=counted_lines,
@@ -751,16 +771,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                     RequiredCheckEvidence(item.name, item.conclusion)
                     for item in provider.required_checks
                 ),
-                latest_human_reviews=tuple(
-                    HumanReviewEvidence(
-                        reviewer=item.reviewer,
-                        state=item.state,
-                        commit_sha=(
-                            GitObjectId(item.commit_sha) if item.commit_sha is not None else None
-                        ),
-                    )
-                    for item in provider.latest_human_reviews
-                ),
+                latest_human_reviews=reviews,
                 threads_resolved=provider.threads_resolved,
             ),
             ReviewPolicyConfig(
@@ -788,6 +799,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         size=size,
         provider=provider,
         configured=configured,
+        reviews=reviews,
         result=result,
         missing_sections=missing_sections,
         transition_exemption=transition_exemption,
@@ -800,6 +812,32 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         transition_exemption=transition_exemption,
     ):
         raise typer.Exit(1)
+
+
+def _since_review_evidence(
+    root: Path,
+    *,
+    item: _ReviewPolicyReviewInput,
+    base: str,
+    head: str,
+    generated_attribute: str,
+) -> SinceReviewEvidence | None:
+    reviewed = item.commit_sha
+    if item.state is not ReviewState.APPROVED or reviewed is None or reviewed == head:
+        return None
+    size = analyze_size_since_review(
+        root,
+        reviewed=reviewed,
+        base=base,
+        head=head,
+        generated_attribute=generated_attribute,
+    )
+    if size is None:
+        return None
+    return SinceReviewEvidence(
+        counted_lines=size.counted_lines,
+        changed_paths=tuple(file.path for file in size.files),
+    )
 
 
 def _load_review_policy_evidence(path: Path) -> _ReviewPolicyEvidenceInput:
@@ -877,6 +915,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
     size: PullRequestSize | None,
     provider: _ReviewPolicyEvidenceInput,
     configured: PullRequestReviewPolicyConfig,
+    reviews: tuple[HumanReviewEvidence, ...],
     result: ReviewPolicyResult,
     missing_sections: tuple[str, ...],
     transition_exemption: str | None,
@@ -934,6 +973,19 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             "required_checks": len(configured.required_checks),
             "human_reviews": len(provider.latest_human_reviews),
         },
+        "earlier_approvals": [
+            {
+                "reviewer": review.reviewer,
+                "commit_sha": review.commit_sha,
+                "counted_lines_since_review": (
+                    review.since_review.counted_lines if review.since_review is not None else None
+                ),
+                "carried_forward": review.reviewer in result.carried_forward_reviewers,
+            }
+            for review in reviews
+            if review.state is ReviewState.APPROVED
+            and review.commit_sha != provider.evaluated_head_sha
+        ],
         "size": (
             {
                 "classification": "measured",

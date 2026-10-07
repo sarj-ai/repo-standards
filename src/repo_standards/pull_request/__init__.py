@@ -16,6 +16,7 @@ from repo_standards.core.pull_request_size import (
     PullRequestSizeCategory as PullRequestSizeCategory,
     PullRequestSizeSummary as PullRequestSizeSummary,
     analyze_pull_request_size as analyze_pull_request_size,
+    analyze_size_since_review as analyze_size_since_review,
     is_test_path as is_test_path,
 )
 from repo_standards.core.review_policy import (
@@ -31,5 +32,6 @@ from repo_standards.core.review_policy import (
     ReviewPolicyReason as ReviewPolicyReason,
     ReviewPolicyResult as ReviewPolicyResult,
     ReviewState as ReviewState,
+    SinceReviewEvidence as SinceReviewEvidence,
     evaluate_review_policy as evaluate_review_policy,
 )

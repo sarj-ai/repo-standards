@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from importlib.metadata import version
 import json
 from pathlib import Path
@@ -439,6 +440,91 @@ def test_pull_request_review_policy_requires_two_reviews_above_800_lines(
     assert summary["tier"] == 2
     assert summary["current_human_approvals"] == 0
     assert summary["reasons"] == ["two_review_threshold", "approvals_missing"]
+
+
+@dataclass(frozen=True, slots=True)
+class RebasedReview:
+    base: str
+    reviewed: str
+    head: str
+
+
+def _rebased_after_review(repository: Path, *, edit_lines: int) -> RebasedReview:
+    _review_policy_fixture(repository)
+    _git(repository, "branch", "-M", "dev")
+    _git(repository, "switch", "--quiet", "-c", "feature")
+    (repository / "feature.py").write_text("value = 1\n" * 300, encoding="utf-8")
+    _commit_changes(repository)
+    reviewed = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "switch", "--quiet", "dev")
+    (repository / "drift.py").write_text("drift = 1\n" * 900, encoding="utf-8")
+    _commit_changes(repository)
+    base = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "switch", "--quiet", "feature")
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "rebase",
+        "--quiet",
+        "dev",
+    )
+    if edit_lines:
+        (repository / "edit.py").write_text("edit = 1\n" * edit_lines, encoding="utf-8")
+        _commit_changes(repository)
+    return RebasedReview(base, reviewed, _git(repository, "rev-parse", "HEAD"))
+
+
+@pytest.mark.parametrize(
+    ("edit_lines", "carried_forward", "reasons"),
+    [
+        (0, True, ["one_review_threshold", "approval_carried_forward"]),
+        (199, True, ["one_review_threshold", "approval_carried_forward"]),
+        (200, False, ["one_review_threshold", "stale_approval", "approvals_missing"]),
+    ],
+)
+def test_pull_request_review_policy_carries_approval_across_rebase(
+    tmp_path: Path,
+    *,
+    edit_lines: int,
+    carried_forward: bool,
+    reasons: list[str],
+) -> None:
+    rebased = _rebased_after_review(tmp_path, edit_lines=edit_lines)
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=rebased.head,
+        reviews=[{"reviewer": "human", "state": "approved", "commit_sha": rebased.reviewed}],
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            rebased.base,
+            "--head",
+            rebased.head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == (0 if carried_forward else 1), result.stdout
+    payload = _json_object(result.stdout)
+    assert _object(payload["summary"])["reasons"] == reasons
+    assert payload["earlier_approvals"] == [
+        {
+            "reviewer": "human",
+            "commit_sha": rebased.reviewed,
+            "counted_lines_since_review": edit_lines,
+            "carried_forward": carried_forward,
+        }
+    ]
 
 
 def test_pull_request_review_policy_transition_requires_one_review_and_skips_size_body(
