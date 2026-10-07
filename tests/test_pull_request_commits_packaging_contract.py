@@ -89,7 +89,11 @@ def test_pull_request_commits_action_uses_runner_event_file_and_locked_package()
 def test_ci_self_tests_action_hook_manifest_and_installed_cli() -> None:
     source = CI_PATH.read_text(encoding="utf-8")
 
-    assert "types: [opened, synchronize, reopened, edited]" in source
+    assert "types: [opened, synchronize, reopened]" in source
+    # Title edits still need commit-policy validation; they do not change the
+    # package tree or require its lint, types, tests and docs to run again.
+    policy = (ROOT / ".github/workflows/commit-policy.yml").read_text(encoding="utf-8")
+    assert "edited" in policy
     assert "types: [checks_requested]" in source
     assert "uses: ./pull-request-commits" in source
     assert "fetch-depth: 0" in source
