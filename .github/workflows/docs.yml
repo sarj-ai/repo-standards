@@ -10,6 +10,7 @@ on:
       - 'src/repo_standards/**'
       - 'pyproject.toml'
       - 'uv.lock'
+      - '.github/deploy/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
