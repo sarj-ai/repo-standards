@@ -200,6 +200,8 @@ jobs:
           wait "$python_pid" || result=1
           wait "$node_pid" || result=1
           exit "$result"
+      - name: Audit documentation dependency graph
+        run: npm --prefix apps/docs audit --audit-level=high
       - name: Verify native TypeScript compiler
         run: test "$(npm --prefix apps/docs exec --offline -- tsc --version)" = 'Version 7.0.2'
       - name: Verify generated reference
