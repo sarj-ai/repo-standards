@@ -4,6 +4,7 @@ import hashlib
 import io
 from threading import Barrier
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -23,11 +24,12 @@ def test_registry_inspection_overlaps_all_reads_and_propagates_failure(
     finished: list[str] = []
 
     def request(url: str, *, token: str | None = None) -> dict[str, object] | None:
-        if "pypi.org" in url:
+        is_pypi = urlsplit(url).hostname == "pypi.org"
+        if is_pypi:
             assert token is None
         barrier.wait(timeout=5)
         finished.append(url)
-        if failed and "pypi.org" in url:
+        if failed and is_pypi:
             message = "registry outage"
             raise OSError(message)
         return None
