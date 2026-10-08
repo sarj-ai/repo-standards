@@ -111,7 +111,13 @@ class _Arguments(argparse.Namespace):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Reviewed docs, delivery-tool and test-only changes use explicit cohorts. "
+        "Source, shared config, deletions, renames and unavailable Git evidence run every test. "
+        "Main, schedules and publication always use full validation. "
+        "Preview with --base origin/main; add --run to execute, or --jobs 1 for serial debugging.",
+    )
     parser.add_argument(
         "--base", default="", help="reviewed base revision; omitted means all tests"
     )
