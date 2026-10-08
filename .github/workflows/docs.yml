@@ -76,9 +76,7 @@ jobs:
         env:
           WORKERS_CI_COMMIT_SHA: ${{ github.sha }}
         run: |
-          npm --prefix apps/docs run lint
-          npm --prefix apps/docs test
-          npm --prefix apps/docs run build
+          bash .github/scripts/verify-reference.sh
       - name: Verify public site artifacts
         if: steps.reuse.outputs.reused != 'true'
         run: uv run --frozen --no-dev --group artifacts python -m repo_standards.verify_release_artifacts --site apps/docs/dist

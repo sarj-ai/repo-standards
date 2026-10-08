@@ -347,6 +347,8 @@ def verify_site(directory: Path) -> list[str]:
         return [f"site artifact does not exist: {directory}"]
     violations: list[str] = []
     observed: set[str] = set()
+    documents: list[tuple[str, str]] = []
+    headers: str | None = None
     for path in directory.rglob("*"):
         if path.is_dir():
             continue
@@ -366,6 +368,10 @@ def verify_site(directory: Path) -> list[str]:
         if artifact_path.name.casefold().endswith(".map"):
             violations.append(f"site:{artifact_path}: source map is not publishable")
         content = path.read_bytes()
+        if artifact_path.suffix == ".html":
+            documents.append((str(artifact_path), content.decode("utf-8")))
+        elif str(artifact_path) == "_headers":
+            headers = content.decode("utf-8")
         display_name = f"site:{artifact_path}"
         violations.extend(_scan_identity(display_name, content))
         if artifact_path.parts[0] != "_astro":
@@ -375,8 +381,8 @@ def verify_site(directory: Path) -> list[str]:
         for name in sorted(REQUIRED_SITE_FILES - observed)
     )
     violations.extend(verify_site_catalog(directory))
-    violations.extend(_verify_site_semantics(directory))
-    violations.extend(_verify_site_csp(directory))
+    violations.extend(_verify_site_semantics(directory, documents))
+    violations.extend(_verify_site_csp(headers, documents))
     return violations
 
 
@@ -424,15 +430,11 @@ def _validate_schema(validator: _SchemaValidator, instance: JSONValue) -> None:
     validator.validate(instance)
 
 
-def _verify_site_csp(directory: Path) -> list[str]:
-    headers_path = directory / "_headers"
-    if not headers_path.is_file():
+def _verify_site_csp(headers: str | None, documents: Iterable[tuple[str, str]]) -> list[str]:
+    if headers is None:
         return ["site:_headers: Cloudflare security headers are required"]
-    headers = headers_path.read_text(encoding="utf-8")
     violations: list[str] = []
-    for path in directory.rglob("*.html"):
-        relative = path.relative_to(directory).as_posix()
-        document = path.read_text(encoding="utf-8")
+    for relative, document in documents:
         if 'http-equiv="content-security-policy"' in document:
             violations.append(f"site:{relative}: CSP must be delivered by the response header only")
         parser = InlineScripts()
@@ -445,7 +447,7 @@ def _verify_site_csp(directory: Path) -> list[str]:
     return violations
 
 
-def _verify_site_semantics(directory: Path) -> list[str]:
+def _verify_site_semantics(directory: Path, documents: Iterable[tuple[str, str]]) -> list[str]:
     violations: list[str] = []
     catalog_path = directory / "api/catalog.json"
     if not catalog_path.is_file():
@@ -453,10 +455,9 @@ def _verify_site_semantics(directory: Path) -> list[str]:
     payload = SiteCatalog.model_validate_json(catalog_path.read_bytes())
     expected_rules = {item.rule_id: item for item in payload.rules}
     observed_rules: set[str] = set()
-    for path in directory.rglob("*.html"):
-        relative = path.relative_to(directory).as_posix()
+    for relative, document in documents:
         parser = PageSemantics()
-        parser.feed(path.read_text(encoding="utf-8"))
+        parser.feed(document)
         if relative == "git-policies/index.html":
             violations.extend(_verify_git_policy_reference(parser))
         violations.extend(_verify_page_landmarks(relative, parser))

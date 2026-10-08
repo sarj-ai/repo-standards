@@ -29,6 +29,12 @@ _TOOL_TESTS = {
         "tests/test_release_reconciliation.py",
         "tests/test_distribution_fast_paths.py",
     ),
+    "src/repo_standards/verify_release_artifacts.py": (
+        "tests/test_release_distributions.py",
+        "tests/test_release_site_contract.py",
+        "tests/test_distribution_fast_paths.py",
+        "tests/test_public_api.py",
+    ),
 }
 
 
@@ -114,7 +120,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
         epilog="Reviewed docs, delivery-tool and test-only changes use explicit cohorts. "
-        "Source, shared config, deletions, renames and unavailable Git evidence run every test. "
+        "Shared source/config, deletions, renames and unavailable Git evidence run every test. "
         "Main, schedules and publication always use full validation. "
         "Preview with --base origin/main; add --run to execute, or --jobs 1 for serial debugging.",
     )
