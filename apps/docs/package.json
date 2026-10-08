@@ -24,7 +24,7 @@
     "@astrojs/check": "0.9.10",
     "@astrojs/sitemap": "3.7.4",
     "@eslint/js": "10.0.1",
-    "@sarj/eslint-plugin": "16.2.4",
+    "@sarj/eslint-plugin": "16.3.0",
     "@types/node": "24.13.3",
     "@typescript/native": "npm:typescript@7.0.2",
     "eslint": "10.10.0",
