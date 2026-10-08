@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+from pathlib import Path
 import tarfile
-from typing import TYPE_CHECKING
+from threading import Barrier
 import zipfile
 
 import pytest
@@ -21,10 +22,6 @@ from release_reconciliation import (
     verify_distribution_release_identity,
     verify_installed_distributions,
 )
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 VERSION = "3.0.0"
@@ -170,6 +167,51 @@ def test_installed_distribution_verifier_checks_both_artifacts_and_writes_checks
         f"{hashlib.sha256(wheel.read_bytes()).hexdigest()}  packages/repo-standards/{wheel.name}",
         f"{hashlib.sha256(sdist.read_bytes()).hexdigest()}  packages/repo-standards/{sdist.name}",
     ]
+
+
+@pytest.mark.parametrize("failed_artifact", [None, "wheel", "sdist"])
+def test_clean_installs_overlap_and_finish_before_failure_or_checksums(
+    tmp_path: Path, failed_artifact: str | None
+) -> None:
+    directory = tmp_path / "packages"
+    directory.mkdir()
+    (directory / WHEEL.name).write_bytes(b"wheel")
+    (directory / SDIST.name).write_bytes(b"sdist")
+    both_started = Barrier(2)
+    imported: list[str] = []
+
+    def run(command: tuple[str, ...]) -> str:
+        if command[:2] == ("uv", "venv"):
+            both_started.wait(timeout=5)
+        elif command[-1] == "--version":
+            label = Path(command[0]).parent.parent.name
+            return "9.9.9" if label == failed_artifact else VERSION
+        elif command[1] == "-c":
+            imported.append(Path(command[0]).parent.parent.name)
+        return ""
+
+    checksum = tmp_path / "SHA256SUMS"
+    if failed_artifact is None:
+        verify_installed_distributions(
+            directory,
+            version=VERSION,
+            smoke_root=tmp_path / "smoke",
+            checksum_path=checksum,
+            run_command=run,
+        )
+        assert sorted(imported) == ["sdist", "wheel"]
+        assert checksum.exists()
+    else:
+        with pytest.raises(ReleaseStateError, match=failed_artifact + " installed version differs"):
+            verify_installed_distributions(
+                directory,
+                version=VERSION,
+                smoke_root=tmp_path / "smoke",
+                checksum_path=checksum,
+                run_command=run,
+            )
+        assert imported == ["sdist" if failed_artifact == "wheel" else "wheel"]
+        assert not checksum.exists()
 
 
 def test_installed_distribution_verifier_rejects_extra_packages(tmp_path: Path) -> None:

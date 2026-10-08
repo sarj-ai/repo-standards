@@ -354,7 +354,7 @@ wheels = [
 
 [[package]]
 name = "repo-standards"
-version = "6.3.2"
+version = "6.3.3"
 source = { editable = "." }
 dependencies = [
     { name = "conventional-pre-commit" },
@@ -364,12 +364,18 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+artifacts = [
+    { name = "jsonschema" },
+]
 dev = [
     { name = "basedpyright" },
     { name = "jsonschema" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
+]
+hooks = [
+    { name = "pre-commit" },
 ]
 
 [package.metadata]
@@ -381,6 +387,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+artifacts = [{ name = "jsonschema", specifier = ">=4.26.0" }]
 dev = [
     { name = "basedpyright", specifier = ">=1.40.1" },
     { name = "jsonschema", specifier = ">=4.26.0" },
@@ -388,6 +395,7 @@ dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.9" },
 ]
+hooks = [{ name = "pre-commit", specifier = ">=4.6.0,<5" }]
 
 [[package]]
 name = "rich"

@@ -73,9 +73,9 @@ jobs:
     name: Prepare and verify release artifacts
     if: >-
       always() &&
-      needs.detect.outputs.prepare_artifacts == 'true' &&
-      (needs.anchor.result == 'success' || needs.anchor.result == 'skipped')
-    needs: [detect, anchor]
+      needs.detect.result == 'success' &&
+      needs.detect.outputs.prepare_artifacts == 'true'
+    needs: [detect]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -150,7 +150,7 @@ jobs:
           --directory dist/packages/repo-standards
       - name: Verify public distribution boundary
         run: >-
-          uv run --frozen python -m repo_standards.verify_release_artifacts
+          uv run --frozen --no-dev --group artifacts python -m repo_standards.verify_release_artifacts
           --distributions dist/packages/repo-standards
       - name: Verify exact release identity in package documentation
         run: >-
@@ -162,12 +162,12 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.detect.outputs.version }}
           SMOKE_ROOT: ${{ runner.temp }}/smoke
-        run: >-
-          python release_reconciliation.py verify-installed
-          --directory dist/packages/repo-standards
-          --version "$RELEASE_VERSION"
-          --smoke-root "$SMOKE_ROOT"
-          --checksum dist/SHA256SUMS
+        run: |
+          python release_reconciliation.py verify-installed \
+            --directory dist/packages/repo-standards \
+            --version "$RELEASE_VERSION" \
+            --smoke-root "$SMOKE_ROOT" \
+            --checksum dist/SHA256SUMS | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload verified artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -213,8 +213,13 @@ jobs:
 
   publish_primary:
     name: Publish repo-standards to PyPI
-    if: needs.detect.outputs.publish_primary == 'true'
-    needs: [detect, build, safety]
+    if: >-
+      always() &&
+      needs.detect.outputs.publish_primary == 'true' &&
+      needs.build.result == 'success' &&
+      needs.safety.result == 'success' &&
+      (needs.anchor.result == 'success' || needs.anchor.result == 'skipped')
+    needs: [detect, anchor, build, safety]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: pypi-release
@@ -254,8 +259,9 @@ jobs:
       needs.detect.outputs.release == 'true' &&
       needs.build.result == 'success' &&
       needs.safety.result == 'success' &&
+      (needs.anchor.result == 'success' || needs.anchor.result == 'skipped') &&
       (needs.publish_primary.result == 'success' || needs.publish_primary.result == 'skipped')
-    needs: [detect, build, publish_primary, safety]
+    needs: [detect, anchor, build, publish_primary, safety]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
