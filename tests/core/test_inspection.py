@@ -9,6 +9,7 @@ import pytest
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import (
     git_index_identity,
+    inspect_repository,
     load_repository_snapshot,
     parse_project_metadata,
     parse_workspace_metadata,
@@ -129,9 +130,7 @@ def test_workspace_metadata_rejects_unsafe_patterns() -> None:
 )
 def test_workspace_metadata_rejects_unsupported_globs(pattern: str) -> None:
     with pytest.raises(ConfigurationError, match="metadata is malformed"):
-        parse_workspace_metadata(
-            "pnpm-workspace.yaml", f"packages:\n  - '{pattern}'\n".encode()
-        )
+        parse_workspace_metadata("pnpm-workspace.yaml", f"packages:\n  - '{pattern}'\n".encode())
 
 
 def test_snapshot_joins_manifest_and_inventory_from_one_git_tree(tmp_path: Path) -> None:
@@ -158,6 +157,40 @@ def test_snapshot_joins_manifest_and_inventory_from_one_git_tree(tmp_path: Path)
     assert repeated.manifest.repository_id == "example-repository"
     assert repeated.provenance == snapshot.provenance
     assert repeated.inspection == snapshot.inspection
+
+
+def test_inventory_retains_overlapping_kinds_case_and_posix_parents(tmp_path: Path) -> None:
+    repository = _committed_repository(tmp_path)
+    paths = (
+        ".github/workflows/CloudBuild.yaml",
+        ".github/workflows/Dockerfile.yml",
+        ".github/workflows/cloudbuild-\u00e9.yaml",
+        ".github/workflows/cloudbuild.YAML",
+        "Dockerfile.production",
+        "infra/dev/main.tf.json",
+        "main.tf",
+    )
+    for path in paths:
+        destination = repository / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("value = 1\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(
+        repository,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "inventory",
+    )
+    inspected = inspect_repository(repository)
+    assert inspected.workflow_paths == paths[:3]
+    assert inspected.cloudbuild_paths == (paths[0], paths[2])
+    assert inspected.dockerfile_paths == (paths[1], paths[4])
+    assert inspected.terraform_modules == (".", "iac", "infra/dev")
 
 
 def test_documentation_entrypoint_must_exist_but_its_blob_need_not_be_read(
