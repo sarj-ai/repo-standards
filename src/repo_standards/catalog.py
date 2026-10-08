@@ -775,8 +775,8 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
 
 def _schemas() -> tuple[SchemaDescriptor, ...]:
     documents = (
-        ("report", "Repository analysis report", "report", report_schema()),
-        ("catalog", "Repo Standards public catalog", "catalog", catalog_schema()),
+        ("report", "Repository analysis report", "report", _report_schema()),
+        ("catalog", "Repo Standards public catalog", "catalog", _catalog_schema()),
     )
     return tuple(
         SchemaDescriptor(
@@ -784,7 +784,7 @@ def _schemas() -> tuple[SchemaDescriptor, ...]:
             title=title,
             media_type="application/schema+json",
             cli_selector=selector,
-            document=_JSON_OBJECT.validate_python(dict(document), strict=True),
+            document=document,
         )
         for schema_id, title, selector, document in documents
     )

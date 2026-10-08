@@ -78,3 +78,44 @@ def test_documentation_installs_overlap_and_either_failure_blocks_build(
     )
     assert (process.returncode == 0) == (failed_tool == "none"), process.stderr
     assert sorted(path.name for path in signals.iterdir()) == ["npm", "uv"]
+
+
+@pytest.mark.parametrize("failed_check", ["none", "eslint", "test", "typecheck"])
+def test_reference_checks_overlap_and_all_must_pass_before_build(
+    tmp_path: Path, failed_check: str
+) -> None:
+    script = (REPOSITORY_ROOT / ".github/scripts/verify-reference.sh").read_text()
+    commands = script[script.index("npm run catalog") :]
+    stub = tmp_path / "npm"
+    stub.write_text(
+        '#!/bin/sh\ncase "$*" in *catalog*) exit 0;; *eslint*) name=eslint;; '
+        "*typecheck*) name=typecheck;; *test*) name=test;; *) "
+        'test -f "$SIGNALS/eslint.done" && test -f "$SIGNALS/test.done" '
+        '&& test -f "$SIGNALS/typecheck.done" || exit 9; '
+        'touch "$SIGNALS/build"; exit 0;; esac\n'
+        'touch "$SIGNALS/$name.started"\n'
+        'until test -f "$SIGNALS/eslint.started" && test -f "$SIGNALS/test.started" '
+        '&& test -f "$SIGNALS/typecheck.started"; do sleep 0.01; done\n'
+        'touch "$SIGNALS/$name.done"\n'
+        '[ "$name" != "$FAIL_CHECK" ]\n'
+    )
+    stub.chmod(0o755)
+    node = tmp_path / "node"
+    node.write_text("#!/bin/sh\nexit 0\n")
+    node.chmod(0o755)
+    process = subprocess.run(
+        (shutil.which("bash") or "/bin/bash", "-eu", "-o", "pipefail", "-c", commands),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={
+            **os.environ,  # ruff: ignore[banned-api] -- preserve the real verification shell environment.
+            "PATH": str(tmp_path) + os.pathsep + os.defpath,
+            "SIGNALS": str(tmp_path),
+            "FAIL_CHECK": failed_check,
+        },
+    )
+    assert (process.returncode == 0) == (failed_check == "none"), process.stderr
+    assert (tmp_path / "build").exists() is (failed_check == "none")
+    assert all((tmp_path / f"{name}.done").exists() for name in ["eslint", "test", "typecheck"])
