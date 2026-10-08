@@ -237,3 +237,26 @@ def test_worker_startup_is_avoided_for_small_or_serial_plans(
     )
     assert test_selection.main() == 0
     assert ("-n" in calls[0]) is parallel
+
+
+@pytest.mark.parametrize("version_line", ["", "version=[]\n", 'version="invalid"\n'])
+def test_missing_or_malformed_own_version_runs_full(repository: Path, version_line: str) -> None:
+    project = repository / "pyproject.toml"
+    project.write_text('[project]\nname="repo-standards"\nversion="1.0.0"\n')
+    _git(repository, "add", ".")
+    _git(
+        repository,
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "version",
+    )
+    project.write_text('[project]\nname="repo-standards"\n' + version_line)
+    plan = select_tests(repository, base="HEAD")
+    assert len(plan.tests) == plan.total_files

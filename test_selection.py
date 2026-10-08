@@ -89,6 +89,10 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
 
 
 def _drop_version(record: dict[str, object]) -> dict[str, object]:
+    version = record.get("version")
+    if not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+        message = "invalid stable release version"
+        raise ValueError(message)
     return {key: value for key, value in record.items() if key != "version"}
 
 
@@ -104,16 +108,13 @@ def _without_version(source: str, path: str) -> object:
             "project": _drop_version(project),
         }
     packages = document["package"]
-    if not isinstance(packages, list) or any(
-        not isinstance(package, dict) for package in packages
-    ):
+    if not isinstance(packages, list) or any(not isinstance(package, dict) for package in packages):
         message = "invalid package records"
         raise ValueError(message)
     owned = [
         package
         for package in packages
-        if package.get("name") == "repo-standards"
-        and package.get("source") == {"editable": "."}
+        if package.get("name") == "repo-standards" and package.get("source") == {"editable": "."}
     ]
     if len(owned) != 1:
         message = "missing or ambiguous editable package"
@@ -121,10 +122,7 @@ def _without_version(source: str, path: str) -> object:
     return {
         **document,
         "package": [
-            _drop_version(package)
-            if package is owned[0]
-            else package
-            for package in packages
+            _drop_version(package) if package is owned[0] else package for package in packages
         ],
     }
 
