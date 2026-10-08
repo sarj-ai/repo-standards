@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -237,6 +238,64 @@ def test_worker_startup_is_avoided_for_small_or_serial_plans(
     )
     assert test_selection.main() == 0
     assert ("-n" in calls[0]) is parallel
+
+
+@pytest.mark.parametrize("status", [0, 7])
+def test_saved_plan_and_summary_preserve_test_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: int
+) -> None:
+    plan = test_selection.TestPlan(("tests/test_alpha.py",), "reviewed cohort", 20)
+
+    def select(_root: Path, *, base: str = "") -> test_selection.TestPlan:
+        assert not base
+        return plan
+
+    def run(argv: tuple[str, ...], *, cwd: Path, check: bool) -> subprocess.CompletedProcess[str]:
+        assert cwd.is_dir()
+        assert not check
+        return subprocess.CompletedProcess(argv, status)
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- inject selected coverage at the CLI boundary.
+        test_selection, "select_tests", select
+    )
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- preserve the pytest exit through reporting.
+        subprocess, "run", run
+    )
+    report = tmp_path / "plan.json"
+    summary = tmp_path / "summary.md"
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- exercise the explicit report arguments.
+        sys,
+        "argv",
+        ["test_selection.py", "--run", "--report", str(report), "--summary", str(summary)],
+    )
+    assert test_selection.main() == status
+    assert json.loads(report.read_text())["tests"] == ["tests/test_alpha.py"]
+    assert "1/20 files; reviewed cohort" in summary.read_text()
+    assert f"exit {status}" in summary.read_text()
+
+
+@pytest.mark.parametrize(
+    "helper",
+    [
+        ".github/scripts/smoke-interfaces.sh",
+        ".github/scripts/verify-python.sh",
+        ".github/scripts/verify-reference.sh",
+    ],
+)
+def test_delivery_helpers_select_contracts_and_fall_back_when_a_contract_is_missing(
+    repository: Path, helper: str
+) -> None:
+    for name in test_selection._TOOL_TESTS[helper]:  # ruff: ignore[private-member-access]  # pyright: ignore[reportPrivateUsage]
+        (repository / name).write_text("pass\n")
+    path = repository / helper
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("changed\n")
+    plan = select_tests(repository, base="HEAD")
+    assert plan.reason == "reviewed PR cohort"
+    assert set(test_selection._TOOL_TESTS[helper]).issubset(plan.tests)  # ruff: ignore[private-member-access]  # pyright: ignore[reportPrivateUsage]
+    (repository / "tests/test_distribution_fast_paths.py").unlink()
+    fallback = select_tests(repository, base="HEAD")
+    assert len(fallback.tests) == fallback.total_files
 
 
 @pytest.mark.parametrize("version_line", ["", "version=[]\n", 'version="invalid"\n'])

@@ -46,6 +46,7 @@ _MAX_TOTAL_SELECTED_BLOB_BYTES = 20_971_520
 _MAX_SELECTED_BLOBS = 100
 _UNBORN_REVISION = "0" * 40
 _GIT_TREE_FIELD_COUNT = 3
+_GIT_IDENTITY_FIELDS = 2
 _GIT_INDEX_FIELD_COUNT = 3
 _GIT_ENVIRONMENT = MappingProxyType(
     {
@@ -305,9 +306,9 @@ def load_calibration_snapshot(
 def _validate_documentation_entrypoints(
     manifest: Manifest, by_path: dict[str, TrackedBlob]
 ) -> None:
-    if manifest.documentation is not None and not set(
-        manifest.documentation.entrypoints
-    ).issubset(by_path):
+    if manifest.documentation is not None and not set(manifest.documentation.entrypoints).issubset(
+        by_path
+    ):
         ConfigurationError.fail("a documentation entrypoint is absent from the exact Git tree")
 
 
@@ -387,9 +388,7 @@ def _classify_blobs(blobs: tuple[TrackedBlob, ...]) -> _ClassifiedBlobs:
     return _ClassifiedBlobs(workflows, cloudbuild, dockerfiles)
 
 
-def _metadata_evidence(
-    root: Path, blobs: tuple[TrackedBlob, ...]
-) -> _MetadataEvidence:
+def _metadata_evidence(root: Path, blobs: tuple[TrackedBlob, ...]) -> _MetadataEvidence:
     metadata_blobs = tuple(
         blob
         for blob in blobs
@@ -476,9 +475,12 @@ def git_identity(root: Path) -> GitIdentity:
                 "--no-optional-locks",
                 "-C",
                 str(root),
-                "rev-parse",
-                "--verify",
-                "HEAD^{commit}",
+                "log",
+                "-1",
+                "--format=%H%n%T",
+                "--no-show-signature",
+                "HEAD",
+                "--",
             ],
             check=True,
             capture_output=True,
@@ -486,31 +488,15 @@ def git_identity(root: Path) -> GitIdentity:
             text=True,
             env=_GIT_ENVIRONMENT,
         )
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         ConfigurationError.fail("cannot resolve the inspected Git revision")
-    commit = result.stdout.strip()
-    try:
-        tree_result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - immutable Git identity query
-            [
-                git_executable,
-                "--no-replace-objects",
-                "--no-lazy-fetch",
-                "--no-optional-locks",
-                "-C",
-                str(root),
-                "rev-parse",
-                "--verify",
-                f"{commit}^{{tree}}",
-            ],
-            check=True,
-            capture_output=True,
-            timeout=30,
-            text=True,
-            env=_GIT_ENVIRONMENT,
-        )
-    except (OSError, subprocess.SubprocessError):
-        ConfigurationError.fail("cannot resolve the inspected Git tree")
-    return GitIdentity(source_revision=commit, tree_digest=tree_result.stdout.strip())
+    identities = result.stdout.splitlines()
+    if len(identities) != _GIT_IDENTITY_FIELDS or any(
+        re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value) is None for value in identities
+    ):
+        ConfigurationError.fail("cannot resolve the inspected Git revision and tree")
+    # Both identities come from one immutable commit object, even if HEAD moves.
+    return GitIdentity(source_revision=identities[0], tree_digest=identities[1])
 
 
 def git_index_identity(root: Path) -> GitIdentity:
@@ -934,7 +920,7 @@ def _query_blob_sizes(
             "--batch-check=%(objectname) %(objecttype) %(objectsize)",
             _blob_batch_input(blobs),
         )
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         ConfigurationError.fail(failure)
     return _parse_batch_sizes(result.stdout, blobs)
 
@@ -953,7 +939,7 @@ def _read_blob_contents(
             "--batch",
             _blob_batch_input(blobs),
         )
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         ConfigurationError.fail(failure)
     return _parse_batch_contents(result.stdout, list(blobs), sizes)
 

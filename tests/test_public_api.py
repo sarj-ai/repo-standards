@@ -55,6 +55,42 @@ def test_root_import_is_lightweight() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
+def test_console_version_probe_does_not_construct_the_full_cli() -> None:
+    command = (
+        "import sys; from repo_standards._entrypoint import main; "
+        "sys.argv=['repo-standards','--version']; main(); "
+        "assert 'repo_standards.cli' not in sys.modules; "
+        "assert 'typer' not in sys.modules; assert 'pydantic' not in sys.modules"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip()
+
+
+def test_unrelated_cli_commands_do_not_import_the_catalog_model() -> None:
+    command = (
+        "import sys; from repo_standards.cli import app; "
+        "from typer.testing import CliRunner; "
+        "result=CliRunner().invoke(app,['capabilities']); "
+        "assert result.exit_code==0, result.output; "
+        "assert 'repo_standards.catalog' not in sys.modules"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 @pytest.mark.parametrize(
     "module_name",
     ["repo_lint", "repo_standards.github", "repo_standards.core.registry"],

@@ -54,7 +54,7 @@ jobs:
           }
           run_check Ruff uv run --no-sync ruff check . & lint_pid=$!
           run_check Typecheck uv run --no-sync basedpyright & types_pid=$!
-          run_check Tests uv run --no-sync python test_selection.py --run --base "$TEST_BASE" & tests_pid=$!
+          run_check Tests uv run --no-sync python test_selection.py --run --base "$TEST_BASE" --report "$RUNNER_TEMP/test-plan.json" --summary "$GITHUB_STEP_SUMMARY" & tests_pid=$!
           result=0
           wait "$lint_pid" || result=1
           wait "$types_pid" || result=1
@@ -92,10 +92,12 @@ jobs:
       - name: Build distribution
         run: uv build --no-sources --out-dir dist/repo-standards
       - name: Validate pre-commit hook manifest
-        run: uv run --frozen --only-group hooks pre-commit validate-manifest .pre-commit-hooks.yaml
+        run: |
+          uv sync --locked --no-dev --group hooks --group artifacts --python 3.14
+          uv run --no-sync pre-commit validate-manifest .pre-commit-hooks.yaml
       - name: Verify public distribution boundary
         run: >-
-          uv run --frozen --no-dev --group artifacts python -m repo_standards.verify_release_artifacts
+          uv run --no-sync python -m repo_standards.verify_release_artifacts
           --distributions dist/repo-standards
       - name: Install wheels into a clean environment
         env:

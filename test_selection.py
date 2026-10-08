@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- fixed Git and Python argv only.
 import sys
+import time
 import tomllib
 
 
@@ -32,6 +33,17 @@ _DOCS_TESTS = (
     "tests/test_pull_request_commits_packaging_contract.py",
 )
 _TOOL_TESTS = {
+    ".github/scripts/smoke-interfaces.sh": (
+        "tests/test_distribution_fast_paths.py",
+        "tests/test_pull_request_commits_packaging_contract.py",
+        "tests/test_public_api.py",
+        "tests/test_cli.py",
+    ),
+    ".github/scripts/verify-python.sh": ("tests/test_distribution_fast_paths.py",),
+    ".github/scripts/verify-reference.sh": (
+        "tests/test_distribution_fast_paths.py",
+        *_DOCS_TESTS,
+    ),
     "ci_artifacts.py": ("tests/test_ci_artifacts.py",),
     "release_reconciliation.py": (
         "tests/test_release_reconciliation.py",
@@ -174,6 +186,8 @@ class _Arguments(argparse.Namespace):
     base: str = ""
     run: bool = False
     jobs: int = 2
+    report: Path | None = None
+    summary: Path | None = None
 
 
 def main() -> int:
@@ -189,11 +203,17 @@ def main() -> int:
     )
     parser.add_argument("--run", action="store_true", help="execute the selected tests")
     parser.add_argument("--jobs", type=int, choices=(1, 2, 4), default=2)
+    parser.add_argument("--report", type=Path, help="save the selected-test plan as JSON")
+    parser.add_argument("--summary", type=Path, help="append coverage, timing and exit status")
     args = _Arguments()
     parser.parse_args(namespace=args)
     root = Path(__file__).resolve().parent
+    started = time.monotonic()
     plan = select_tests(root, base=args.base)
-    sys.stdout.write(json.dumps(asdict(plan), sort_keys=True) + "\n")
+    rendered = json.dumps(asdict(plan), sort_keys=True) + "\n"
+    if args.report is not None:
+        args.report.write_text(rendered)
+    sys.stdout.write(rendered)
     sys.stdout.flush()
     if not args.run:
         return 0
@@ -202,11 +222,18 @@ def main() -> int:
         if args.jobs > 1 and len(plan.tests) >= _PARALLEL_FILE_THRESHOLD
         else ()
     )
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- bounded installed pytest invocation.
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- bounded installed pytest invocation.
         (sys.executable, "-m", "pytest", *parallel, *plan.tests),
         cwd=root,
         check=False,
     ).returncode
+    if args.summary is not None:
+        with args.summary.open("a") as stream:
+            stream.write(
+                f"Tests: {len(plan.tests)}/{plan.total_files} files; {plan.reason}; "
+                f"{time.monotonic() - started:.2f}s; exit {result}.\n"
+            )
+    return result
 
 
 if __name__ == "__main__":
