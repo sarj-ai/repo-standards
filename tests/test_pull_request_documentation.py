@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from typing import TYPE_CHECKING
@@ -655,4 +656,55 @@ def test_dependency_metadata_exception_rejects_binary_json_encodings(
 
     assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
         f"apps/docs/{filename}",
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"framework": "1.0.1"},
+        {"framework": {".": "1.0.1", "parser": "7.1.6"}},
+        {"framework@^1": {"@scope/parser": "7.1.6"}},
+        {"framework": "$site-framework"},
+    ],
+)
+def test_existing_docs_package_overrides_are_dependency_metadata(
+    tmp_path: Path, overrides: dict[str, object]
+) -> None:
+    base = _docs_package(tmp_path)
+    package = tmp_path / "apps/docs/package.json"
+    document = TypeAdapter(dict[str, object]).validate_json(package.read_text(encoding="utf-8"))
+    document["overrides"] = overrides
+    package.write_text(json.dumps(document) + "\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == ()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        None,
+        [],
+        {"framework": 1},
+        {"framework": True},
+        {"framework": []},
+        {"framework": ""},
+        {"": "1.0.1"},
+        {".": "1.0.1"},
+        {"framework": {"parser": None}},
+    ],
+)
+def test_invalid_dependency_overrides_remain_documentation_findings(
+    tmp_path: Path, overrides: object
+) -> None:
+    base = _docs_package(tmp_path)
+    package = tmp_path / "apps/docs/package.json"
+    document = TypeAdapter(dict[str, object]).validate_json(package.read_text(encoding="utf-8"))
+    document["overrides"] = overrides
+    package.write_text(json.dumps(document) + "\n", encoding="utf-8")
+    _commit(tmp_path)
+
+    assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
+        "apps/docs/package.json",
     )

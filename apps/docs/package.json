@@ -32,13 +32,16 @@
     "jiti": "2.7.0",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "typescript-eslint": "8.70.0",
-    "wrangler": "4.130.0"
+    "wrangler": "4.148.0"
   },
   "engines": {
     "node": ">=24.12.0"
   },
   "overrides": {
     "@astrojs/markdown-satteri": "0.3.6",
-    "sharp": "0.35.4"
+    "sharp": "0.35.5",
+    "postcss-nested": {
+      "postcss-selector-parser": "7.1.6"
+    }
   }
 }

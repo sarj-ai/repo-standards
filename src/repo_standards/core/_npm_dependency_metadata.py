@@ -11,6 +11,7 @@ _OBJECT = TypeAdapter(dict[str, JSONValue], config=ConfigDict(allow_inf_nan=Fals
 _DEPENDENCY_FIELDS = frozenset(
     {"dependencies", "devDependencies", "peerDependencies", "optionalDependencies"}
 )
+_PACKAGE_FIELDS = _DEPENDENCY_FIELDS | {"overrides"}
 _RESOLUTION_FIELDS = frozenset({"packages", "dependencies"})
 
 
@@ -38,14 +39,28 @@ def _package_update(old: dict[str, JSONValue], new: dict[str, JSONValue]) -> boo
     name = old.get("name")
     if not isinstance(name, str) or not name.strip():
         return False
-    if not _same_metadata(old, new, _DEPENDENCY_FIELDS):
+    if not _same_metadata(old, new, _PACKAGE_FIELDS):
         return False
-    return all(
+    return all(_valid_overrides(document.get("overrides", {})) for document in (old, new)) and all(
         isinstance(values := document.get(field, {}), dict)
         and all(isinstance(value, str) for value in values.values())
         for document in (old, new)
         for field in _DEPENDENCY_FIELDS
     )
+
+
+def _valid_overrides(value: JSONValue, *, nested: bool = False) -> bool:
+    if not isinstance(value, dict):
+        return False
+    for selector, resolution in value.items():
+        if not selector.strip() or (selector == "." and not nested):
+            return False
+        if isinstance(resolution, str):
+            if not resolution.strip():
+                return False
+        elif not _valid_overrides(resolution, nested=True):
+            return False
+    return True
 
 
 def _lock_root(document: dict[str, JSONValue], name: JSONValue) -> dict[str, JSONValue] | None:
