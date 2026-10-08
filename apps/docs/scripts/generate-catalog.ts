@@ -9,7 +9,7 @@ const repositoryDirectory = resolve(appDirectory, '../..');
 const generatedDirectory = resolve(appDirectory, 'src/generated');
 const result = spawnSync(
   'uv',
-  ['run', '--project', repositoryDirectory, '--frozen', '--no-dev', 'repo-standards', 'catalog'],
+  ['run', '--project', repositoryDirectory, '--frozen', 'repo-standards', 'catalog'],
   {
     cwd: repositoryDirectory,
     encoding: 'utf8',

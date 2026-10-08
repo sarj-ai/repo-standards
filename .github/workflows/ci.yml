@@ -210,7 +210,7 @@ jobs:
         env:
           WORKERS_CI_COMMIT_SHA: ${{ github.sha }}
         run: |
-          npm --prefix apps/docs run verify
+          bash .github/scripts/verify-reference.sh
           uv run --frozen --no-dev --group artifacts python -m repo_standards.verify_release_artifacts --site apps/docs/dist
       - name: Bind verified site to exact main
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
