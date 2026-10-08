@@ -20,12 +20,6 @@ if TYPE_CHECKING:
 _ASCII_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
-def _contains_control_character(value: str) -> bool:
-    if value.isascii():
-        return _ASCII_CONTROL.search(value) is not None
-    return any(unicodedata.category(char).startswith("C") for char in value)
-
-
 def canonical_path(value: str) -> str:
     if not value or "\\" in value or _contains_control_character(value):
         ConfigurationError.fail(f"invalid repository-relative path: {value!r}")
@@ -36,6 +30,12 @@ def canonical_path(value: str) -> str:
     if value.startswith("/") or normalized in {".", ".."} or normalized.startswith("../"):
         ConfigurationError.fail(f"path escapes repository root: {value!r}")
     return normalized
+
+
+def _contains_control_character(value: str) -> bool:
+    if value.isascii():
+        return _ASCII_CONTROL.search(value) is not None
+    return any(unicodedata.category(char).startswith("C") for char in value)
 
 
 def workspace_pattern_matches(relative: PurePosixPath, pattern: str) -> bool:

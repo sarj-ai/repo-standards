@@ -165,7 +165,7 @@ def test_inventory_retains_overlapping_kinds_case_and_posix_parents(tmp_path: Pa
         ".github/workflows/CloudBuild.yaml",
         ".github/workflows/Dockerfile.yml",
         ".github/workflows/cloudbuild-\u00e9.yaml",
-        ".github/workflows/cloudbuild.YAML",
+        ".github/workflows/cloudbuild-uppercase.YAML",
         "Dockerfile.production",
         "infra/dev/main.tf.json",
         "main.tf",
