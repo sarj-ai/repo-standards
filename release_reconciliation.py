@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import hashlib
 import json
@@ -10,6 +11,7 @@ import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- fixed release commands only
 import sys
 import tarfile
+import time
 from typing import TYPE_CHECKING, Literal, cast, final
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -33,6 +35,12 @@ ArtifactSource = Literal["build", "github", "none", "pypi"]
 
 class ReleaseStateError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class InstalledArtifactTiming:
+    label: str
+    seconds: float
 
 
 @dataclass(frozen=True, order=True)
@@ -420,25 +428,20 @@ def verify_installed_distributions(
         raise ReleaseStateError(msg)
 
     execute = _run_release_command if run_command is None else run_command
-    imports = (
-        "import repo_standards, repo_standards.catalog, "
-        "repo_standards.pull_request, repo_standards.repository"
-    )
     artifacts = (
         ("wheel", directory / f"repo_standards-{version}-py3-none-any.whl"),
         ("sdist", directory / f"repo_standards-{version}.tar.gz"),
     )
-    for label, artifact in artifacts:
-        environment = smoke_root / label
-        python = environment / "bin" / "python"
-        executable = environment / "bin" / "repo-standards"
-        execute(("uv", "venv", "--python", "3.14", str(environment)))
-        execute(("uv", "pip", "install", "--python", str(python), str(artifact)))
-        installed_version = execute((str(executable), "--version")).strip()
-        if installed_version != version:
-            msg = f"{label} installed version differs: {installed_version!r}"
-            raise ReleaseStateError(msg)
-        execute((str(python), "-c", imports))
+    with ThreadPoolExecutor(max_workers=len(artifacts)) as executor:
+        futures = [
+            executor.submit(
+                _verify_installed_artifact, artifact, label, version, smoke_root, execute
+            )
+            for label, artifact in artifacts
+        ]
+        timings = [future.result() for future in futures]
+    for timing in timings:
+        sys.stdout.write(f"{timing.label} clean install and imports: {timing.seconds:.2f}s\n")
 
     if not checksum_path.exists():
         lines = []
@@ -447,6 +450,36 @@ def verify_installed_distributions(
             relative = artifact.relative_to(checksum_path.parent)
             lines.append(f"{hashlib.sha256(artifact.read_bytes()).hexdigest()}  {relative}\n")
         checksum_path.write_text("".join(lines), encoding="utf-8")
+
+
+def _verify_installed_artifact(
+    artifact: Path,
+    label: str,
+    version: str,
+    smoke_root: Path,
+    execute: Callable[[tuple[str, ...]], str],
+) -> InstalledArtifactTiming:
+    started = time.monotonic()
+    environment = smoke_root / label
+    python = environment / "bin" / "python"
+    executable = environment / "bin" / "repo-standards"
+    execute(("uv", "venv", "--python", "3.14", str(environment)))
+    execute(("uv", "pip", "install", "--python", str(python), str(artifact)))
+    installed_version = execute((str(executable), "--version")).strip()
+    if installed_version != version:
+        msg = f"{label} installed version differs: {installed_version!r}"
+        raise ReleaseStateError(msg)
+    execute(
+        (
+            str(python),
+            "-c",
+            (
+                "import repo_standards, repo_standards.catalog, "
+                "repo_standards.pull_request, repo_standards.repository"
+            ),
+        )
+    )
+    return InstalledArtifactTiming(label, time.monotonic() - started)
 
 
 def _run_release_command(command: tuple[str, ...]) -> str:

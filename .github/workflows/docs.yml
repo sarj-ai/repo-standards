@@ -24,6 +24,8 @@ concurrency:
 
 jobs:
   build:
+    env:
+      UV_NO_DEV: 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -60,8 +62,12 @@ jobs:
       - name: Install locked toolchains
         if: steps.reuse.outputs.reused != 'true'
         run: |
-          uv sync --locked --python 3.14
-          npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund
+          uv sync --locked --python 3.14 --no-dev & python_pid=$!
+          npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund & node_pid=$!
+          result=0
+          wait "$python_pid" || result=1
+          wait "$node_pid" || result=1
+          exit "$result"
       - name: Verify native TypeScript compiler
         if: steps.reuse.outputs.reused != 'true'
         run: test "$(npm --prefix apps/docs exec --offline -- tsc --version)" = 'Version 7.0.2'
@@ -75,7 +81,7 @@ jobs:
           npm --prefix apps/docs run build
       - name: Verify public site artifacts
         if: steps.reuse.outputs.reused != 'true'
-        run: uv run python -m repo_standards.verify_release_artifacts --site apps/docs/dist
+        run: uv run --frozen --no-dev --group artifacts python -m repo_standards.verify_release_artifacts --site apps/docs/dist
       - name: Upload immutable site
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
