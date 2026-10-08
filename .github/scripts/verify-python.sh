@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+  echo 'usage: bash .github/scripts/verify-python.sh [base]'
+  echo 'Omit base for all tests; origin/main selects reviewed changed-test cohorts.'
+  echo 'Shared changes fall back to all tests. Ruff, types and tests must all pass.'
+  exit 0
+fi
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 # An omitted base is the full gate; explicit bases use the reviewed selector.
 uv sync --locked --python 3.14

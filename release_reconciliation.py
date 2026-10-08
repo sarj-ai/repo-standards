@@ -383,8 +383,13 @@ def download_artifacts(side: RegistrySide, directory: Path) -> None:
     # Validate every URL/name before any network request or destination write.
     for artifact in side.artifacts:
         parsed = urlsplit(artifact.url)
+        safe_name = Path(artifact.name).name == artifact.name and artifact.name not in {
+            "",
+            ".",
+            "..",
+        }
         if (
-            Path(artifact.name).name != artifact.name
+            not safe_name
             or "\\" in artifact.name
             or parsed.scheme != "https"
             or parsed.hostname not in {"github.com", "files.pythonhosted.org"}

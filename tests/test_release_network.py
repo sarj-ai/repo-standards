@@ -95,6 +95,7 @@ def test_downloads_overlap_and_only_publish_files_after_all_hashes_pass(
     ("name", "url"),
     [
         ("../escape.whl", "https://files.pythonhosted.org/wheel"),
+        ("..", "https://files.pythonhosted.org/wheel"),
         ("nested\\escape.whl", "https://files.pythonhosted.org/wheel"),
         ("wheel.whl", "http://files.pythonhosted.org/wheel"),
         ("wheel.whl", "https://other.example/wheel"),
