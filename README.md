@@ -217,13 +217,20 @@ Thresholds, labels, comments, and approval requirements remain consumer policy. 
 
 ```bash
 uv sync --locked
-uv run pytest
+uv run python test_selection.py --run
 uv run ruff check .
 uv run basedpyright
 uvx --no-config --isolated --python 3.14 \
   --from sarj-standards-bootstrap==2.0.3 \
   code-standards check --trust-repository-code
 ```
+
+To preview a focused local or PR test run, use `uv run python test_selection.py
+--base origin/main`, then add `--run`. Reviewed documentation, delivery-tool and
+test-only changes use explicit cohorts; source, shared configuration, deletions,
+renames and unavailable Git evidence run the full suite. Main, schedules and
+publication always run all tests. Two workers are the default; use `--jobs 1`
+for serial debugging.
 
 Build the same wheel and source distribution used by publishing:
 
