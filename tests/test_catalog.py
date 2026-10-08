@@ -284,3 +284,12 @@ def test_catalog_public_source_pointers_are_relative_and_present() -> None:
         assert ".." not in source.parts
         assert (repository / source).is_file()
         assert rule.source.symbol
+
+
+def test_embedded_schema_mutation_cannot_change_later_catalogs() -> None:
+    first = build_catalog(app, package_version="1.0.0")
+    expected = build_catalog(app, package_version="1.0.0").model_dump_json()
+    for descriptor in first.schemas:
+        assert isinstance(descriptor.document, dict)
+        descriptor.document.clear()
+    assert build_catalog(app, package_version="1.0.0").model_dump_json() == expected

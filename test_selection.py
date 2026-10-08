@@ -10,8 +10,16 @@ import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- fixed Git and Python argv only.
 import sys
+import tomllib
 
 
+_PARALLEL_FILE_THRESHOLD = 8
+_VERSION_TESTS = (
+    "tests/test_public_api.py",
+    "tests/test_release_distributions.py",
+    "tests/test_catalog.py",
+    "tests/test_cli.py",
+)
 _CONTRACTS = ("tests/test_public_content.py", "tests/test_test_selection.py")
 _DOCS_TESTS = (
     "tests/test_catalog.py",
@@ -69,6 +77,8 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
             selected.add(path)
         elif path.startswith(("apps/docs/", ".github/deploy/")):
             selected.update(_DOCS_TESTS)
+        elif path in {"pyproject.toml", "uv.lock"} and _version_only(root, base, path):
+            selected.update(_VERSION_TESTS)
         elif path in _TOOL_TESTS:
             selected.update(_TOOL_TESTS[path])
         else:
@@ -76,6 +86,55 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
     if not selected.issubset(all_tests):
         return full("reviewed cohort is missing a required contract")
     return TestPlan(tuple(sorted(selected)), "reviewed PR cohort", len(all_tests))
+
+
+def _drop_version(record: dict[str, object]) -> dict[str, object]:
+    version = record.get("version")
+    if not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+        message = "invalid stable release version"
+        raise ValueError(message)
+    return {key: value for key, value in record.items() if key != "version"}
+
+
+def _without_version(source: str, path: str) -> object:
+    document = tomllib.loads(source)
+    if path == "pyproject.toml":
+        project = document["project"]
+        if not isinstance(project, dict) or project.get("name") != "repo-standards":
+            message = "unexpected project identity"
+            raise ValueError(message)
+        return {
+            **document,
+            "project": _drop_version(project),
+        }
+    packages = document["package"]
+    if not isinstance(packages, list) or any(not isinstance(package, dict) for package in packages):
+        message = "invalid package records"
+        raise ValueError(message)
+    owned = [
+        package
+        for package in packages
+        if package.get("name") == "repo-standards" and package.get("source") == {"editable": "."}
+    ]
+    if len(owned) != 1:
+        message = "missing or ambiguous editable package"
+        raise ValueError(message)
+    return {
+        **document,
+        "package": [
+            _drop_version(package) if package is owned[0] else package for package in packages
+        ],
+    }
+
+
+def _version_only(root: Path, base: str, path: str) -> bool:
+    try:
+        ancestor = _git(root, "merge-base", "HEAD", base).strip()
+        previous = _without_version(_git(root, "show", f"{ancestor}:{path}"), path)
+        current = _without_version((root / path).read_text(), path)
+    except OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError:
+        return False
+    return previous == current
 
 
 def _changed_paths(root: Path, base: str) -> list[str] | None:
@@ -137,8 +196,13 @@ def main() -> int:
     sys.stdout.flush()
     if not args.run:
         return 0
+    parallel = (
+        ("-n", str(args.jobs), "--dist", "worksteal")
+        if args.jobs > 1 and len(plan.tests) >= _PARALLEL_FILE_THRESHOLD
+        else ()
+    )
     return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- bounded installed pytest invocation.
-        (sys.executable, "-m", "pytest", "-n", str(args.jobs), "--dist", "worksteal", *plan.tests),
+        (sys.executable, "-m", "pytest", *parallel, *plan.tests),
         cwd=root,
         check=False,
     ).returncode
