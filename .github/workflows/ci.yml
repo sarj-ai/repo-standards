@@ -110,16 +110,7 @@ jobs:
           REPORT_PATH: ${{ runner.temp }}/repo-standards-report.json
           SMOKE_ENV: ${{ runner.temp }}/repo-standards-smoke
         run: |
-          "$SMOKE_ENV/bin/repo-standards" --help
-          "$SMOKE_ENV/bin/repo-standards" --version
-          "$SMOKE_ENV/bin/repo-standards" capabilities
-          "$SMOKE_ENV/bin/repo-standards" pull-request commits --help
-          "$SMOKE_ENV/bin/repo-standards" pull-request documentation --help
-          "$SMOKE_ENV/bin/repo-standards" pull-request size --help
-          "$SMOKE_ENV/bin/repo-standards" schema
-          "$SMOKE_ENV/bin/repo-standards" rest --help
-          "$SMOKE_ENV/bin/python" -c \
-            'import repo_standards, repo_standards.catalog, repo_standards.pull_request, repo_standards.repository'
+          bash .github/scripts/smoke-interfaces.sh
           mkdir -p "$FIXTURE_ROOT/.repo-standards"
           cp tests/fixtures/smoke/.repo-standards/repository.toml \
             "$FIXTURE_ROOT/.repo-standards/repository.toml"

@@ -98,4 +98,6 @@ def test_ci_self_tests_action_hook_manifest_and_installed_cli() -> None:
     assert "uses: ./pull-request-commits" in source
     assert "fetch-depth: 0" in source
     assert "pre-commit validate-manifest .pre-commit-hooks.yaml" in source
-    assert 'repo-standards" pull-request commits --help' in source
+    assert "bash .github/scripts/smoke-interfaces.sh" in source
+    smoke = (ROOT / ".github/scripts/smoke-interfaces.sh").read_text(encoding="utf-8")
+    assert '"$cli" pull-request commits --help' in smoke
