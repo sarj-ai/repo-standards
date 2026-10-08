@@ -14,11 +14,6 @@ from typing import Annotated, ClassVar, Literal, NamedTuple, NewType, NoReturn, 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import typer
 
-from repo_standards.catalog import (
-    build_catalog,
-    catalog_schema,
-    report_schema,
-)
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.commit_message import CommitMessageResult, check_local_commit_message_file
 from repo_standards.core.engine import analyze, check_baseline
@@ -322,6 +317,8 @@ def capabilities_command() -> None:
 @app.command("catalog")
 def catalog_command() -> None:
     """Export the deterministic public product, rule, command, and schema catalog."""
+    from repo_standards.catalog import build_catalog  # ruff: ignore[import-outside-top-level] -- only catalog export needs the complete reference model.
+
     try:
         payload = build_catalog(app, package_version=_installed_version())
     except (ConfigurationError, TypeError, ValueError) as error:
@@ -668,9 +665,7 @@ def _render_pull_request_documentation(result: PullRequestDocumentation) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _trusted_review_policy(
-    root: Path, manifest: Path | None
-) -> _TrustedReviewPolicy:
+def _trusted_review_policy(root: Path, manifest: Path | None) -> _TrustedReviewPolicy:
     manifest_path = manifest or Path(".repo-standards/repository.toml")
     if not manifest_path.is_absolute():
         manifest_path = root / manifest_path
@@ -1266,9 +1261,7 @@ def _resolve_pull_request_commits_request(  # ruff: ignore[too-many-arguments] -
         base=inputs.context.base_sha,
         head=inputs.context.head_sha,
         maximum_commits=history.maximum_commits,
-        commit_message_enforcement=(
-            manifest.commit_message.enforcement
-        ),
+        commit_message_enforcement=(manifest.commit_message.enforcement),
     )
 
 
@@ -1306,9 +1299,7 @@ def _analyze_resolved_pull_request_inputs(
         head_ref=context.head_ref,
         transition_exemptions=transition_exemptions,
         commit_message_enforcement=(
-            inputs.manifest.commit_message.enforcement
-            if inputs.manifest is not None
-            else None
+            inputs.manifest.commit_message.enforcement if inputs.manifest is not None else None
         ),
     )
 
@@ -2292,6 +2283,8 @@ def print_schema(
         )
     match selected:
         case SchemaDocument.CATALOG:
+            from repo_standards.catalog import catalog_schema  # ruff: ignore[import-outside-top-level] -- defer the catalog reference model for other commands.
+
             payload = catalog_schema()
         case SchemaDocument.REPORT:
             payload = _report_schema()
@@ -2299,6 +2292,8 @@ def print_schema(
 
 
 def _report_schema() -> Mapping[str, object]:
+    from repo_standards.catalog import report_schema  # ruff: ignore[import-outside-top-level] -- schema generation is a dedicated command.
+
     return report_schema()
 
 
