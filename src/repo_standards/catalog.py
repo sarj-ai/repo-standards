@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from enum import Enum, StrEnum
+from functools import lru_cache
 from hashlib import sha256
 import inspect
 import json
@@ -78,12 +80,12 @@ HttpsUrl = Annotated[str, Field(pattern=r"^https://")]
 
 _RULE_SLUGS = types.MappingProxyType(
     {
-    "repository/artifacts/terraform-examples": "terraform-examples",
-    "repository/artifacts/schema-derived-config-examples": "schema-derived-config-examples",
-    "repository/artifacts/bespoke-iac-verifiers": "bespoke-iac-verifiers",
-    "repository/artifacts/operational-script-tests": "operational-script-tests",
-    "repository/artifacts/terraform-test-files": "terraform-test-files",
-    "repository/documentation/placement": "documentation-placement",
+        "repository/artifacts/terraform-examples": "terraform-examples",
+        "repository/artifacts/schema-derived-config-examples": "schema-derived-config-examples",
+        "repository/artifacts/bespoke-iac-verifiers": "bespoke-iac-verifiers",
+        "repository/artifacts/operational-script-tests": "operational-script-tests",
+        "repository/artifacts/terraform-test-files": "terraform-test-files",
+        "repository/documentation/placement": "documentation-placement",
     }
 )
 
@@ -348,8 +350,7 @@ def _validate_policy_bindings(
     for binding in policy.bindings:
         rule = rules_by_id.get(binding.rule_id)
         if rule is None or (
-            binding.rule_version != rule.rule_version
-            or binding.severity != rule.default_severity
+            binding.rule_version != rule.rule_version or binding.severity != rule.default_severity
         ):
             message = f"catalog policy binding does not match its rule: {binding.rule_id}"
             raise ValueError(message)
@@ -381,12 +382,22 @@ def _validate_command_graph(catalog: Catalog) -> None:
 
 
 def catalog_schema() -> dict[str, JSONValue]:
+    return deepcopy(_catalog_schema())
+
+
+@lru_cache(maxsize=1)
+def _catalog_schema() -> dict[str, JSONValue]:
     schema = _JSON_OBJECT.validate_python(Catalog.model_json_schema(), strict=True)
     schema["$id"] = _CATALOG_SCHEMA_ID
     return schema
 
 
 def report_schema() -> dict[str, JSONValue]:
+    return deepcopy(_report_schema())
+
+
+@lru_cache(maxsize=1)
+def _report_schema() -> dict[str, JSONValue]:
     schema = _schema_object(output_schema())
     required = _schema_required(schema)
     required.extend(["tool", "command", "provenance", "baseline", "ratchet"])
@@ -754,7 +765,7 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
         CapabilityDescriptor(
             capability_id=CapabilityId("rest"),
             title="REST and OpenAPI",
-    summary="Discover API frameworks without executing application code.",
+            summary="Discover API frameworks without executing application code.",
             status="preview",
             command_ids=tuple(item for item in command_ids if item.startswith("rest.")),
             input_kinds=rest_inputs,

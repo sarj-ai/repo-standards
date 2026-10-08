@@ -4,6 +4,7 @@ from hashlib import sha256
 from importlib.metadata import version
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from jsonschema import Draft202012Validator, validate
 from pydantic import TypeAdapter, ValidationError
@@ -14,11 +15,16 @@ from repo_standards.catalog import (
     Catalog,
     build_catalog,
     catalog_schema,
+    report_schema,
 )
 from repo_standards.cli import app
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.models import JSONValue
 from repo_standards.policy_sarj import SarjPolicy
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 runner = CliRunner()
@@ -44,6 +50,23 @@ def test_catalog_is_deterministic_and_digest_covers_all_content() -> None:
     expected = sha256(canonical_json(unsigned.model_dump(mode="json")).encode()).hexdigest()
     assert first.provenance.content_digest == expected
     assert len(expected) == 64
+
+
+@pytest.mark.parametrize("factory", [catalog_schema, report_schema])
+def test_cached_schema_returns_independent_nested_documents(
+    factory: Callable[[], dict[str, JSONValue]],
+) -> None:
+    first = factory()
+    assert isinstance(first, dict)
+    first.clear()
+    second = factory()
+    assert isinstance(second, dict)
+    properties = second["properties"]
+    assert isinstance(properties, dict)
+    properties.clear()
+    third = factory()
+    assert isinstance(third, dict)
+    assert third["properties"]
 
 
 def test_catalog_contains_every_rule_policy_binding_command_and_capability() -> None:

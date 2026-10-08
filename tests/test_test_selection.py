@@ -107,3 +107,36 @@ def test_missing_required_documentation_contract_falls_back_to_full(repository: 
     plan = select_tests(repository, base="HEAD")
     assert len(plan.tests) == plan.total_files
     assert "missing" in plan.reason
+
+
+def test_distribution_verifier_uses_its_complete_delivery_cohort(repository: Path) -> None:
+    expected = {
+        "tests/test_release_distributions.py",
+        "tests/test_release_site_contract.py",
+        "tests/test_distribution_fast_paths.py",
+        "tests/test_public_api.py",
+        "tests/test_public_content.py",
+        "tests/test_test_selection.py",
+    }
+    for name in expected:
+        (repository / name).write_text("pass\n")
+    _git(repository, "add", ".")
+    _git(
+        repository,
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "contracts",
+    )
+    source = repository / "src/repo_standards/verify_release_artifacts.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("changed\n")
+    plan = select_tests(repository, base="HEAD")
+    assert set(plan.tests) == expected
+    assert len(plan.tests) < plan.total_files

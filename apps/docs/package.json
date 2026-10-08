@@ -13,7 +13,8 @@
     "preview": "astro preview",
     "test": "node --test ./scripts/verify-deployment.test.ts",
     "typecheck": "astro check && tsc --project tsconfig.node.json",
-    "verify:deployment": "node ./scripts/verify-deployment.ts"
+    "verify:deployment": "node ./scripts/verify-deployment.ts",
+    "verify": "npm run catalog && eslint . --max-warnings 0 && npm test && npm run typecheck && astro build && node ./scripts/finalize-cloudflare-artifacts.ts"
   },
   "dependencies": {
     "@astrojs/starlight": "0.41.11",

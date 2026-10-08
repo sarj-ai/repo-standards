@@ -3,11 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import tomllib
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 import yaml
 
 from repo_standards.core.models import JSONValue
+
+
+if TYPE_CHECKING:
+    import pytest
 
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
@@ -106,12 +111,30 @@ def test_publish_build_disables_setup_uv_cache() -> None:
 
 
 def _public_files() -> tuple[Path, ...]:
-    return tuple(
-        path
-        for path in REPOSITORY_ROOT.rglob("*")
-        if not EXCLUDED_DIRECTORIES.intersection(path.relative_to(REPOSITORY_ROOT).parts)
-        and (path.is_file() or path.is_symlink())
-    )
+    files: list[Path] = []
+    for directory, children, names in REPOSITORY_ROOT.walk():
+        children[:] = [name for name in children if name not in EXCLUDED_DIRECTORIES]
+        files.extend(
+            directory / name
+            for name in names
+            if name not in EXCLUDED_DIRECTORIES
+            and ((directory / name).is_file() or (directory / name).is_symlink())
+        )
+    return tuple(files)
+
+
+def test_public_scan_prunes_dependencies_and_keeps_exposed_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv/private.py").write_text("private\n")
+    (tmp_path / "public.py").write_text("public\n")
+    (tmp_path / "exposed").symlink_to(tmp_path / ".venv", target_is_directory=True)
+    monkeypatch.setitem(globals(), "REPOSITORY_ROOT", tmp_path)
+    assert {path.relative_to(tmp_path).as_posix() for path in _public_files()} == {
+        "public.py",
+        "exposed",
+    }
 
 
 def test_public_tree_contains_only_public_identity_references() -> None:
