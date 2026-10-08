@@ -339,6 +339,7 @@ def test_parallel_ci_waits_for_all_checks_and_propagates_failure(
             "FAIL_CHECK": failed_check,
             "RESULTS": str(tmp_path / "results"),
             "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
+            "TEST_BASE": "",
         },
     )
     assert (process.returncode == 0) == (failed_check == "none"), process.stderr

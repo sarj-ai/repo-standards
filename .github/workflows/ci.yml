@@ -42,6 +42,8 @@ jobs:
       - name: Audit locked dependencies
         run: uv audit --locked
       - name: Lint, typecheck and test independently
+        env:
+          TEST_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: |
           run_check() {
             label="$1"; shift
@@ -50,9 +52,9 @@ jobs:
             printf '%s: %ss (exit %s)\n' "$label" "$((SECONDS - started))" "$result" >> "$GITHUB_STEP_SUMMARY"
             return "$result"
           }
-          run_check Ruff uv run ruff check . & lint_pid=$!
-          run_check Typecheck uv run basedpyright & types_pid=$!
-          run_check Tests uv run --python 3.14 pytest & tests_pid=$!
+          run_check Ruff uv run --no-sync ruff check . & lint_pid=$!
+          run_check Typecheck uv run --no-sync basedpyright & types_pid=$!
+          run_check Tests uv run --no-sync python test_selection.py --run --base "$TEST_BASE" & tests_pid=$!
           result=0
           wait "$lint_pid" || result=1
           wait "$types_pid" || result=1

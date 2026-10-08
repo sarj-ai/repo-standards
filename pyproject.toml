@@ -1,6 +1,6 @@
 [project]
 name = "repo-standards"
-version = "6.3.4"
+version = "6.3.5"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
@@ -39,6 +39,7 @@ dev = [
     "jsonschema>=4.26.0",
     "pre-commit>=4.6.0,<5",
     "pytest>=9.1.1",
+    "pytest-xdist==3.8.0",
   "ruff>=0.16.9",
 ]
 
@@ -87,3 +88,4 @@ extend-select = ["B", "E", "F", "I", "PERF", "PL", "RUF", "S", "SIM", "UP"]
 # The dependency-free artifact bootstrap validates provider JSON and archive
 # provenance before the project's Python environment is available.
 "ci_artifacts.py" = ["too-many-locals", "too-many-return-statements"]
+"test_selection.py" = ["too-many-return-statements"]

@@ -40,10 +40,11 @@ runs:
   using: composite
   steps:
     - name: Install uv
-      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
-        version: '0.12.12'
+        version: '0.12.18'
         enable-cache: true
+        save-cache: false
         cache-dependency-glob: ${{ github.action_path }}/uv.lock
     - name: Install locked pull-request-size environment
       shell: bash
@@ -68,10 +69,17 @@ runs:
         uv run --project "$GITHUB_ACTION_PATH" --no-sync repo-standards pull-request size "$INPUT_ROOT" \
           --base "$base" --head "$head" \
           --generated-attribute "$INPUT_GENERATED_ATTRIBUTE" --report-path "$report_path" >/dev/null
-        counted=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["summary"]["counted_lines"])' "$report_path")
-        excluded=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["summary"]["excluded_lines"])' "$report_path")
-        total=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["summary"]["total_lines"])' "$report_path")
-        report=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python -c 'import json,sys; payload=json.load(open(sys.argv[1], encoding="utf-8")); print(json.dumps({key: value for key, value in payload.items() if key not in {"categories", "directories", "files"}}, sort_keys=True, separators=(",", ":")))' "$report_path")
+        values=$(uv run --project "$GITHUB_ACTION_PATH" --no-sync python - "$report_path" <<'PYTHON'
+        import json, sys
+        with open(sys.argv[1], encoding="utf-8") as stream:
+            payload = json.load(stream)
+        summary = payload["summary"]
+        report = {key: value for key, value in payload.items() if key not in {"categories", "directories", "files"}}
+        print(summary["counted_lines"], summary["excluded_lines"], summary["total_lines"],
+              json.dumps(report, sort_keys=True, separators=(",", ":")), sep="\t")
+        PYTHON
+        )
+        IFS=$'\t' read -r counted excluded total report <<< "$values"
         echo "counted-lines=$counted" >> "$GITHUB_OUTPUT"
         echo "excluded-lines=$excluded" >> "$GITHUB_OUTPUT"
         echo "total-lines=$total" >> "$GITHUB_OUTPUT"
