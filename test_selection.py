@@ -88,6 +88,10 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
     return TestPlan(tuple(sorted(selected)), "reviewed PR cohort", len(all_tests))
 
 
+def _drop_version(record: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in record.items() if key != "version"}
+
+
 def _without_version(source: str, path: str) -> object:
     document = tomllib.loads(source)
     if path == "pyproject.toml":
@@ -97,7 +101,7 @@ def _without_version(source: str, path: str) -> object:
             raise ValueError(message)
         return {
             **document,
-            "project": {key: value for key, value in project.items() if key != "version"},
+            "project": _drop_version(project),
         }
     packages = document["package"]
     if not isinstance(packages, list) or any(
@@ -117,7 +121,7 @@ def _without_version(source: str, path: str) -> object:
     return {
         **document,
         "package": [
-            {key: value for key, value in package.items() if key != "version"}
+            _drop_version(package)
             if package is owned[0]
             else package
             for package in packages
