@@ -95,25 +95,34 @@ def _without_version(source: str, path: str) -> object:
         if not isinstance(project, dict) or project.get("name") != "repo-standards":
             message = "unexpected project identity"
             raise ValueError(message)
-        del project["version"]
-    else:
-        packages = document["package"]
-        if not isinstance(packages, list) or any(
-            not isinstance(package, dict) for package in packages
-        ):
-            message = "invalid package records"
-            raise ValueError(message)
-        owned = [
-            package
+        return {
+            **document,
+            "project": {key: value for key, value in project.items() if key != "version"},
+        }
+    packages = document["package"]
+    if not isinstance(packages, list) or any(
+        not isinstance(package, dict) for package in packages
+    ):
+        message = "invalid package records"
+        raise ValueError(message)
+    owned = [
+        package
+        for package in packages
+        if package.get("name") == "repo-standards"
+        and package.get("source") == {"editable": "."}
+    ]
+    if len(owned) != 1:
+        message = "missing or ambiguous editable package"
+        raise ValueError(message)
+    return {
+        **document,
+        "package": [
+            {key: value for key, value in package.items() if key != "version"}
+            if package is owned[0]
+            else package
             for package in packages
-            if package.get("name") == "repo-standards"
-            and package.get("source") == {"editable": "."}
-        ]
-        if len(owned) != 1:
-            message = "missing or ambiguous editable package"
-            raise ValueError(message)
-        del owned[0]["version"]
-    return document
+        ],
+    }
 
 
 def _version_only(root: Path, base: str, path: str) -> bool:

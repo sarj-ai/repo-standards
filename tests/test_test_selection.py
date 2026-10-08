@@ -220,14 +220,20 @@ def test_worker_startup_is_avoided_for_small_or_serial_plans(
         assert not base
         return plan
 
-    monkeypatch.setattr(test_selection, "select_tests", select)
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- intercept CLI plan lookup for dispatch
+        test_selection, "select_tests", select
+    )
     calls: list[tuple[str, ...]] = []
 
     def run(command: tuple[str, ...], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(subprocess, "run", run)
-    monkeypatch.setattr(sys, "argv", ["test_selection.py", "--run", "--jobs", str(jobs)])
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- intercept CLI process dispatch
+        subprocess, "run", run
+    )
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- process argv is the CLI input under test
+        sys, "argv", ["test_selection.py", "--run", "--jobs", str(jobs)]
+    )
     assert test_selection.main() == 0
     assert ("-n" in calls[0]) is parallel
