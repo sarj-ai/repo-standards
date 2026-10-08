@@ -119,3 +119,91 @@ def test_reference_checks_overlap_and_all_must_pass_before_build(
     assert (process.returncode == 0) == (failed_check == "none"), process.stderr
     assert (tmp_path / "build").exists() is (failed_check == "none")
     assert all((tmp_path / f"{name}.done").exists() for name in ["eslint", "test", "typecheck"])
+
+
+@pytest.mark.parametrize("failed_check", ["none", "ruff", "basedpyright", "python"])
+def test_local_gate_runs_all_checks_and_preserves_test_base(
+    tmp_path: Path, failed_check: str
+) -> None:
+    source = (REPOSITORY_ROOT / ".github/scripts/verify-python.sh").read_text()
+    commands = source[source.index("uv sync") :]
+    stub = tmp_path / "uv"
+    stub.write_text(
+        '#!/bin/sh\nif [ "$1" = sync ]; then exit 0; fi\nname="$3"\n'
+        'if [ "$name" = python ]; then test "$*" = '
+        '"run --no-sync python test_selection.py --run --base origin/main" || exit 8; fi\n'
+        'touch "$SIGNALS/$name.started"\n'
+        'until test -f "$SIGNALS/ruff.started" && test -f "$SIGNALS/basedpyright.started" '
+        '&& test -f "$SIGNALS/python.started"; do sleep 0.01; done\n'
+        'touch "$SIGNALS/$name.done"\n[ "$name" != "$FAIL_CHECK" ]\n'
+    )
+    stub.chmod(0o755)
+    result = subprocess.run(
+        (
+            shutil.which("bash") or "/bin/bash",
+            "-eu",
+            "-o",
+            "pipefail",
+            "-c",
+            commands,
+            "gate",
+            "origin/main",
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={
+            **os.environ,  # ruff: ignore[banned-api] -- real shell with controlled tool path
+            "PATH": str(tmp_path) + os.pathsep + os.defpath,
+            "SIGNALS": str(tmp_path),
+            "FAIL_CHECK": failed_check,
+        },
+    )
+    assert (result.returncode == 0) is (failed_check == "none"), result.stderr
+    assert all((tmp_path / f"{name}.done").exists() for name in ["ruff", "basedpyright", "python"])
+
+
+@pytest.mark.parametrize("failed_check", ["none", "capabilities", "schema", "rest"])
+def test_installed_smoke_overlaps_groups_and_propagates_failure(
+    tmp_path: Path, failed_check: str
+) -> None:
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    cli = binaries / "repo-standards"
+    cli.write_text(
+        '#!/bin/sh\nname="$1"\n'
+        'if [ "$name" = capabilities ] || [ "$name" = schema ]; then\n'
+        'touch "$SIGNALS/$name.started"\n'
+        'until test -f "$SIGNALS/capabilities.started" && test -f "$SIGNALS/schema.started"; '
+        'do sleep 0.01; done\nfi\n'
+        'echo "$*" >> "$SIGNALS/commands"\n'
+        '[ "$name" != "$FAIL_CHECK" ]\n'
+    )
+    cli.chmod(0o755)
+    python = binaries / "python"
+    python.write_text("#!/bin/sh\nexit 0\n")
+    python.chmod(0o755)
+    result = subprocess.run(
+        (
+            shutil.which("bash") or "/bin/bash",
+            str(REPOSITORY_ROOT / ".github/scripts/smoke-interfaces.sh"),
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={
+            **os.environ,  # ruff: ignore[banned-api] -- exercise the actual installed smoke helper
+            "SMOKE_ENV": str(tmp_path),
+            "SIGNALS": str(tmp_path),
+            "FAIL_CHECK": failed_check,
+            "RUNNER_TEMP": str(tmp_path),
+        },
+    )
+    assert (result.returncode == 0) is (failed_check == "none"), result.stderr
+    commands = (tmp_path / "commands").read_text().splitlines()
+    assert "capabilities" in commands
+    assert "schema" in commands
+    if failed_check == "none":
+        assert len(commands) == 8

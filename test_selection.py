@@ -35,6 +35,7 @@ _TOOL_TESTS = {
     "ci_artifacts.py": ("tests/test_ci_artifacts.py",),
     "release_reconciliation.py": (
         "tests/test_release_reconciliation.py",
+        "tests/test_release_network.py",
         "tests/test_distribution_fast_paths.py",
     ),
     "src/repo_standards/verify_release_artifacts.py": (
@@ -64,7 +65,10 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
     if not base or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*", base) is None:
         return full("full validation requested or invalid base")
     try:
-        changes = _changed_paths(root, base)
+        ancestor = _git(root, "merge-base", "HEAD", base).strip()
+        if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", ancestor) is None:
+            return full("invalid comparison identity")
+        changes = _changed_paths(root, ancestor)
     except OSError, subprocess.SubprocessError:
         return full("Git evidence unavailable")
     if changes is None:
@@ -77,7 +81,7 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
             selected.add(path)
         elif path.startswith(("apps/docs/", ".github/deploy/")):
             selected.update(_DOCS_TESTS)
-        elif path in {"pyproject.toml", "uv.lock"} and _version_only(root, base, path):
+        elif path in {"pyproject.toml", "uv.lock"} and _version_only(root, ancestor, path):
             selected.update(_VERSION_TESTS)
         elif path in _TOOL_TESTS:
             selected.update(_TOOL_TESTS[path])
@@ -127,9 +131,8 @@ def _without_version(source: str, path: str) -> object:
     }
 
 
-def _version_only(root: Path, base: str, path: str) -> bool:
+def _version_only(root: Path, ancestor: str, path: str) -> bool:
     try:
-        ancestor = _git(root, "merge-base", "HEAD", base).strip()
         previous = _without_version(_git(root, "show", f"{ancestor}:{path}"), path)
         current = _without_version((root / path).read_text(), path)
     except OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError:
@@ -137,19 +140,17 @@ def _version_only(root: Path, base: str, path: str) -> bool:
     return previous == current
 
 
-def _changed_paths(root: Path, base: str) -> list[str] | None:
-    ancestor = _git(root, "merge-base", "HEAD", base).strip()
-    if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", ancestor) is None:
-        return None
+def _changed_paths(root: Path, ancestor: str) -> list[str] | None:
     records = _git(root, "diff", "--name-status", "-z", "--find-renames", ancestor, "--").split(
         "\0"
     )
     changes: list[str] = []
-    while records and records[0]:
-        status = records.pop(0)
-        if status not in {"A", "M"} or not records:
+    for index in range(0, len(records) - 1, 2):
+        if records[index] not in {"A", "M"} or not records[index + 1]:
             return None
-        changes.append(records.pop(0))
+        changes.append(records[index + 1])
+    if not records or records[-1] or len(records) % 2 != 1:
+        return None
     changes.extend(
         path
         for path in _git(root, "ls-files", "--others", "--exclude-standard", "-z").split("\0")

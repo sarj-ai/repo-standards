@@ -229,17 +229,25 @@ def inspect_release(*, version: str, repository: str, head_sha: str) -> ReleaseS
     # This dependency-free bootstrap runs before the project environment exists.
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
     api = f"https://api.github.com/repos/{repository}"
-    tag_document = _request_json(f"{api}/git/ref/tags/v{version}", token=token)
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        tag_request = executor.submit(_request_json, f"{api}/git/ref/tags/v{version}", token=token)
+        release_request = executor.submit(
+            _request_json, f"{api}/releases/tags/v{version}", token=token
+        )
+        pypi_request = executor.submit(
+            _request_json, f"https://pypi.org/pypi/repo-standards/{version}/json"
+        )
+        tag_document = tag_request.result()
+        release_document = release_request.result()
+        pypi_document = pypi_request.result()
     tag_sha = (
         None
         if tag_document is None
         else _nested_string(tag_document, object_key="object", value_key="sha")
     )
-    release_document = _request_json(f"{api}/releases/tags/v{version}", token=token)
     github = (
         None if release_document is None else parse_github_registry_side(release_document, version)
     )
-    pypi_document = _request_json(f"https://pypi.org/pypi/repo-standards/{version}/json")
     pypi = None if pypi_document is None else parse_pypi_registry_side(pypi_document, version)
     return ReleaseState(version, head_sha, tag_sha, github, pypi)
 
@@ -372,34 +380,40 @@ def _nested_string(document: dict[str, object], *, object_key: str, value_key: s
 
 
 def download_artifacts(side: RegistrySide, directory: Path) -> None:
+    # Validate every URL/name before any network request or destination write.
+    for artifact in side.artifacts:
+        parsed = urlsplit(artifact.url)
+        if (
+            Path(artifact.name).name != artifact.name
+            or "\\" in artifact.name
+            or parsed.scheme != "https"
+            or parsed.hostname not in {"github.com", "files.pythonhosted.org"}
+            or (parsed.username, parsed.password) != (None, None)
+        ):
+            msg = f"artifact URL or filename is not an approved registry artifact: {artifact.name}"
+            raise ReleaseStateError(msg)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        downloads = list(executor.map(_download_artifact, side.artifacts))
+    # All hashes must pass before writing either artifact or its checksum receipt.
     directory.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
-    for artifact in side.artifacts:
-        destination = directory / artifact.name
-        parsed = urlsplit(artifact.url)
-        if parsed.scheme != "https" or parsed.hostname not in {
-            "github.com",
-            "files.pythonhosted.org",
-        }:
-            msg = f"artifact URL is not an approved HTTPS registry URL: {artifact.name}"
-            raise ReleaseStateError(msg)
-        request = Request(  # ruff: ignore[suspicious-url-open-usage] -- exact HTTPS hosts allowed above
-            artifact.url,
-            headers={"User-Agent": "repo-standards-release"},
-        )
-        with urlopen(  # ruff: ignore[suspicious-url-open-usage]
-            request,
-            timeout=60,
-        ) as response:
-            content = response.read()
-        digest = hashlib.sha256(content).hexdigest()
-        if digest != artifact.sha256:
-            msg = f"downloaded artifact digest differs: {artifact.name}"
-            raise ReleaseStateError(msg)
-        destination.write_bytes(content)
-        lines.append(f"{digest}  packages/repo-standards/{artifact.name}\n")
+    for artifact, content in zip(side.artifacts, downloads, strict=True):
+        (directory / artifact.name).write_bytes(content)
+        lines.append(f"{artifact.sha256}  packages/repo-standards/{artifact.name}\n")
     checksum_path = directory.parents[1] / "SHA256SUMS"
     checksum_path.write_text("".join(lines), encoding="utf-8")
+
+
+def _download_artifact(artifact: Artifact) -> bytes:
+    request = Request(  # ruff: ignore[suspicious-url-open-usage] -- caller validates HTTPS registry host
+        artifact.url, headers={"User-Agent": "repo-standards-release"}
+    )
+    with urlopen(request, timeout=60) as response:  # ruff: ignore[suspicious-url-open-usage]
+        content = response.read()
+    if hashlib.sha256(content).hexdigest() != artifact.sha256:
+        msg = f"downloaded artifact digest differs: {artifact.name}"
+        raise ReleaseStateError(msg)
+    return content
 
 
 def verify_installed_distributions(

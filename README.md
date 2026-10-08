@@ -225,6 +225,11 @@ uvx --no-config --isolated --python 3.14 \
   code-standards check --trust-repository-code
 ```
 
+Run the Python checks together with `bash .github/scripts/verify-python.sh`.
+For a shorter edit loop, append `origin/main` to select the reviewed changed-file
+test cohort; shared changes fall back to the full suite. Omitting the base runs
+all tests. The helper waits for lint, types and tests and fails if any check fails.
+
 Build the same wheel and source distribution used by publishing:
 
 ```bash
