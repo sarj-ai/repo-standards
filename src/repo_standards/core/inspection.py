@@ -371,28 +371,26 @@ def _inspection_from_blobs(
 
 
 def _classify_blobs(blobs: tuple[TrackedBlob, ...]) -> _ClassifiedBlobs:
-    workflows = tuple(
-        blob
-        for blob in blobs
-        if blob.path.startswith(".github/workflows/") and blob.path.endswith((".yaml", ".yml"))
-    )
-    cloudbuild = tuple(
-        blob
-        for blob in blobs
-        if Path(blob.path).name.casefold().startswith("cloudbuild")
-        and blob.path.endswith((".yaml", ".yml"))
-    )
-    dockerfiles = tuple(
-        blob for blob in blobs if Path(blob.path).name.casefold().startswith("dockerfile")
-    )
-    return _ClassifiedBlobs(workflows, cloudbuild, dockerfiles)
+    workflows: list[TrackedBlob] = []
+    cloudbuild: list[TrackedBlob] = []
+    dockerfiles: list[TrackedBlob] = []
+    for blob in blobs:
+        name = blob.path.rpartition("/")[2].casefold()
+        if blob.path.endswith((".yaml", ".yml")):
+            if blob.path.startswith(".github/workflows/"):
+                workflows.append(blob)
+            if name.startswith("cloudbuild"):
+                cloudbuild.append(blob)
+        if name.startswith("dockerfile"):
+            dockerfiles.append(blob)
+    return _ClassifiedBlobs(tuple(workflows), tuple(cloudbuild), tuple(dockerfiles))
 
 
 def _metadata_evidence(root: Path, blobs: tuple[TrackedBlob, ...]) -> _MetadataEvidence:
     metadata_blobs = tuple(
         blob
         for blob in blobs
-        if Path(blob.path).name in {"package.json", "pnpm-workspace.yaml", "pyproject.toml"}
+        if blob.path.rpartition("/")[2] in {"package.json", "pnpm-workspace.yaml", "pyproject.toml"}
     )
     if len(metadata_blobs) > _MAX_METADATA_FILES:
         ConfigurationError.fail(
@@ -404,7 +402,7 @@ def _metadata_evidence(root: Path, blobs: tuple[TrackedBlob, ...]) -> _MetadataE
     workspaces: list[WorkspaceEvidence] = []
     for blob in metadata_blobs:
         content = contents.get(blob.object_id)
-        if Path(blob.path).name != "pnpm-workspace.yaml":
+        if blob.path.rpartition("/")[2] != "pnpm-workspace.yaml":
             project = _inspect_project(blob, content, issues)
             if project is not None:
                 packages.append(project)
@@ -439,8 +437,8 @@ def _tracked_file_evidence(
 def _ownership_evidence_paths(packages: tuple[PackageEvidence, ...]) -> frozenset[str]:
     paths: set[str] = set()
     for project in packages:
-        root = Path(project.path).parent.as_posix()
-        prefix = "" if root == "." else f"{root}/"
+        root = project.path.rpartition("/")[0]
+        prefix = f"{root}/" if root else ""
         paths.update(f"{prefix}{name}" for name in _OWNERSHIP_LOCK_NAMES)
         entrypoints = _NPM_ENTRYPOINTS if project.ecosystem == "npm" else _PYTHON_ENTRYPOINTS
         paths.update(f"{prefix}{name}" for name in entrypoints)
@@ -827,8 +825,7 @@ def _terraform_module_units(blobs: tuple[TrackedBlob, ...]) -> tuple[InventoryUn
     for blob in blobs:
         if not blob.path.endswith((".tf", ".tf.json")):
             continue
-        parent = Path(blob.path).parent
-        directory = "." if parent == Path() else parent.as_posix()
+        directory = blob.path.rpartition("/")[0] or "."
         by_directory.setdefault(directory, []).append(blob.object_id)
     return tuple(
         InventoryUnit(

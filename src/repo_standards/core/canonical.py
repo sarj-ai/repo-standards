@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import PurePosixPath
 import posixpath
+import re
 from typing import TYPE_CHECKING
 import unicodedata
 
@@ -16,20 +17,25 @@ if TYPE_CHECKING:
     from .models import Diagnostic, Manifest
 
 
+_ASCII_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
 def canonical_path(value: str) -> str:
-    if (
-        not value
-        or "\\" in value
-        or any(unicodedata.category(char).startswith("C") for char in value)
-    ):
+    if not value or "\\" in value or _contains_control_character(value):
         ConfigurationError.fail(f"invalid repository-relative path: {value!r}")
-    normalized_unicode = unicodedata.normalize("NFC", value)
+    normalized_unicode = value if value.isascii() else unicodedata.normalize("NFC", value)
     if normalized_unicode != value:
         ConfigurationError.fail(f"path must be NFC-normalized: {value!r}")
     normalized = posixpath.normpath(value)
     if value.startswith("/") or normalized in {".", ".."} or normalized.startswith("../"):
         ConfigurationError.fail(f"path escapes repository root: {value!r}")
     return normalized
+
+
+def _contains_control_character(value: str) -> bool:
+    if value.isascii():
+        return _ASCII_CONTROL.search(value) is not None
+    return any(unicodedata.category(char).startswith("C") for char in value)
 
 
 def workspace_pattern_matches(relative: PurePosixPath, pattern: str) -> bool:
@@ -68,7 +74,7 @@ def canonical_json(value: object) -> str:
             separators=(",", ":"),
             sort_keys=True,
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         ConfigurationError.fail("value cannot be encoded as canonical JSON")
 
 

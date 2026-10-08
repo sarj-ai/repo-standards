@@ -157,6 +157,34 @@ def test_unsafe_paths_fail_closed(path: str) -> None:
         canonical_path(path)
 
 
+def test_ascii_filename_controls_and_allowed_punctuation() -> None:
+    for codepoint in range(128):
+        path = f"src/name{chr(codepoint)}file.py"
+        if codepoint < 32 or codepoint == 127 or chr(codepoint) == "\\":
+            with pytest.raises(ConfigurationError):
+                canonical_path(path)
+        else:
+            assert canonical_path(path) == path
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/zero\u200bwidth.py",
+        "src/private\ue000.py",
+        "src/surrogate\ud800.py",
+        "src/cafe\u0301.py",
+    ],
+)
+def test_unicode_controls_and_non_normalized_names_still_fail(path: str) -> None:
+    with pytest.raises(ConfigurationError):
+        canonical_path(path)
+
+
+def test_normalized_unicode_filename_remains_valid() -> None:
+    assert canonical_path("src/caf\u00e9.py") == "src/caf\u00e9.py"
+
+
 def test_ratchet_rejects_new_and_stale_findings() -> None:
     report = analyze(
         _manifest(),
