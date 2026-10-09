@@ -46,7 +46,7 @@ def test_action_keeps_complete_report_out_of_github_output() -> None:
 
 def test_action_uses_locked_non_mutating_environment() -> None:
     serialized = _action_source()
-    assert "--locked --no-dev --python 3.14" in serialized
+    assert "--locked --no-dev --python 3.15" in serialized
     assert "setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7" in serialized
 
 

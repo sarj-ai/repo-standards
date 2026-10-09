@@ -454,9 +454,15 @@ def verify_installed_distributions(
     with ThreadPoolExecutor(max_workers=len(artifacts)) as executor:
         futures = [
             executor.submit(
-                _verify_installed_artifact, artifact, label, version, smoke_root, execute
+                _verify_installed_artifact,
+                artifact,
+                (f"{label}-{python_version}", python_version),
+                version,
+                smoke_root,
+                execute,
             )
             for label, artifact in artifacts
+            for python_version in ("3.14", "3.15")
         ]
         timings = [future.result() for future in futures]
     for timing in timings:
@@ -473,16 +479,17 @@ def verify_installed_distributions(
 
 def _verify_installed_artifact(
     artifact: Path,
-    label: str,
+    target: tuple[str, str],
     version: str,
     smoke_root: Path,
     execute: Callable[[tuple[str, ...]], str],
 ) -> InstalledArtifactTiming:
     started = time.monotonic()
+    label, python_version = target
     environment = smoke_root / label
     python = environment / "bin" / "python"
     executable = environment / "bin" / "repo-standards"
-    execute(("uv", "venv", "--python", "3.14", str(environment)))
+    execute(("uv", "venv", "--python", python_version, str(environment)))
     execute(("uv", "pip", "install", "--python", str(python), str(artifact)))
     installed_version = execute((str(executable), "--version")).strip()
     if installed_version != version:

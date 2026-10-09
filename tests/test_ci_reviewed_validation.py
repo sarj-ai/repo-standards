@@ -156,7 +156,7 @@ def _gateway(  # ruff: ignore[too-many-branches] -- independent negative provide
             "head_repository_id": 4,
         }
     latest = {**run, "run_attempt": 2} if case == "race" else run
-    jobs = [{"name": "Validate / Python 3.14", "status": "completed", "conclusion": "success"}]
+    jobs = [{"name": "Validate / Python 3.15", "status": "completed", "conclusion": "success"}]
     if case == "job-failed":
         jobs[0]["conclusion"] = "failure"
     rows = [run, _run(run_id=8, conclusion="failure")] if case == "newer-failed" else [run]

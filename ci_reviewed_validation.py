@@ -26,7 +26,7 @@ _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _MAX_AGE = timedelta(hours=24)
 _MAX_PROOF_BYTES = 4096
 _MAX_PROVIDER_ROWS = 100
-_JOB = "Validate / Python 3.14"
+_JOB = "Validate / Python 3.15"
 
 
 def _git(root: Path, revision: str) -> str:

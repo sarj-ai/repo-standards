@@ -26,7 +26,7 @@ def test_pull_request_commits_hook_is_quiet_advisory_and_history_scoped() -> Non
             ),
             "entry": "repo-standards pull-request commits . --advisory --quiet",
             "language": "python",
-            "language_version": "python3.14",
+            "language_version": "python3.15",
             "always_run": True,
             "pass_filenames": False,
             "verbose": True,
@@ -38,7 +38,7 @@ def test_pull_request_commits_hook_is_quiet_advisory_and_history_scoped() -> Non
             "description": "Validates and safely normalizes the commit message header.",
             "entry": "repo-standards commit-message --fix-safe",
             "language": "python",
-            "language_version": "python3.14",
+            "language_version": "python3.15",
             "always_run": True,
             "pass_filenames": True,
             "require_serial": True,
@@ -50,7 +50,7 @@ def test_pull_request_commits_hook_is_quiet_advisory_and_history_scoped() -> Non
             "description": "Validates the exact prospective Git tree from the staged index.",
             "entry": "repo-standards check . --staged",
             "language": "python",
-            "language_version": "python3.14",
+            "language_version": "python3.15",
             "always_run": True,
             "pass_filenames": False,
             "require_serial": True,
@@ -81,7 +81,7 @@ def test_pull_request_commits_action_uses_runner_event_file_and_locked_package()
     assert "${{ inputs.root }}" in source
     assert '--github-event "$GITHUB_EVENT_PATH"' in source
     assert 'pull-request commits "$INPUT_ROOT"' in source
-    assert '--project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.14' in source
+    assert '--project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.15' in source
     assert '--project "$GITHUB_ACTION_PATH/.." --no-sync repo-standards' in source
     assert "uvx" not in source
 

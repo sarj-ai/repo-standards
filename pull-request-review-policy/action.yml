@@ -55,12 +55,12 @@ runs:
     - name: Install uv
       uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       with:
-        version: '0.12.12'
+        version: '0.12.24'
         enable-cache: true
         cache-dependency-glob: ${{ github.action_path }}/../uv.lock
     - name: Install locked review-policy environment
       shell: bash
-      run: uv sync --project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.14
+      run: uv sync --project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.15
     - name: Reconcile pull-request review policy
       id: reconcile
       shell: bash

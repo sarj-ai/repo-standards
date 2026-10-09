@@ -49,7 +49,7 @@ jobs:
         if: steps.reuse.outputs.reused != 'true'
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: '0.12.18'
+          version: '0.12.24'
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Install Node.js
@@ -62,7 +62,7 @@ jobs:
       - name: Install locked toolchains
         if: steps.reuse.outputs.reused != 'true'
         run: |
-          uv sync --locked --python 3.14 --no-dev & python_pid=$!
+          uv sync --locked --python 3.15 --no-dev & python_pid=$!
           npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund & node_pid=$!
           result=0
           wait "$python_pid" || result=1
