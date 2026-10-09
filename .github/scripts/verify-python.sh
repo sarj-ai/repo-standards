@@ -12,7 +12,7 @@ while (( $# )); do
   case "$1" in
     --help|-h) usage; exit 0;;
     --base)
-      if (( $# < 2 )) || [[ "$base_selected" == true ]]; then usage >&2; exit 2; fi
+      if (( $# < 2 )) || [[ "$base_selected" == true || "$2" == -* ]]; then usage >&2; exit 2; fi
       verify_base="$2"; base_selected=true; shift 2;;
     --jobs)
       if (( $# < 2 )) || [[ "$2" != 1 && "$2" != 2 && "$2" != 4 ]]; then usage >&2; exit 2; fi

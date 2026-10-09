@@ -122,8 +122,9 @@ def test_reference_checks_overlap_and_all_must_pass_before_build(
 
 
 @pytest.mark.parametrize("failed_check", ["none", "ruff", "basedpyright", "python"])
+@pytest.mark.parametrize("base_option", [False, True])
 def test_local_gate_runs_all_checks_and_preserves_test_base(
-    tmp_path: Path, failed_check: str
+    tmp_path: Path, failed_check: str, *, base_option: bool
 ) -> None:
     stub = tmp_path / "uv"
     stub.write_text(
@@ -143,7 +144,7 @@ def test_local_gate_runs_all_checks_and_preserves_test_base(
             "-o",
             "pipefail",
             str(REPOSITORY_ROOT / ".github/scripts/verify-python.sh"),
-            "origin/main",
+            *(("--base", "origin/main") if base_option else ("origin/main",)),
             "--jobs",
             "4",
         ),
@@ -214,6 +215,7 @@ def test_installed_smoke_overlaps_groups_and_propagates_failure(
         pytest.param(["--jobs", "0"], id="zero-jobs"),
         pytest.param(["--jobs", "17"], id="unbounded-jobs"),
         pytest.param(["--base"], id="missing-base"),
+        pytest.param(["--base", "--help"], id="option-as-base"),
         pytest.param(["first", "second"], id="duplicate-positionals"),
         pytest.param(["first", "--base", "second"], id="duplicate-base"),
         pytest.param(["--unknown"], id="unknown-flag"),
