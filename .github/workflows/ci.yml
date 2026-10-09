@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
@@ -41,7 +42,18 @@ jobs:
         run: uv sync --locked --python 3.14
       - name: Audit locked dependencies
         run: uv audit --locked
+      - name: Verify full validation of identical reviewed tree
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: reviewed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUSH_BASE: ${{ github.event.before }}
+        run: >-
+          python ci_reviewed_validation.py reuse
+          --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --base "$PUSH_BASE"
+          --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
       - name: Lint, typecheck and test independently
+        if: steps.reviewed.outputs.reused != 'true'
         env:
           TEST_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: |
@@ -60,6 +72,19 @@ jobs:
           wait "$types_pid" || result=1
           wait "$tests_pid" || result=1
           exit "$result"
+      - name: Record successful full PR validation
+        if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
+        run: >-
+          python ci_reviewed_validation.py record --plan "$RUNNER_TEMP/test-plan.json"
+          --destination "$RUNNER_TEMP/reviewed-validation"
+      - name: Keep immutable full-validation certificate
+        if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reviewed-validation-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/reviewed-validation/proof.json
+          if-no-files-found: ignore
+          retention-days: 2
 
   package:
     name: Build and install artifacts
