@@ -497,3 +497,38 @@ def test_selected_blob_reader_rejects_absent_and_duplicate_paths(tmp_path: Path)
         read_tracked_blob_contents(repository, ("missing.json",))
     with pytest.raises(ConfigurationError, match="unique"):
         read_tracked_blob_contents(repository, ("package.json", "package.json"))
+
+
+@pytest.mark.parametrize(
+    ("paths", "message"),
+    [
+        (("Fixture.json", "fixture.json"), "collide after normalization"),
+        (("noncanonical\\fixture.json",), "invalid repository-relative path"),
+    ],
+)
+def test_committed_path_boundaries_survive_direct_blob_sorting(
+    tmp_path: Path, paths: tuple[str, ...], message: str
+) -> None:
+    repository = _committed_repository(tmp_path)
+    blob = subprocess.check_output(
+        ["git", "-C", str(repository), "rev-parse", "HEAD:package.json"],
+        text=True,
+        timeout=10,
+    ).strip()
+    # Write the index directly so case-insensitive filesystems
+    # cannot collapse the deliberately invalid tracked-tree paths.
+    for path in paths:
+        _git(repository, "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "invalid tree fixture",
+    )
+    with pytest.raises(ConfigurationError, match=message):
+        inspect_repository(repository)

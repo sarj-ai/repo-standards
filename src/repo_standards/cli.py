@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import date
 from enum import StrEnum
-from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -14,6 +13,12 @@ from typing import Annotated, ClassVar, Literal, NamedTuple, NewType, NoReturn, 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import typer
 
+from repo_standards._machine import (
+    MAX_PAGE_SIZE as _MAX_PAGE_SIZE,
+    capabilities_payload,
+    envelope as _envelope,
+    installed_version as _installed_version,
+)
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.commit_message import CommitMessageResult, check_local_commit_message_file
 from repo_standards.core.engine import analyze, check_baseline
@@ -112,8 +117,6 @@ pull_request_app = typer.Typer(
 app.add_typer(rest_app, name="rest")
 app.add_typer(pull_request_app, name="pull-request")
 
-_DISTRIBUTION_NAME = "repo-standards"
-_MAX_PAGE_SIZE = 500
 _INSPECTION_KINDS = frozenset(
     {"all", "project", "workflow", "cloudbuild", "dockerfile", "terraform", "openapi"}
 )
@@ -237,81 +240,10 @@ def main() -> None:
     app()
 
 
-def _envelope(
-    command: str,
-    *,
-    completion: str = "complete",
-    conclusion: str = "passed",
-    provenance: Mapping[str, object] | None = None,
-    issues: Sequence[Mapping[str, object]] = (),
-) -> dict[str, object]:
-    return {
-        "schema_version": 2,
-        "tool": _tool(),
-        "command": command,
-        "completion": completion,
-        "conclusion": conclusion,
-        "provenance": dict(provenance or {"kind": "installed-environment"}),
-        "execution_issues": list(issues),
-    }
-
-
-def _tool() -> Mapping[str, object]:
-    return {"name": "repo-standards", "version": _installed_version()}
-
-
-def _installed_version() -> str:
-    try:
-        return metadata.version(_DISTRIBUTION_NAME)
-    except metadata.PackageNotFoundError:
-        return "unknown"
-
-
 @app.command("capabilities")
 def capabilities_command() -> None:
     """Describe the stable machine capabilities without inspecting a repository."""
-    payload = {
-        **_envelope("capabilities"),
-        "commands": [
-            "capabilities",
-            "catalog",
-            "check",
-            "commit-message",
-            "explain",
-            "inspect",
-            "pull-request commits",
-            "pull-request review-policy",
-            "pull-request size",
-            "report",
-            "rest discover",
-            "rest doctor",
-            "rules",
-            "schema",
-        ],
-        "formats": ["json", "pretty-json", "text"],
-        "modes": ["report", "ratchet", "strict"],
-        "exit_codes": {"0": "satisfied", "1": "policy-findings", "2": "incomplete"},
-        "safety": {
-            "network": False,
-            "network_default": False,
-            "network_mode": "disabled",
-            "repository_code_execution": False,
-            "mutation": "commit-message --fix-safe only",
-            "autofix": "bounded mechanical commit-header normalization only",
-            "inspection_input": "exact-git-head-tree",
-        },
-        "domains": {
-            "repository": {"status": "stable"},
-            "rest": {
-                "status": "preview",
-                "input": "committed-openapi-json",
-                "application_code_execution": False,
-            },
-        },
-        "schemas": ["catalog", "report"],
-        "pagination": {"default_limit": 100, "maximum_limit": _MAX_PAGE_SIZE},
-    }
-    typer.echo(canonical_json(payload))
+    typer.echo(canonical_json(capabilities_payload()))
 
 
 @app.command("catalog")

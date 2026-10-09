@@ -73,6 +73,30 @@ def test_console_version_probe_does_not_construct_the_full_cli() -> None:
     assert completed.stdout.strip()
 
 
+@pytest.mark.parametrize(
+    "arguments", [["capabilities"], ["--version"]], ids=["capabilities", "version"]
+)
+def test_console_metadata_is_identical_without_loading_analysis(arguments: list[str]) -> None:
+    script = (
+        "import sys; from repo_standards._entrypoint import main; "
+        "sys.argv=['repo-standards',*sys.argv[1:]]; main(); "
+        "assert 'repo_standards.cli' not in sys.modules; "
+        "assert 'repo_standards.core.inspection' not in sys.modules; "
+        "assert 'repo_standards.policy_sarj' not in sys.modules; "
+        "assert 'typer' not in sys.modules; assert 'pydantic' not in sys.modules"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script, *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    expected = CliRunner().invoke(app, arguments)
+    assert completed.returncode == expected.exit_code == 0, completed.stderr
+    assert completed.stdout == expected.stdout
+
+
 def test_unrelated_cli_commands_do_not_import_the_catalog_model() -> None:
     command = (
         "import sys; from repo_standards.cli import app; "
