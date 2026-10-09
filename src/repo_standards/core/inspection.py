@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 from io import BytesIO
+from operator import attrgetter
 import os
 from pathlib import Path
 import re
@@ -618,12 +619,9 @@ def _tracked_files(root: Path, tree_digest: str) -> tuple[TrackedBlob, ...]:
     canonical = tuple(canonical_path(blob.path) for blob in blobs)
     if canonical != tuple(blob.path for blob in blobs):
         ConfigurationError.fail("tracked paths must already be canonical")
-    if len(canonical) != len(set(canonical)) or len(canonical) != len(
-        {p.casefold() for p in canonical}
-    ):
+    if len(canonical) != len({path.casefold() for path in canonical}):
         ConfigurationError.fail("tracked paths collide after normalization")
-    by_path = {blob.path: blob for blob in blobs}
-    return tuple(by_path[path] for path in sorted(canonical))
+    return tuple(sorted(blobs, key=attrgetter("path")))
 
 
 def _parse_tree_record(record: str) -> _TreeRecord:
