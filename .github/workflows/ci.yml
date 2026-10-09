@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate / Python 3.14
+    name: Validate / Python 3.15
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-24.04' || 'blacksmith-2vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
@@ -35,7 +35,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: '0.12.18'
+          version: '0.12.24'
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Verify full validation of identical reviewed tree
@@ -50,7 +50,7 @@ jobs:
           --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
       - name: Install locked environment
         if: steps.reviewed.outputs.reused != 'true'
-        run: uv sync --locked --python 3.14
+        run: uv sync --locked --python 3.15
       - name: Audit locked dependencies
         run: uv audit --locked
       - name: Lint, typecheck and test independently
@@ -87,6 +87,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 2
 
+  compatibility:
+    name: Compatibility / Python 3.14
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-24.04' || 'blacksmith-2vcpu-ubuntu-2404' }}
+    timeout-minutes: 10
+    steps:
+      - name: Check out tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.24'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Verify minimum supported runtime
+        env:
+          STANDARDS_PYTHON: '3.14'
+        run: bash .github/scripts/verify-python.sh
+
   package:
     name: Build and install artifacts
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-24.04' || 'blacksmith-2vcpu-ubuntu-2404' }}
@@ -106,7 +126,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: '0.12.18'
+          version: '0.12.24'
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Render exact main release identity
@@ -119,8 +139,15 @@ jobs:
         run: uv build --no-sources --out-dir dist/repo-standards
       - name: Validate pre-commit hook manifest
         run: |
-          uv sync --locked --no-dev --group hooks --group artifacts --python 3.14
+          uv sync --locked --no-dev --group hooks --group artifacts --python 3.15
           uv run --no-sync pre-commit validate-manifest .pre-commit-hooks.yaml
+      - name: Verify wheel and source installs on both supported runtimes
+        run: >-
+          python release_reconciliation.py verify-installed
+          --directory dist/repo-standards
+          --version "$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          --smoke-root "$RUNNER_TEMP/repo-standards-install-matrix"
+          --checksum dist/SHA256SUMS
       - name: Verify public distribution boundary
         run: >-
           uv run --no-sync python -m repo_standards.verify_release_artifacts
@@ -129,7 +156,7 @@ jobs:
         env:
           SMOKE_ENV: ${{ runner.temp }}/repo-standards-smoke
         run: |
-          uv venv --python 3.14 "$SMOKE_ENV"
+          uv venv --python 3.15 "$SMOKE_ENV"
           uv pip install --python "$SMOKE_ENV/bin/python" \
             dist/repo-standards/repo_standards-*.whl
       - name: Smoke-test installed interfaces
@@ -204,7 +231,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: '0.12.18'
+          version: '0.12.24'
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Install Node.js
@@ -215,7 +242,7 @@ jobs:
           cache-dependency-path: apps/docs/package-lock.json
       - name: Install locked toolchains
         run: |
-          uv sync --locked --python 3.14 --no-dev & python_pid=$!
+          uv sync --locked --python 3.15 --no-dev & python_pid=$!
           npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund & node_pid=$!
           result=0
           wait "$python_pid" || result=1
@@ -248,16 +275,18 @@ jobs:
   gate:
     name: CI / gate
     if: always()
-    needs: [validate, package, docs]
+    needs: [validate, compatibility, package, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require every expected lane
         env:
           VALIDATE_RESULT: ${{ needs.validate.result }}
+          COMPATIBILITY_RESULT: ${{ needs.compatibility.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
         run: |
           test "$VALIDATE_RESULT" = success
+          test "$COMPATIBILITY_RESULT" = success
           test "$PACKAGE_RESULT" = success
           test "$DOCS_RESULT" = success

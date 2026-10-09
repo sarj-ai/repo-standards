@@ -160,16 +160,19 @@ def test_installed_distribution_verifier_checks_both_artifacts_and_writes_checks
         run_command=run,
     )
 
-    assert len(commands) == 8
-    assert sum(command[:2] == ("uv", "venv") for command in commands) == 2
-    assert sum(command[:3] == ("uv", "pip", "install") for command in commands) == 2
+    assert {command[3] for command in commands if command[:2] == ("uv", "venv")} == {"3.14", "3.15"}
+    assert len(commands) == 16
+    assert sum(command[:2] == ("uv", "venv") for command in commands) == 4
+    assert sum(command[:3] == ("uv", "pip", "install") for command in commands) == 4
     assert checksum.read_text(encoding="utf-8").splitlines() == [
         f"{hashlib.sha256(wheel.read_bytes()).hexdigest()}  packages/repo-standards/{wheel.name}",
         f"{hashlib.sha256(sdist.read_bytes()).hexdigest()}  packages/repo-standards/{sdist.name}",
     ]
 
 
-@pytest.mark.parametrize("failed_artifact", [None, "wheel", "sdist"])
+@pytest.mark.parametrize(
+    "failed_artifact", [None, "wheel-3.14", "wheel-3.15", "sdist-3.14", "sdist-3.15"]
+)
 def test_clean_installs_overlap_and_finish_before_failure_or_checksums(
     tmp_path: Path, failed_artifact: str | None
 ) -> None:
@@ -199,7 +202,7 @@ def test_clean_installs_overlap_and_finish_before_failure_or_checksums(
             checksum_path=checksum,
             run_command=run,
         )
-        assert sorted(imported) == ["sdist", "wheel"]
+        assert sorted(imported) == ["sdist-3.14", "sdist-3.15", "wheel-3.14", "wheel-3.15"]
         assert checksum.exists()
     else:
         with pytest.raises(ReleaseStateError, match=failed_artifact + " installed version differs"):
@@ -210,7 +213,9 @@ def test_clean_installs_overlap_and_finish_before_failure_or_checksums(
                 checksum_path=checksum,
                 run_command=run,
             )
-        assert imported == ["sdist" if failed_artifact == "wheel" else "wheel"]
+        assert sorted(imported) == sorted(
+            {"wheel-3.14", "wheel-3.15", "sdist-3.14", "sdist-3.15"} - {failed_artifact}
+        )
         assert not checksum.exists()
 
 

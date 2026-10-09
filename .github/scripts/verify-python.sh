@@ -25,7 +25,8 @@ while (( $# )); do
 done
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 # An omitted base is the full gate; explicit bases use the reviewed selector.
-uv sync --locked --python 3.14
+export UV_PYTHON="${STANDARDS_PYTHON:-3.15}"
+uv sync --locked --python "$UV_PYTHON"
 run_check() {
   label="$1"; shift
   started=$SECONDS

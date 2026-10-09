@@ -24,5 +24,5 @@ def test_documentation_action_uses_trusted_revisions_and_locked_package() -> Non
     assert "github.event.pull_request.base.sha" in source
     assert "github.event.pull_request.head.sha" in source
     assert "pull-request documentation" in source
-    assert '--project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.14' in source
+    assert '--project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.15' in source
     assert "uvx" not in source
