@@ -122,16 +122,15 @@ def test_reference_checks_overlap_and_all_must_pass_before_build(
 
 
 @pytest.mark.parametrize("failed_check", ["none", "ruff", "basedpyright", "python"])
+@pytest.mark.parametrize("base_option", [False, True])
 def test_local_gate_runs_all_checks_and_preserves_test_base(
-    tmp_path: Path, failed_check: str
+    tmp_path: Path, failed_check: str, *, base_option: bool
 ) -> None:
-    source = (REPOSITORY_ROOT / ".github/scripts/verify-python.sh").read_text()
-    commands = source[source.index("uv sync") :]
     stub = tmp_path / "uv"
     stub.write_text(
         '#!/bin/sh\nif [ "$1" = sync ]; then exit 0; fi\nname="$3"\n'
         'if [ "$name" = python ]; then test "$*" = '
-        '"run --no-sync python test_selection.py --run --base origin/main" || exit 8; fi\n'
+        '"run --no-sync python test_selection.py --run --base origin/main --jobs 4" || exit 8; fi\n'
         'touch "$SIGNALS/$name.started"\n'
         'until test -f "$SIGNALS/ruff.started" && test -f "$SIGNALS/basedpyright.started" '
         '&& test -f "$SIGNALS/python.started"; do sleep 0.01; done\n'
@@ -144,10 +143,10 @@ def test_local_gate_runs_all_checks_and_preserves_test_base(
             "-eu",
             "-o",
             "pipefail",
-            "-c",
-            commands,
-            "gate",
-            "origin/main",
+            str(REPOSITORY_ROOT / ".github/scripts/verify-python.sh"),
+            *(("--base", "origin/main") if base_option else ("origin/main",)),
+            "--jobs",
+            "4",
         ),
         check=False,
         capture_output=True,
@@ -176,7 +175,7 @@ def test_installed_smoke_overlaps_groups_and_propagates_failure(
         'if [ "$name" = capabilities ] || [ "$name" = schema ]; then\n'
         'touch "$SIGNALS/$name.started"\n'
         'until test -f "$SIGNALS/capabilities.started" && test -f "$SIGNALS/schema.started"; '
-        'do sleep 0.01; done\nfi\n'
+        "do sleep 0.01; done\nfi\n"
         'echo "$*" >> "$SIGNALS/commands"\n'
         '[ "$name" != "$FAIL_CHECK" ]\n'
     )
@@ -207,3 +206,68 @@ def test_installed_smoke_overlaps_groups_and_propagates_failure(
     assert "schema" in commands
     if failed_check == "none":
         assert len(commands) == 8
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        pytest.param(["--jobs"], id="missing-jobs"),
+        pytest.param(["--jobs", "0"], id="zero-jobs"),
+        pytest.param(["--jobs", "17"], id="unbounded-jobs"),
+        pytest.param(["--base"], id="missing-base"),
+        pytest.param(["--base", "--help"], id="option-as-base"),
+        pytest.param(["first", "second"], id="duplicate-positionals"),
+        pytest.param(["first", "--base", "second"], id="duplicate-base"),
+        pytest.param(["--unknown"], id="unknown-flag"),
+    ],
+)
+def test_local_gate_rejects_invalid_options_before_installing(
+    tmp_path: Path, arguments: list[str]
+) -> None:
+    stub = tmp_path / "uv"
+    stub.write_text('#!/bin/sh\ntouch "$SIGNALS/installed"\n')
+    stub.chmod(0o755)
+
+    result = subprocess.run(
+        (
+            shutil.which("bash") or "/bin/bash",
+            str(REPOSITORY_ROOT / ".github/scripts/verify-python.sh"),
+            *arguments,
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={
+            **os.environ,  # ruff: ignore[banned-api] -- real argument parser with an observable installer.
+            "PATH": str(tmp_path) + os.pathsep + os.defpath,
+            "SIGNALS": str(tmp_path),
+        },
+    )
+
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+    assert not (tmp_path / "installed").exists()
+
+
+def test_reused_validation_skips_only_the_test_environment_and_retains_a_fresh_audit() -> None:
+    workflow = OBJECT_MAP.validate_python(
+        yaml.load(
+            (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader
+        ),
+        strict=True,
+    )
+    jobs = OBJECT_MAP.validate_python(workflow["jobs"], strict=True)
+    validate = OBJECT_MAP.validate_python(jobs["validate"], strict=True)
+    steps = OBJECT_LIST.validate_python(validate["steps"], strict=True)
+    proof = next(index for index, step in enumerate(steps) if step.get("id") == "reviewed")
+    install = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("name") == "Install locked environment"
+    )
+    assert proof < install
+    assert steps[install]["if"] == "steps.reviewed.outputs.reused != 'true'"
+    audit = next(step for step in steps if step.get("name") == "Audit locked dependencies")
+    assert audit["run"] == "uv audit --locked"
+    assert "if" not in audit

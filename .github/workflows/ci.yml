@@ -38,10 +38,6 @@ jobs:
           version: '0.12.18'
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - name: Install locked environment
-        run: uv sync --locked --python 3.14
-      - name: Audit locked dependencies
-        run: uv audit --locked
       - name: Verify full validation of identical reviewed tree
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: reviewed
@@ -52,6 +48,11 @@ jobs:
           python ci_reviewed_validation.py reuse
           --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --base "$PUSH_BASE"
           --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Install locked environment
+        if: steps.reviewed.outputs.reused != 'true'
+        run: uv sync --locked --python 3.14
+      - name: Audit locked dependencies
+        run: uv audit --locked
       - name: Lint, typecheck and test independently
         if: steps.reviewed.outputs.reused != 'true'
         env:
