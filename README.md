@@ -166,7 +166,6 @@ are accepted only when Git's `MERGE_HEAD` proves merge state. Temporary `fixup!`
 `amend!` messages are accepted locally so every Git autosquash mode remains usable, but exact PR CI
 rejects them if they remain in review history. Consumers that already lock Repo Standards may
 invoke the same commands from their existing hook manager to avoid a duplicate environment.
-Published packages support Python 3.14 and 3.15. Python hooks and GitHub actions use Python 3.15 by default.
 
 ## GitHub Action
 
