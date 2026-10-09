@@ -231,11 +231,5 @@ Build the same wheel and source distribution used by publishing:
 uv build --no-sources
 ```
 
-Main CI can reuse full Python validation from a successful own-repository PR run within
-24 hours when its immutable proof matches the exact Git tree and comparison base. A
-partial test cohort, missing proof, changed base, fork, expired artifact or rerun uses
-fresh validation. Dependency audits and exact-main package/docs builds still run;
-manual and scheduled CI always run all tests.
-
 Releases are reconcilable. The protected workflow independently repairs a missing PyPI
 publication or GitHub Release from the same verified source revision.

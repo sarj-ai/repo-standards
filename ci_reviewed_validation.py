@@ -1,4 +1,10 @@
-"""Reuse full validation of an identical, recently merged, own-repository PR tree."""
+"""Reuse full validation of an identical, recently merged, own-repository PR tree.
+
+Only successful full-suite CI within 24 hours can qualify. Partial cohorts,
+changed bases, forks, expired artifacts or unavailable proof require fresh checks.
+Dependency audits and exact-main package/documentation builds remain fresh.
+Manual and scheduled CI always run all tests.
+"""
 
 from __future__ import annotations
 
