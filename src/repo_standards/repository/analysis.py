@@ -18,6 +18,8 @@ from repo_standards.core.models import (
 from repo_standards.core.rule_reviews import RuleVersion, activated_rule_ids
 from repo_standards.policy_sarj import SarjPolicy
 
+from .comparison import with_makefile_comparison
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RepositoryAnalysisRequest:
@@ -28,6 +30,7 @@ class RepositoryAnalysisRequest:
     as_of: date | None = None
     staged: bool = False
     enabled_rule_ids: tuple[str, ...] = ()
+    base_revision: str | None = None
 
 
 def analyze_repository(request: RepositoryAnalysisRequest) -> AnalysisReport:
@@ -55,21 +58,27 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         baseline_path=request.baseline_path if request.mode is Mode.RATCHET else None,
         identity=git_index_identity(root) if request.staged else None,
     )
-    repository_diagnostics = policy.evaluate_repository(snapshot)
     if snapshot.manifest.enabled_rules and request.enabled_rule_ids:
         ConfigurationError.fail("manifest enabled_rules cannot be combined with enabled_rule_ids")
+    enabled_rules = activated_rule_ids(
+        snapshot.manifest.enabled_rules or request.enabled_rule_ids,
+        current_rules=frozenset(RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()),
+    )
+    snapshot = with_makefile_comparison(
+        root,
+        snapshot,
+        enabled_rules=enabled_rules,
+        base_revision=request.base_revision,
+        as_of=request.as_of,
+    )
+    repository_diagnostics = policy.evaluate_repository(snapshot)
     report = analyze(
         snapshot.manifest,
         policy,
         mode=request.mode,
         as_of=request.as_of,
         additional_diagnostics=repository_diagnostics,
-        enabled_rules=activated_rule_ids(
-            snapshot.manifest.enabled_rules or request.enabled_rule_ids,
-            current_rules=frozenset(
-                RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()
-            ),
-        ),
+        enabled_rules=enabled_rules,
     )
     report = replace(report, input_provenance=snapshot.provenance)
     if request.mode is Mode.RATCHET:

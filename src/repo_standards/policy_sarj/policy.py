@@ -29,6 +29,7 @@ from repo_standards.core.taxonomy import (
     taxonomy,
 )
 
+from .makefiles import MAKEFILE_GROWTH_RULE_ID, makefile_diagnostics
 from .spec import (
     PATH_TEMPLATES,
     PROFILE_ID,
@@ -324,6 +325,57 @@ RULES = (
         ),
     ),
     Rule(
+        rule_id=MAKEFILE_GROWTH_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Do not add or grow Makefiles without a scoped exception",
+        description=(
+            "Do not create Makefiles or grow existing ones without a scoped, documented exception. "
+            "Compare exact Git snapshots per path, counting comments, blank lines and an "
+            "unterminated final line; CRLF and LF count equally. New paths, including empty "
+            "files and move/copy destinations, require an exception. Equal size, shrinkage and "
+            "deletion pass; changes in one file do not offset another. Match Makefile, "
+            "GNUmakefile, Makecall, Makefile.*, GNUmakefile.* and *.mk case-insensitively; "
+            "exclude suffix variants ending in .md, .mdx, .rst, .adoc or .txt. Vendor, generated "
+            "and fixture paths have no automatic exemption. Arbitrary custom names and included "
+            "non-Make files "
+            "are outside this scope. Exact-path makefiles.exceptions records require max_lines, "
+            "owner, reason, issue, created_on and expires_on, with at most 90 days of validity. "
+            "Standalone exception use requires --as-of; the Code Standards bridge supplies UTC. "
+            "Baselines and generic diagnostic exceptions cannot authorize growth."
+        ),
+        why=(
+            "Convenience wrappers duplicate native command interfaces and add maintenance "
+            "and review noise."
+        ),
+        fix=(
+            "Prefer existing native commands; remove redundant wrappers with their callers "
+            "and preserve necessary contracts until safely migrated. Do not transfer aliases "
+            "into replacement scripts or task files. Use --base for branch-wide committed "
+            "comparisons; the local default covers the last commit and staged checks use HEAD. "
+            "Missing comparison objects produce incomplete analysis."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-artifact-makefile-growth",
+                title="Existing Makefile grows between Git snapshots",
+                language="json",
+                before='{"base":{"Makefile":2},"head":{"Makefile":3}}',
+                after='{"base":{"Makefile":2},"head":{"Makefile":2}}',
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-artifact-new-empty-makefile",
+                title="An empty Makefile is still a new artifact",
+                language="json",
+                before='{"base":{},"head":{"tools/Makefile":0}}',
+                after='{"base":{},"head":{}}',
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
         rule_id=RuleId("repository/documentation/placement"),
         version=3,
         default_severity="error",
@@ -351,6 +403,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/operational-script-tests"): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/terraform-test-files"): RuleClassification.OBJECTIVE,
+        MAKEFILE_GROWTH_RULE_ID: RuleClassification.JUDGMENT,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
     }
 )
@@ -361,6 +414,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
         RuleId("repository/artifacts/operational-script-tests"): 46,
         RuleId("repository/artifacts/terraform-test-files"): 47,
+        MAKEFILE_GROWTH_RULE_ID: 48,
         RuleId("repository/documentation/placement"): 50,
     }
 )
@@ -404,7 +458,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=18,
+    policy_version=19,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1002,4 +1056,8 @@ class SarjPolicy:
 
     @staticmethod
     def evaluate_repository(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
-        return _repository_artifact_diagnostics(snapshot)
+        diagnostics = _repository_artifact_diagnostics(snapshot)
+        if snapshot.makefile_comparison is None:
+            return diagnostics
+        rule = next(item for item in RULES if item.rule_id == MAKEFILE_GROWTH_RULE_ID)
+        return diagnostics + makefile_diagnostics(snapshot, rule=rule)

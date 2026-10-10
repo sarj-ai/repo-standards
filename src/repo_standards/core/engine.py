@@ -25,6 +25,7 @@ from .rule_reviews import RuleVersion
 def apply_exceptions(
     diagnostics: tuple[Diagnostic, ...], manifest: Manifest, as_of: date | None
 ) -> tuple[Diagnostic, ...]:
+    _reject_uncapped_exceptions(diagnostics, manifest)
     if manifest.exceptions and as_of is None:
         ConfigurationError.fail("--as-of YYYY-MM-DD is required when exceptions are declared")
     exceptions = {
@@ -80,6 +81,12 @@ def apply_exceptions(
         )
         ConfigurationError.fail(f"exceptions do not match current findings: {scopes}")
     return tuple(result)
+
+
+def _reject_uncapped_exceptions(diagnostics: tuple[Diagnostic, ...], manifest: Manifest) -> None:
+    unsupported = {item.rule_id for item in diagnostics if not item.baselineable}
+    if any(item.rule_id in unsupported for item in manifest.exceptions):
+        ConfigurationError.fail("Makefile growth requires a capped makefiles.exceptions record")
 
 
 def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a safety boundary
@@ -192,7 +199,9 @@ def classify_baseline(report: AnalysisReport, baseline: Baseline) -> RatchetComp
         RatchetEntry(
             fingerprint=fingerprint,
             classification=(
-                RatchetClassification.KNOWN if fingerprint in known else RatchetClassification.NEW
+                RatchetClassification.KNOWN
+                if fingerprint in known and current[fingerprint].baselineable
+                else RatchetClassification.NEW
             ),
             diagnostic=current[fingerprint],
         )

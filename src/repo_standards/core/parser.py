@@ -17,6 +17,7 @@ from .models import (
     ComponentId,
     DocumentationConfig,
     ExceptionRecord,
+    MakefileException,
     Manifest,
     PolicyId,
     PullRequestCommitHistoryConfig,
@@ -194,6 +195,8 @@ def parse_exception(value: object, index: int) -> ExceptionRecord:
         "expires_on",
     }
     _strict_keys(data, fields, fields, context)
+    if data["rule_id"] == "repository/artifacts/makefile-growth":
+        ConfigurationError.fail("Makefile growth requires a capped makefiles.exceptions record")
     created_on = _string(data, "created_on", context)
     expires_on = _string(data, "expires_on", context)
     fingerprint = _string(data, "fingerprint", context)
@@ -248,9 +251,7 @@ def parse_documentation(value: object) -> DocumentationConfig:
         ConfigurationError.fail("documentation.entrypoints must be non-empty and unique")
     if any(not path.casefold().endswith(".md") for path in entrypoints):
         ConfigurationError.fail("documentation.entrypoints must be Markdown paths")
-    maximum_added_pages = _integer(
-        data, "maximum_added_pages", "documentation", default=0
-    )
+    maximum_added_pages = _integer(data, "maximum_added_pages", "documentation", default=0)
     if maximum_added_pages < 0:
         ConfigurationError.fail("documentation.maximum_added_pages must be non-negative")
     addition_exemptions = tuple(
@@ -551,6 +552,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         "documentation",
         "pull_request",
         "commit_message",
+        "makefiles",
     }
     required = {"repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
@@ -581,6 +583,56 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         commit_message=parse_commit_message(data["commit_message"])
         if "commit_message" in data
         else CommitMessageConfig(),
+        makefile_exceptions=_makefile_exceptions(data["makefiles"]) if "makefiles" in data else (),
+    )
+
+
+def _makefile_exceptions(value: object) -> tuple[MakefileException, ...]:
+    data = _mapping(value, "makefiles")
+    _strict_keys(data, {"exceptions"}, set(), "makefiles")
+    records = _list(data.get("exceptions", []), "makefiles.exceptions")
+    if len(records) > _MAX_EXCEPTIONS:
+        ConfigurationError.fail(f"makefiles may contain at most {_MAX_EXCEPTIONS} exceptions")
+    exceptions = tuple(_makefile_exception(item, index) for index, item in enumerate(records))
+    paths = tuple(item.path for item in exceptions)
+    if len(paths) != len(set(paths)):
+        ConfigurationError.fail("makefiles.exceptions contains duplicate paths")
+    return exceptions
+
+
+def _makefile_exception(value: object, index: int) -> MakefileException:
+    context = f"makefiles.exceptions[{index}]"
+    data = _mapping(value, context)
+    fields = {"path", "max_lines", "owner", "reason", "issue", "created_on", "expires_on"}
+    _strict_keys(data, fields, fields, context)
+    raw_path = _string(data, "path", context)
+    path = canonical_path(raw_path)
+    if path != raw_path or any(character in path for character in "*?[]"):
+        ConfigurationError.fail(f"{context}.path must be an exact canonical path without globs")
+    max_lines = _integer(data, "max_lines", context, default=0)
+    if max_lines < 0:
+        ConfigurationError.fail(f"{context}.max_lines must be non-negative")
+    if any(not _string(data, key, context).strip() for key in ("owner", "reason", "issue")):
+        ConfigurationError.fail(f"{context}.owner, reason and issue must contain text")
+    created_on = _string(data, "created_on", context)
+    expires_on = _string(data, "expires_on", context)
+    if not _DATE.fullmatch(created_on) or not _DATE.fullmatch(expires_on):
+        ConfigurationError.fail(f"{context}.created_on and expires_on must be YYYY-MM-DD")
+    try:
+        created_date = date.fromisoformat(created_on)
+        expiry_date = date.fromisoformat(expires_on)
+    except ValueError:
+        ConfigurationError.fail(f"{context}.created_on and expires_on must be YYYY-MM-DD")
+    if expiry_date < created_date or expiry_date - created_date > _MAX_EXCEPTION_DURATION:
+        ConfigurationError.fail(f"{context} must expire within 90 days of created_on")
+    return MakefileException(
+        path=path,
+        max_lines=max_lines,
+        owner=_string(data, "owner", context),
+        reason=_string(data, "reason", context),
+        issue=_string(data, "issue", context),
+        created_on=created_on,
+        expires_on=expires_on,
     )
 
 

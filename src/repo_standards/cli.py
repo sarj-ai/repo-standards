@@ -88,6 +88,7 @@ from repo_standards.pull_request._inputs import (
     resolve_github_pull_request_inputs,
     resolve_local_pull_request_inputs,
 )
+from repo_standards.repository.comparison import with_makefile_comparison
 from repo_standards.rest import (
     InstrumentationDetectionReport,
     TrackedFile as RestTrackedFile,
@@ -1758,6 +1759,12 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
     mode: Annotated[Mode, typer.Option()] = Mode.STRICT,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
     as_of: Annotated[str | None, typer.Option(help="Deterministic YYYY-MM-DD")] = None,
+    base: Annotated[
+        str | None,
+        typer.Option(
+            "--base", help="Compare Makefile paths and lines to this commit; staged uses HEAD."
+        ),
+    ] = None,
     staged: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - Typer option
         bool,
         typer.Option(
@@ -1783,16 +1790,21 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
             as_of=as_of,
             staged=staged,
             enabled_rule_ids=tuple(enable_rule or ()),
+            base_revision=base,
         )
     )
 
 
 @app.command("report")
-def report_command(
+def report_command(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - Typer CLI boundary
     root: Annotated[Path, typer.Argument()] = Path(),
     manifest: Annotated[str, typer.Option()] = ".repo-standards/repository.toml",
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
     as_of: Annotated[str | None, typer.Option(help="Deterministic YYYY-MM-DD")] = None,
+    base: Annotated[
+        str | None,
+        typer.Option("--base", help="Compare Makefile paths and lines to this commit."),
+    ] = None,
     enable_rule: Annotated[
         list[str] | None,
         typer.Option(
@@ -1812,6 +1824,7 @@ def report_command(
             as_of=as_of,
             staged=False,
             enabled_rule_ids=tuple(enable_rule or ()),
+            base_revision=base,
         )
     )
 
@@ -1826,6 +1839,7 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
     as_of: str | None,
     staged: bool,
     enabled_rule_ids: tuple[str, ...],
+    base_revision: str | None,
 ) -> int:
     command = "report" if mode is Mode.REPORT else "check"
     baseline_state: Mapping[str, object] = {
@@ -1844,6 +1858,7 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
             as_of=as_of,
             staged=staged,
             enabled_rule_ids=enabled_rule_ids,
+            base_revision=base_revision,
         )
     except ConfigurationError as error:
         report = _incomplete(SarjPolicy.policy_id, mode, str(error))
@@ -1900,6 +1915,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     as_of: str | None,
     staged: bool,
     enabled_rule_ids: tuple[str, ...],
+    base_revision: str | None,
 ) -> _CompletedAnalysis:
     try:
         resolved_root = root.resolve(strict=True)
@@ -1916,23 +1932,30 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         if mode is Mode.RATCHET and "baseline" in str(error):
             raise BaselineError(str(error)) from error
         raise
+    if snapshot.manifest.enabled_rules and enabled_rule_ids:
+        ConfigurationError.fail("manifest enabled_rules cannot be combined with --enable-rule")
+    enabled_rules = activated_rule_ids(
+        snapshot.manifest.enabled_rules or enabled_rule_ids,
+        current_rules=frozenset(RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()),
+    )
+    evaluation_date = _parse_date(as_of)
+    snapshot = with_makefile_comparison(
+        resolved_root,
+        snapshot,
+        enabled_rules=enabled_rules,
+        base_revision=base_revision,
+        as_of=evaluation_date,
+    )
     repository_diagnostics = (
         policy.evaluate_repository(snapshot) if isinstance(policy, RepositoryPolicy) else ()
     )
-    if snapshot.manifest.enabled_rules and enabled_rule_ids:
-        ConfigurationError.fail("manifest enabled_rules cannot be combined with --enable-rule")
     report = analyze(
         snapshot.manifest,
         policy,
         mode=mode,
-        as_of=_parse_date(as_of),
+        as_of=evaluation_date,
         additional_diagnostics=repository_diagnostics,
-        enabled_rules=activated_rule_ids(
-            snapshot.manifest.enabled_rules or enabled_rule_ids,
-            current_rules=frozenset(
-                RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()
-            ),
-        ),
+        enabled_rules=enabled_rules,
     )
     report = replace(report, input_provenance=snapshot.provenance)
     if mode is not Mode.RATCHET:

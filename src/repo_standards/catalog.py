@@ -85,6 +85,7 @@ _RULE_SLUGS = types.MappingProxyType(
         "repository/artifacts/bespoke-iac-verifiers": "bespoke-iac-verifiers",
         "repository/artifacts/operational-script-tests": "operational-script-tests",
         "repository/artifacts/terraform-test-files": "terraform-test-files",
+        "repository/artifacts/makefile-growth": "makefile-growth",
         "repository/documentation/placement": "documentation-placement",
     }
 )
