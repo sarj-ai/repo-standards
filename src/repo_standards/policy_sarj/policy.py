@@ -330,8 +330,19 @@ RULES = (
         default_severity="warning",
         title="Do not add or grow Makefiles without a scoped exception",
         description=(
-            "New tracked Make artifacts and increases in each existing artifact's physical "
-            "line count require a documented, bounded path exception."
+            "Do not create Makefiles or grow existing ones without a scoped, documented exception. "
+            "Compare exact Git snapshots per path, counting comments, blank lines and an "
+            "unterminated final line; CRLF and LF count equally. New paths, including empty "
+            "files and move/copy destinations, require an exception. Equal size, shrinkage and "
+            "deletion pass; changes in one file do not offset another. Match Makefile, "
+            "GNUmakefile, Makecall, Makefile.*, GNUmakefile.* and *.mk case-insensitively; "
+            "exclude suffix variants ending in .md, .mdx, .rst, .adoc or .txt. Vendor, generated "
+            "and fixture paths have no automatic exemption. Arbitrary custom names and included "
+            "non-Make files "
+            "are outside this scope. Exact-path makefiles.exceptions records require max_lines, "
+            "owner, reason, issue, created_on and expires_on, with at most 90 days of validity. "
+            "Standalone exception use requires --as-of; the Code Standards bridge supplies UTC. "
+            "Baselines and generic diagnostic exceptions cannot authorize growth."
         ),
         why=(
             "Convenience wrappers duplicate native command interfaces and add maintenance "
@@ -340,7 +351,9 @@ RULES = (
         fix=(
             "Prefer existing native commands; remove redundant wrappers with their callers "
             "and preserve necessary contracts until safely migrated. Do not transfer aliases "
-            "into new task runners."
+            "into replacement scripts or task files. Use --base for branch-wide committed "
+            "comparisons; the local default covers the last commit and staged checks use HEAD. "
+            "Missing comparison objects produce incomplete analysis."
         ),
         taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
         examples=(

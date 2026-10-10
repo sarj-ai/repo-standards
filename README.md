@@ -10,9 +10,8 @@ and explicitly activated by a consumer.
   ownership, delivery/GitHub state, and repository-wide API/document sets—belong here.
 - Source and configuration semantics for Python, TypeScript, SQL, Terraform/HCL, Markdown,
   YAML, JSON, and shell belong in `sarj-ai/code-standards`.
-- If a tracked path or an exact Git comparison is sufficient to produce the finding, use
-  Repo Standards. If interpreting source or configuration semantics is necessary, use Code
-  Standards.
+- If a path alone is sufficient to produce the finding, use Repo Standards. If source content
+  is necessary, use Code Standards.
 
 After a rule is approved, activate its stable ID in `.repo-standards/repository.toml`:
 
@@ -22,58 +21,6 @@ enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]
 
 The locked Repo Standards release supplies the current reviewed implementation. Manifests and
 one-off `--enable-rule` checks select current rules by stable, versionless ID.
-
-## Makefile concision
-
-Do not add Makefiles or grow existing ones without a scoped exception. Prefer existing native
-commands; remove redundant wrappers after updating their callers. Do not transfer aliases into
-new scripts or task runners. Preserve CI, hosting, database isolation, image/runtime flags, and
-reviewed Terraform plan contracts until their callers are safely migrated.
-
-`repository/artifacts/makefile-growth` starts as a warning and remains disabled pending its
-separate approval review and explicit consumer activation. It compares exact Git snapshots,
-without executing Make or inferring whether a target is used. The executable JSON examples map
-repository paths to their physical line counts in `base` and `head`.
-
-The rule covers case-insensitive `Makefile`, `GNUmakefile`, `Makecall`, `Makefile.*`,
-`GNUmakefile.*`, and `*.mk` names. Suffix variants ending in `.md`, `.mdx`, `.rst`, `.adoc`, or
-`.txt` are documentation exclusions. Tracked vendor, generated, and fixture paths receive no
-automatic exemption. Arbitrarily named Make inputs are outside this filename-based check.
-
-Each new path requires an exception, including an empty file or a move/copy destination.
-Existing files may stay the same size, shrink, or be deleted. Comments and blank lines count;
-CRLF is one line terminator, and an unterminated final line still counts. Deleting one file
-cannot offset growth in another. Same-size rewrites still require ordinary review for behavioral
-safety.
-
-Standalone checks accept an explicit comparison base:
-
-```bash
-repo-standards check . --base origin/main --enable-rule repository/artifacts/makefile-growth
-```
-
-Staged checks compare `HEAD` with the index. Without `--base`, committed-tree checks compare the
-last commit with its first parent; this does not establish a whole-PR result. CI supplies its
-event comparison base. Only a proven root commit or unborn index has an empty base; unavailable
-history produces incomplete analysis.
-
-Document a necessary contract in the candidate repository manifest, reviewed in the same PR:
-
-```toml
-[[makefiles.exceptions]]
-path = "Makefile"
-max_lines = 24
-owner = "@example/build"
-reason = "The hosting provider still invokes this target while its build command is migrated."
-issue = "https://github.com/example/project/issues/123"
-created_on = "2026-10-09"
-expires_on = "2027-01-07"
-```
-
-An exception authorizes only its exact path up to its line ceiling, for at most 90 days. The
-Code Standards bridge supplies the UTC assessment date; standalone exception checks require
-`--as-of YYYY-MM-DD`. Keep necessary existing files without creating blanket legacy allowances.
-Baselines and generic diagnostic exceptions cannot authorize Makefile growth.
 
 ## Run it
 
@@ -259,8 +206,7 @@ Thresholds, labels, comments, and approval requirements remain consumer policy. 
 
 ## Safety model
 
-- Repository contents come from exact Git trees or the exact staged index; Makefile comparisons
-  inspect both the selected candidate and its comparison base.
+- Repository contents come from one exact Git tree.
 - Workflow YAML and API descriptions are parsed as inert data.
 - Missing required evidence produces an inconclusive result rather than a false pass.
 - Advisory commit-history analysis reports incomplete evidence without blocking local commits.
