@@ -40,14 +40,14 @@ def test_makefile_metadata_records_verified_policy_preference_without_activation
     rule = next(item for item in RULES if item.rule_id == RULE_ID)
     governance = next(item for item in POLICY_SPEC.rule_governance if item.rule_id == RULE_ID)
 
-    assert rule.version == 1
-    assert rule.default_severity == "warning"
-    assert POLICY_SPEC.policy_version == 19
-    assert governance.maturity is RuleMaturity.WARNING
+    assert rule.version == 2
+    assert rule.default_severity == "error"
+    assert POLICY_SPEC.policy_version == 20
+    assert governance.maturity is RuleMaturity.STABLE_ERROR
     assert governance.classification is RuleClassification.JUDGMENT
     assert governance.evidence == "verified"
     assert {example.language for example in rule.examples} == {"json"}
-    assert {example.expected_severity for example in rule.examples} == {"warning"}
+    assert {example.expected_severity for example in rule.examples} == {"error"}
 
 
 def test_makefile_example_fixture_rejects_path_only_input() -> None:

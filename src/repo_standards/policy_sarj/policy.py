@@ -326,8 +326,8 @@ RULES = (
     ),
     Rule(
         rule_id=MAKEFILE_GROWTH_RULE_ID,
-        version=1,
-        default_severity="warning",
+        version=2,
+        default_severity="error",
         title="Do not add or grow Makefiles without a scoped exception",
         description=(
             "Do not create Makefiles or grow existing ones without a scoped, documented exception. "
@@ -363,7 +363,7 @@ RULES = (
                 language="json",
                 before='{"base":{"Makefile":2},"head":{"Makefile":3}}',
                 after='{"base":{"Makefile":2},"head":{"Makefile":2}}',
-                expected_severity="warning",
+                expected_severity="error",
             ),
             _example(
                 example_id="sarj-artifact-new-empty-makefile",
@@ -371,7 +371,7 @@ RULES = (
                 language="json",
                 before='{"base":{},"head":{"tools/Makefile":0}}',
                 after='{"base":{},"head":{}}',
-                expected_severity="warning",
+                expected_severity="error",
             ),
         ),
     ),
@@ -458,7 +458,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=19,
+    policy_version=20,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
