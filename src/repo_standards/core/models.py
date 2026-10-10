@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from enum import StrEnum
 from typing import ClassVar, Literal, NewType, Protocol, runtime_checkable
 
@@ -74,6 +75,17 @@ class ExceptionRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class MakefileException:
+    path: str
+    max_lines: int
+    owner: str
+    reason: str
+    issue: str
+    created_on: str
+    expires_on: str
+
+
+@dataclass(frozen=True, slots=True)
 class DocumentationConfig:
     entrypoints: tuple[str, ...]
     maximum_added_pages: int = 0
@@ -136,6 +148,7 @@ class Manifest:
     documentation: DocumentationConfig | None = None
     pull_request: PullRequestConfig | None = None
     commit_message: CommitMessageConfig = field(default_factory=CommitMessageConfig)
+    makefile_exceptions: tuple[MakefileException, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +255,7 @@ class Diagnostic:
     related_locations: tuple[RelatedLocation, ...] = ()
     observed_value: JSONValue | None = None
     expected_value: JSONValue | None = None
+    baselineable: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,6 +367,26 @@ class InputProvenance:
     baseline_path: str | None = None
     baseline_object_id: GitObjectId | None = None
     baseline_digest: str | None = None
+    comparison_base_revision: str | None = None
+    comparison_base_tree_digest: str | None = None
+    comparison_basis: Literal["explicit", "last-commit", "staged", "empty"] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MakefileMetric:
+    path: str
+    object_id: str
+    lines: int
+
+
+@dataclass(frozen=True, slots=True)
+class MakefileComparison:
+    base_revision: str
+    base_tree_digest: str
+    basis: Literal["explicit", "last-commit", "staged", "empty"]
+    base_files: tuple[MakefileMetric, ...]
+    head_files: tuple[MakefileMetric, ...]
+    as_of: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,6 +412,7 @@ class RepositorySnapshot:
     baseline: Baseline | None
     inspection: RepositoryInspection
     provenance: InputProvenance
+    makefile_comparison: MakefileComparison | None = None
 
 
 @runtime_checkable

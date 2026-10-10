@@ -171,3 +171,39 @@ def test_calibration_refuses_broad_private_overlay_permissions(tmp_path: Path) -
 
     assert completed.returncode != 0
     assert "mode 0600" in completed.stderr
+
+
+def test_makefile_calibration_keeps_distinct_source_findings(tmp_path: Path) -> None:
+    finding_ids: list[str] = []
+    for index in range(2):
+        area = tmp_path / str(index)
+        area.mkdir()
+        repository, _corpus = _fixture(area)
+        (repository / "Makefile").write_text("check:\n\ttool check\n" if index else "")
+        _git(repository, "add", ".")
+        _git(
+            repository,
+            "-c",
+            "user.name=Rule Calibration",
+            "-c",
+            "user.email=rule-calibration@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "new Makefile",
+        )
+        result = _run(
+            "_worker",
+            "--root",
+            str(repository),
+            "--manifest",
+            str(area / "sidecar.toml"),
+            "--rule",
+            "repository/artifacts/makefile-growth",
+        )
+        payload = _JSON_OBJECT.validate_json(result.stdout)
+        findings = _JSON_OBJECTS.validate_python(payload["findings"])
+        assert len(findings) == 1
+        assert findings[0]["path"] == "Makefile"
+        finding_ids.append(str(findings[0]["finding_id"]))
+    assert finding_ids[0] != finding_ids[1]

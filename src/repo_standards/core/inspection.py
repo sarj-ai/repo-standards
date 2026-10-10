@@ -47,8 +47,8 @@ _MAX_TOTAL_SELECTED_BLOB_BYTES = 20_971_520
 _MAX_SELECTED_BLOBS = 100
 _UNBORN_REVISION = "0" * 40
 _GIT_TREE_FIELD_COUNT = 3
-_GIT_IDENTITY_FIELDS = 2
 _GIT_INDEX_FIELD_COUNT = 3
+_ASCII_CONTROL_LIMIT = 32
 _GIT_ENVIRONMENT = MappingProxyType(
     {
         "GIT_CONFIG_GLOBAL": os.devnull,
@@ -462,40 +462,8 @@ def _ownership_evidence_is_substantive(content: bytes | None) -> bool:
 
 
 def git_identity(root: Path) -> GitIdentity:
-    git_executable = shutil.which("git")
-    if git_executable is None:
-        ConfigurationError.fail("Git executable is unavailable")
-    try:
-        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed Git identity query
-            [
-                git_executable,
-                "--no-replace-objects",
-                "--no-lazy-fetch",
-                "--no-optional-locks",
-                "-C",
-                str(root),
-                "log",
-                "-1",
-                "--format=%H%n%T",
-                "--no-show-signature",
-                "HEAD",
-                "--",
-            ],
-            check=True,
-            capture_output=True,
-            timeout=30,
-            text=True,
-            env=_GIT_ENVIRONMENT,
-        )
-    except OSError, subprocess.SubprocessError:
-        ConfigurationError.fail("cannot resolve the inspected Git revision")
-    identities = result.stdout.splitlines()
-    if len(identities) != _GIT_IDENTITY_FIELDS or any(
-        re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value) is None for value in identities
-    ):
-        ConfigurationError.fail("cannot resolve the inspected Git revision and tree")
-    # Both identities come from one immutable commit object, even if HEAD moves.
-    return GitIdentity(source_revision=identities[0], tree_digest=identities[1])
+    # Resolve HEAD once, then read that immutable commit without traversing its history.
+    return git_revision_identity(root, "HEAD")
 
 
 def git_index_identity(root: Path) -> GitIdentity:
@@ -503,12 +471,119 @@ def git_index_identity(root: Path) -> GitIdentity:
     try:
         source_revision = git_identity(root).source_revision
     except ConfigurationError:
+        if not git_head_is_unborn(root):
+            raise
         source_revision = _UNBORN_REVISION
     return GitIdentity(
         source_revision=source_revision,
         tree_digest=digest,
         mode="git-index",
     )
+
+
+def git_head_is_unborn(root: Path) -> bool:
+    symbolic = _git_process(root, ["symbolic-ref", "--quiet", "HEAD"])
+    if symbolic.returncode != 0:
+        return False
+    ref = symbolic.stdout.strip()
+    if not ref.startswith("refs/heads/") or "\n" in ref:
+        return False
+    result = _git_process(root, ["show-ref", "--verify", "--quiet", "--", ref])
+    return result.returncode == 1
+
+
+def git_revision_identity(root: Path, revision: str) -> GitIdentity:
+    if (
+        not revision
+        or len(revision.encode("utf-8")) > _MAX_PATH_BYTES
+        or any(ord(character) < _ASCII_CONTROL_LIMIT for character in revision)
+    ):
+        ConfigurationError.fail("comparison base must be a bounded Git revision")
+    resolved = _git_process(
+        root, ["rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}"]
+    )
+    commit = resolved.stdout.strip()
+    if resolved.returncode != 0 or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit) is None:
+        ConfigurationError.fail("cannot resolve the comparison base commit; provide its Git object")
+    headers = _commit_headers(root, commit)
+    tree_header = next(
+        (line.removeprefix(b"tree ") for line in headers if line.startswith(b"tree ")), b""
+    )
+    try:
+        tree = tree_header.decode("ascii")
+    except UnicodeError:
+        ConfigurationError.fail("cannot read the comparison base tree identity")
+    if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", tree) is None:
+        ConfigurationError.fail("cannot read the comparison base tree identity")
+    return GitIdentity(commit, tree)
+
+
+def git_parent_identity(root: Path, identity: GitIdentity) -> GitIdentity | None:
+    # Read object headers: a shallow boundary with a missing parent is not a root commit.
+    headers = _commit_headers(root, identity.source_revision)
+    parent = next(
+        (line.removeprefix(b"parent ") for line in headers if line.startswith(b"parent ")), None
+    )
+    if parent is None:
+        return None
+    try:
+        revision = parent.decode("ascii")
+    except UnicodeError:
+        ConfigurationError.fail("inspected commit has an invalid parent identity")
+    return git_revision_identity(root, revision)
+
+
+def _commit_headers(root: Path, revision: str) -> tuple[bytes, ...]:
+    executable = shutil.which("git")
+    if executable is None:
+        ConfigurationError.fail("Git executable is unavailable")
+    payload = _bounded_git_payload(
+        [
+            executable,
+            "--no-replace-objects",
+            "--no-lazy-fetch",
+            "--no-optional-locks",
+            "-C",
+            str(root),
+            "cat-file",
+            "commit",
+            revision,
+        ],
+        noun="inspected commit parents",
+    )
+    headers = payload.partition(b"\n\n")[0]
+    if len(headers) > _MAX_METADATA_BYTES:
+        ConfigurationError.fail("commit headers exceed the 1 MiB safety limit")
+    return tuple(headers.splitlines())
+
+
+def tracked_files_for_identity(root: Path, identity: GitIdentity) -> tuple[TrackedBlob, ...]:
+    return _blobs_for_identity(root, identity)
+
+
+def _git_process(root: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    executable = shutil.which("git")
+    if executable is None:
+        ConfigurationError.fail("Git executable is unavailable")
+    try:
+        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - bounded inert Git object queries, without a shell
+            [
+                executable,
+                "--no-replace-objects",
+                "--no-lazy-fetch",
+                "--no-optional-locks",
+                "-C",
+                str(root),
+                *arguments,
+            ],
+            check=False,
+            capture_output=True,
+            timeout=30,
+            text=True,
+            env=_GIT_ENVIRONMENT,
+        )
+    except OSError, UnicodeError, subprocess.SubprocessError:
+        ConfigurationError.fail("cannot inspect the comparison Git object")
 
 
 def _blobs_for_identity(root: Path, identity: GitIdentity) -> tuple[TrackedBlob, ...]:

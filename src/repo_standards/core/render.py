@@ -132,7 +132,12 @@ def _related_location_dict(location: RelatedLocation) -> Mapping[str, object]:
 
 
 def input_provenance_dict(provenance: InputProvenance) -> Mapping[str, object]:
-    return asdict(provenance)
+    payload: dict[str, object] = asdict(provenance)
+    return {
+        key: value
+        for key, value in payload.items()
+        if not key.startswith("comparison_") or value is not None
+    }
 
 
 def ratchet_dict(comparison: RatchetComparison) -> Mapping[str, object]:

@@ -14,7 +14,9 @@ from typing import Annotated, NoReturn
 import typer
 
 from repo_standards.core.inspection import load_calibration_snapshot
+from repo_standards.core.rule_reviews import RuleVersion
 from repo_standards.policy_sarj.policy import SarjPolicy
+from repo_standards.repository.comparison import with_makefile_comparison
 
 
 _PRIVATE_MODE = 0o600
@@ -40,7 +42,7 @@ def _object(path: Path) -> dict[str, object]:
     _private_file(path, label="corpus overlay")
     try:
         value: object = json.loads(path.read_bytes())
-    except (OSError, ValueError):
+    except OSError, ValueError:
         _fail("corpus overlay must be valid JSON")
     if not isinstance(value, dict):
         _fail("corpus overlay must be a JSON object")
@@ -122,19 +124,35 @@ def _verify(sources: list[dict[str, str]]) -> None:
             _fail(f"corpus pin mismatch: {source['report_name']}")
 
 
-def _finding_id(rule_id: str, path: str, anchor: str) -> str:
-    return hashlib.sha256(f"{rule_id}\0{path}\0{anchor}".encode()).hexdigest()
+def _finding_id(rule_id: str, path: str, anchor: str, revision: str) -> str:
+    return hashlib.sha256(f"{revision}\0{rule_id}\0{path}\0{anchor}".encode()).hexdigest()
 
 
 def _worker(root: Path, manifest_path: Path, rule_id: str) -> int:
     snapshot = load_calibration_snapshot(root, manifest_path.read_bytes())
+    snapshot = with_makefile_comparison(
+        root,
+        snapshot,
+        enabled_rules=frozenset(
+            RuleVersion(rule.rule_id, rule.version)
+            for rule in SarjPolicy.rules()
+            if rule.rule_id == rule_id
+        ),
+        base_revision=None,
+        as_of=None,
+    )
     diagnostics = SarjPolicy.evaluate_repository(snapshot)
     selected = [item for item in diagnostics if item.rule_id == rule_id]
     payload = {
         "tracked_files": snapshot.inspection.tracked_file_count,
         "findings": [
             {
-                "finding_id": _finding_id(str(item.rule_id), item.path, item.manifest_anchor),
+                "finding_id": _finding_id(
+                    str(item.rule_id),
+                    item.path,
+                    item.manifest_anchor,
+                    snapshot.inspection.source_revision,
+                ),
                 "rule_id": str(item.rule_id),
                 "path": item.path,
                 "anchor": item.manifest_anchor,
