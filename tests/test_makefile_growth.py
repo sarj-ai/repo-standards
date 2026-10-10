@@ -283,6 +283,29 @@ def test_deletion_is_allowed(repository: Path) -> None:
     assert report.diagnostics == ()
 
 
+@pytest.mark.parametrize(("count", "size"), [(1, 5_242_881), (101, 1)])
+@pytest.mark.parametrize("staged", [True, False])
+@pytest.mark.parametrize("delete", [True, False])
+def test_blob_limits_apply_only_to_surviving_makefiles(
+    repository: Path, count: int, size: int, staged: bool, delete: bool
+) -> None:
+    paths = [repository / "Makefile", *(repository / f"{index}.mk" for index in range(count - 1))]
+    for path in paths:
+        path.write_bytes(b"#" * size)
+    base = _commit(repository)
+    if delete:
+        for path in paths:
+            path.unlink()
+    _git(repository, "add", "-A")
+    if not staged and delete:
+        _commit(repository)
+    report = analyze_repository(
+        RepositoryAnalysisRequest(root=repository, staged=staged, base_revision=base)
+    )
+    assert report.completion == ("complete" if delete else "incomplete")
+    assert report.diagnostics == ()
+
+
 def test_local_default_reports_only_last_commit(repository: Path) -> None:
     (repository / "Makefile").write_bytes(b"check:\n\ttool check\n# extra\n")
     previous = _commit(repository)
