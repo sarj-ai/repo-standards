@@ -57,12 +57,15 @@ def with_makefile_comparison(
     else:
         base = git_parent_identity(root, head)
         basis = "empty" if base is None else "last-commit"
+    head_files = _metrics(root, head)
     comparison = MakefileComparison(
         base_revision=base.source_revision if base else "0" * len(head.source_revision),
         base_tree_digest=base.tree_digest if base else "0" * len(head.source_revision),
         basis=basis,
-        base_files=_metrics(root, base) if base else (),
-        head_files=_metrics(root, head),
+        base_files=_metrics(root, base, frozenset(item.path for item in head_files))
+        if base
+        else (),
+        head_files=head_files,
         as_of=as_of,
     )
     return replace(
@@ -81,11 +84,13 @@ def _empty_revision(revision: str) -> bool:
     return len(revision) in {40, 64} and set(revision) == {"0"}
 
 
-def _metrics(root: Path, identity: GitIdentity) -> tuple[MakefileMetric, ...]:
+def _metrics(
+    root: Path, identity: GitIdentity, surviving: frozenset[str] | None = None
+) -> tuple[MakefileMetric, ...]:
     paths = tuple(
         blob.path
         for blob in tracked_files_for_identity(root, identity)
-        if is_makefile_path(blob.path)
+        if is_makefile_path(blob.path) and (surviving is None or blob.path in surviving)
     )
     return tuple(
         MakefileMetric(blob.path, blob.object_id, physical_lines(blob.content))
