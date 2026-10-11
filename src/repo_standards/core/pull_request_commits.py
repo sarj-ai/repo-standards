@@ -28,6 +28,8 @@ _MAXIMUM_SHA_PREFIX_LENGTH = 40
 _MAXIMUM_REVISION_BYTES = 1024
 _CONTROL_CHARACTER_LIMIT = 32
 _REVISION_METADATA_LINES = 3
+_MERGE_METADATA_LINES = 2
+_MERGE_PARENT_COUNT = 2
 _MAXIMUM_GIT_OUTPUT_BYTES = 16 * 1024 * 1024
 _GIT_TIMEOUT = timedelta(seconds=10)
 _READ_CHUNK_BYTES = 64 * 1024
@@ -189,8 +191,9 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
     )
     if len(commits) > MAXIMUM_ANALYZED_COMMITS:
         ConfigurationError.fail("pull-request history exceeds the 10000-commit safety limit")
-    exemption_id = _transition_exemption(
+    exemption_id = matching_transition_exemption(
         resolved,
+        base_object_id=base_object_id,
         head_object_id=head_object_id,
         repository_id=None if repository_id is None else RepositoryId(repository_id),
         base_ref=base_ref,
@@ -348,9 +351,10 @@ def _numbering_issue(commits: tuple[PullRequestCommit, ...]) -> NumberingIssue |
     return issue
 
 
-def _transition_exemption(  # ruff: ignore[too-many-arguments] - identity proof is conjunctive
+def matching_transition_exemption(  # ruff: ignore[too-many-arguments] - identity proof is conjunctive
     root: Path,
     *,
+    base_object_id: GitObjectId,
     head_object_id: GitObjectId,
     repository_id: RepositoryId | None,
     base_ref: str | None,
@@ -372,11 +376,48 @@ def _transition_exemption(  # ruff: ignore[too-many-arguments] - identity proof 
             continue
         _safe_revision(exemption.source_ref, name="source")
         source_object_id = _resolve_source(root, exemption.source_ref)
-        if not head_object_id.startswith(snapshot_prefix):
-            continue
-        if _is_ancestor(root, head_object_id, source_object_id):
+        snapshot = _transition_snapshot(root, base_object_id, head_object_id, snapshot_prefix)
+        if snapshot is not None and _is_ancestor(root, snapshot, source_object_id):
             return exemption.exemption_id
     return None
+
+
+def _transition_snapshot(
+    root: Path,
+    base: GitObjectId,
+    head: GitObjectId,
+    snapshot_prefix: str,
+) -> GitObjectId | None:
+    if head.startswith(snapshot_prefix):
+        return head
+    metadata = _git(
+        root,
+        "show",
+        "--no-patch",
+        "--format=%P%n%T",
+        head,
+        failure="Git could not inspect a refreshed transition",
+    ).splitlines()
+    if len(metadata) != _MERGE_METADATA_LINES:
+        return None
+    parents = metadata[0].split()
+    if len(parents) != _MERGE_PARENT_COUNT or parents[1].decode("ascii") != base:
+        return None
+    snapshot = GitObjectId(parents[0].decode("ascii"))
+    if not snapshot.startswith(snapshot_prefix):
+        return None
+    try:
+        merged_tree = _git(
+            root,
+            "merge-tree",
+            "--write-tree",
+            snapshot,
+            base,
+            failure="Transition parents do not merge cleanly",
+        ).strip()
+    except ConfigurationError:
+        return None
+    return snapshot if merged_tree == metadata[1] else None
 
 
 def _resolve_source(root: Path, source_ref: str) -> GitObjectId:
@@ -403,7 +444,7 @@ def _is_ancestor(root: Path, ancestor: GitObjectId, descendant: GitObjectId) -> 
             timeout=_GIT_TIMEOUT.total_seconds(),
             env=_GIT_ENVIRONMENT,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         ConfigurationError.fail("Git could not verify transition ancestry")
     if completed.returncode not in {0, 1}:
         ConfigurationError.fail("Git could not verify transition ancestry")

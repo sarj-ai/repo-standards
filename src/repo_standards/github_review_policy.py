@@ -999,8 +999,9 @@ def final_policy_decision(
     same_repository: bool,
     author_is_bot: bool,
     draft: bool,
+    transition_exempt: bool = False,
 ) -> FinalPolicyDecision:
-    if not policy_passed or tier != 0:
+    if not policy_passed or tier != 0 or (transition_exempt and same_repository and not draft):
         return FinalPolicyDecision(passed=policy_passed, reason=None)
     if not lane_enabled:
         return FinalPolicyDecision(passed=False, reason="review_optional_lane_disabled")
@@ -1133,6 +1134,7 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
         same_repository=same_repository,
         author_is_bot=author_is_bot,
         draft=snapshot.draft,
+        transition_exempt=summary.get("transition_exemption") is not None,
     )
     final_passed = decision.passed
     operational_reason = decision.reason

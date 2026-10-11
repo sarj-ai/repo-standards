@@ -275,21 +275,24 @@ def _review_policy_evidence(  # ruff: ignore[too-many-arguments] - focused fixtu
     return evidence
 
 
-def _promotion_evidence(
+def _promotion_evidence(  # ruff: ignore[too-many-arguments] - independent trusted identity and source evidence
     repository: Path,
     *,
     head: str,
     author_login: str = "release-automation[bot]",
     current_head: str | None = None,
     head_repository_id: int = 123,
+    source: str | None = None,
 ) -> Path:
+    snapshot = source or head
+    _git(repository, "update-ref", "refs/remotes/origin/dev", snapshot)
     return _review_policy_evidence(
         repository,
         head=head,
-        reviews=[{"reviewer": "human", "state": "approved", "commit_sha": head}],
+        reviews=[],
         body="",
         base_ref="preview",
-        head_ref=f"automation/promote-dev-{head[:12]}",
+        head_ref=f"automation/promote-dev-{snapshot[:12]}",
         author_is_bot=True,
         author_login=author_login,
         current_head=current_head,
@@ -527,7 +530,7 @@ def test_pull_request_review_policy_carries_approval_across_rebase(
     ]
 
 
-def test_pull_request_review_policy_transition_requires_one_review_and_skips_size_body(
+def test_pull_request_review_policy_verified_transition_skips_size_body_and_review(
     tmp_path: Path,
 ) -> None:
     base = _review_policy_fixture(tmp_path)
@@ -554,12 +557,57 @@ def test_pull_request_review_policy_transition_requires_one_review_and_skips_siz
     assert result.exit_code == 0, result.stdout
     payload = _json_object(result.stdout)
     summary = _object(payload["summary"])
-    assert summary["tier"] == 1
+    assert summary["tier"] == 0
     assert summary["transition_exemption"] == "promote"
     assert summary["missing_body_sections"] == []
     assert "transition_exemption" in summary["reasons"]  # type: ignore[operator]
     assert _object(payload["size"])["classification"] == "transition-exempt"
     assert payload["files"] == []
+
+
+def test_review_policy_accepts_a_verified_refreshed_promotion(tmp_path: Path) -> None:
+    original_base = _review_policy_fixture(tmp_path)
+    (tmp_path / "large.py").write_text("value = 1\n" * 900, encoding="utf-8")
+    _commit_changes(tmp_path)
+    source = _git(tmp_path, "rev-parse", "HEAD")
+    _git(tmp_path, "checkout", "--quiet", "--detach", original_base)
+    (tmp_path / "hotfix.txt").write_text("target hotfix\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    _git(tmp_path, "checkout", "--quiet", "--detach", source)
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=Repository Lint",
+        "-c",
+        "user.email=repository-lint@example.invalid",
+        "merge",
+        "--quiet",
+        "--no-ff",
+        "-m",
+        "Merge target",
+        base,
+    )
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _promotion_evidence(tmp_path, head=head, source=source)
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    summary = _object(_json_object(result.stdout)["summary"])
+    assert summary["transition_exemption"] == "promote"
+    assert summary["tier"] == 0
 
 
 @pytest.mark.parametrize(

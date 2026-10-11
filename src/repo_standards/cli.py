@@ -58,6 +58,7 @@ from repo_standards.core.pull_request_commits import (
     TransitionExemption,
     TransitionExemptionId,
     analyze_pull_request_commits,
+    matching_transition_exemption,
 )
 from repo_standards.core.pull_request_documentation import (
     PullRequestDocumentation,
@@ -667,6 +668,8 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                 "required_checks evidence must contain exactly the checks in the trusted manifest"
             )
         transition_exemption = _matching_review_policy_transition(
+            root=resolved_root,
+            base=GitObjectId(base),
             provider=provider,
             configured_pull_request=configured_pull_request,
         )
@@ -685,7 +688,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
             )
         else:
             size = None
-            counted_lines = configured.zero_review_below_counted_lines
+            counted_lines = 0
             changed_paths = ()
             missing_sections = ()
         reviews = tuple(
@@ -809,6 +812,8 @@ def _require_complete_review_policy_evidence(provider: _ReviewPolicyEvidenceInpu
 
 def _matching_review_policy_transition(
     *,
+    root: Path,
+    base: GitObjectId,
     provider: _ReviewPolicyEvidenceInput,
     configured_pull_request: PullRequestConfig,
 ) -> str | None:
@@ -821,17 +826,26 @@ def _matching_review_policy_transition(
     ):
         return None
     exemptions = set(review_policy.transition_exemptions)
-    for transition in configured_pull_request.commit_history.transitions:
-        expected_head_ref = (
-            f"{transition.head_prefix}{provider.evaluated_head_sha[: transition.sha_prefix_length]}"
-        )
-        if (
-            transition.transition_id in exemptions
-            and provider.base_ref == transition.base_ref
-            and provider.head_ref == expected_head_ref
-        ):
-            return transition.transition_id
-    return None
+    return matching_transition_exemption(
+        root,
+        base_object_id=base,
+        head_object_id=GitObjectId(provider.evaluated_head_sha),
+        repository_id=RepositoryId(str(provider.head_repository_id)),
+        base_ref=provider.base_ref,
+        head_ref=provider.head_ref,
+        exemptions=tuple(
+            TransitionExemption(
+                exemption_id=TransitionExemptionId(transition.transition_id),
+                repository_id=RepositoryId(str(provider.base_repository_id)),
+                source_ref=f"origin/{transition.source_ref}",
+                base_ref=transition.base_ref,
+                head_prefix=transition.head_prefix,
+                sha_prefix_length=transition.sha_prefix_length,
+            )
+            for transition in configured_pull_request.commit_history.transitions
+            if transition.transition_id in exemptions
+        ),
+    )
 
 
 def _review_policy_merge_ready(
