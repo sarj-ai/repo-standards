@@ -293,6 +293,75 @@ def test_verified_transition_bypasses_legacy_headers_even_within_limit(tmp_path:
     assert not result.commit_message_findings
 
 
+@pytest.mark.parametrize("damage", [None, "tree", "extra", "base", "source"])
+def test_refreshed_transition_requires_a_clean_source_target_merge(
+    tmp_path: Path,
+    damage: str | None,
+) -> None:
+    repository, original_base = _repository(tmp_path)
+    for index in range(6):
+        _commit(repository, f"promoted {index + 1}")
+    snapshot = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "branch", "dev", snapshot)
+    _git(repository, "checkout", "--quiet", "--detach", original_base)
+    target = _commit_new_file(repository, "hotfix.txt", "target hotfix")
+    _git(repository, "checkout", "--quiet", "--detach", snapshot)
+    _git(
+        repository,
+        "-c",
+        "user.name=Repository Standards",
+        "-c",
+        "user.email=repository-standards@example.invalid",
+        "merge",
+        "--quiet",
+        "--no-ff",
+        "-m",
+        "Merge target",
+        target,
+    )
+    head = _git(repository, "rev-parse", "HEAD")
+    if damage == "tree":
+        _commit_new_file(repository, "unattested.txt", "unattested change")
+        head = _git(
+            repository,
+            "-c",
+            "user.name=Repository Standards",
+            "-c",
+            "user.email=repository-standards@example.invalid",
+            "commit-tree",
+            _git(repository, "rev-parse", "HEAD^{tree}"),
+            "-p",
+            snapshot,
+            "-p",
+            target,
+            "-m",
+            "Changed merge tree",
+        )
+    elif damage == "extra":
+        head = _commit(repository, "extra change")
+    elif damage == "source":
+        _git(repository, "branch", "--force", "dev", original_base)
+    result = analyze_pull_request_commits(
+        repository,
+        base=original_base if damage == "base" else target,
+        head=head,
+        base_ref="preview",
+        head_ref=f"automation/promote-dev-{snapshot[:12]}",
+        repository_id="sarj-ai/bulbul",
+        transition_exemptions=(
+            TransitionExemption(
+                exemption_id=TransitionExemptionId("bulbul-dev-preview"),
+                repository_id=RepositoryId("sarj-ai/bulbul"),
+                source_ref="dev",
+                base_ref="preview",
+                head_prefix="automation/promote-dev-",
+            ),
+        ),
+    )
+    assert result.satisfied is (damage is None)
+    assert (result.exemption_id == "bulbul-dev-preview") is (damage is None)
+
+
 def test_transition_snapshot_allows_source_advance(tmp_path: Path) -> None:
     repository, base = _repository(tmp_path)
     _git(repository, "branch", "preview", base)

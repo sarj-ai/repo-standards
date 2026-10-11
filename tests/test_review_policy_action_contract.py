@@ -97,6 +97,33 @@ def test_non_tier_zero_runtime_gate_ignores_optional_lane() -> None:
     assert (decision.passed, decision.reason) == (True, None)
 
 
+@pytest.mark.parametrize(
+    ("policy_passed", "same_repository", "draft", "expected"),
+    [
+        (True, True, False, True),
+        (False, True, False, False),
+        (True, False, False, False),
+        (True, True, True, False),
+    ],
+)
+def test_verified_transition_runtime_gate(
+    policy_passed: bool,
+    same_repository: bool,
+    draft: bool,
+    expected: bool,
+) -> None:
+    decision = final_policy_decision(
+        policy_passed=policy_passed,
+        tier=0,
+        lane_enabled=False,
+        same_repository=same_repository,
+        author_is_bot=True,
+        draft=draft,
+        transition_exempt=True,
+    )
+    assert decision.passed is expected
+
+
 def test_failed_policy_stays_blocked_when_optional_lane_is_enabled() -> None:
     decision = final_policy_decision(
         policy_passed=False,
