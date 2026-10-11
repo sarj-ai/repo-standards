@@ -42,7 +42,7 @@ def test_makefile_metadata_records_verified_policy_preference_without_activation
 
     assert rule.version == 2
     assert rule.default_severity == "error"
-    assert POLICY_SPEC.policy_version == 20
+    assert POLICY_SPEC.policy_version == 21
     assert governance.maturity is RuleMaturity.STABLE_ERROR
     assert governance.classification is RuleClassification.JUDGMENT
     assert governance.evidence == "verified"

@@ -362,6 +362,10 @@ def pull_request_size_command(  # ruff: ignore[too-many-arguments,too-many-posit
     owned fixtures; preserve independent oracles, case isolation, and safety checks.
     Coverage percentages and test counts alone do not justify another case.
 
+    For maintained-code density, include production and test categories from the
+    existing JSON report, including support and configuration. Counted review
+    lines exclude tests; churn measures additions plus deletions, not net LOC.
+
     Source-semantic test-quality checks belong to Code Standards. Do not infer
     quality from a test filename, file length, or the excluded-line count.
     """

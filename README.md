@@ -201,6 +201,13 @@ and Bats conventions. Mark generated or machine-owned artifacts in the trusted b
 path/to/generated/** pr-size-excluded
 ```
 
+Counted lines measure the production review budget. A PR adding only 50 test lines has zero
+counted lines and 50 total changed lines. For maintained-code density, include handwritten tests,
+support, and configuration: use the existing JSON report's production and test categories,
+which expose additions and deletions. Churn is additions plus deletions; assess net retained LOC
+and the complete maintenance cost separately. A test's exclusion from the budget says nothing
+about its value, and a generated-file attribute does not prove generation ownership.
+
 Thresholds, labels, comments, and approval requirements remain consumer policy. Use
 `pull_request`, never `pull_request_target`; this metric is not a security gate.
 

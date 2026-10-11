@@ -22,6 +22,12 @@ from repo_standards.core.models import (
 from repo_standards.policy_sarj import SarjPolicy
 
 
+_PACKAGE_ROOT = "libraries/infra"
+_PACKAGE_TEST = "tests/test_inputs.py"
+_PYTHON_PACKAGE = ("python", "input-library")
+_NPM_PACKAGE = ("npm", "@example/input-library")
+
+
 def _snapshot(
     *paths: str,
     components: tuple[Component, ...] = (),
@@ -86,7 +92,7 @@ def _rule_ids(snapshot: RepositorySnapshot) -> list[RuleId]:
 def _root_package(
     ecosystem: str,
     path: str,
-    name: str,
+    name: str | None,
     *,
     workspace_root: bool,
 ) -> PackageEvidence:
@@ -298,6 +304,7 @@ def test_root_terraform_module_verifier_is_rejected() -> None:
         pytest.param("ci/contracts/preview.test.cjs", id="ci"),
         pytest.param("ops/preview.test.tsx", id="tsx-relocation"),
         pytest.param("iac/scripts/health-check.test.sh", id="shell"),
+        pytest.param("scripts/iac/tests/test_inputs.py", id="undeclared-operational-package"),
         pytest.param("deploy/policy.spec.jq", id="jq"),
         pytest.param(".github/actions/release/contract.test.cjs", id="github-action"),
         pytest.param(".github/workflows/release.spec.ts", id="github-workflow"),
@@ -653,6 +660,141 @@ def test_operational_root_precedes_declared_tool_ownership(
             )
         )
         == expected_rules
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "native_package", "evidence_path", "substantive", "prohibited"),
+    [
+        pytest.param("shared-library", _PYTHON_PACKAGE, "uv.lock", True, False, id="python-lock"),
+        pytest.param("application", _PYTHON_PACKAGE, "main.py", True, False, id="python-source"),
+        pytest.param("shared-library", _NPM_PACKAGE, "src/index.ts", True, False, id="npm-source"),
+        pytest.param(
+            "shared-library", _PYTHON_PACKAGE, None, True, True, id="nominal-package-only"
+        ),
+        pytest.param(
+            "shared-library", _PYTHON_PACKAGE, "uv.lock", False, True, id="empty-evidence"
+        ),
+        pytest.param(None, _PYTHON_PACKAGE, "uv.lock", True, True, id="undeclared-package"),
+        pytest.param(
+            "terraform-root", _PYTHON_PACKAGE, "uv.lock", True, True, id="operational-component"
+        ),
+        pytest.param("shared-library", ("python", None), "uv.lock", True, True, id="unnamed"),
+    ],
+)
+def test_declared_package_test_requires_native_evidence(
+    kind: str | None,
+    native_package: tuple[str, str | None],
+    evidence_path: str | None,
+    substantive: bool,
+    prohibited: bool,
+) -> None:
+    root = _PACKAGE_ROOT
+    ecosystem, identity = native_package
+    metadata = "package.json" if ecosystem == "npm" else "pyproject.toml"
+    package = _root_package(
+        ecosystem,
+        f"{root}/{metadata}",
+        identity,
+        workspace_root=False,
+    )
+    component = Component(
+        ComponentId("shared.input-library"),
+        kind or "shared-library",
+        root,
+        identity or "input-library",
+        capability="input-library",
+    )
+    artifact = "inputs.test.cjs" if ecosystem == "npm" else "test_inputs.py"
+    paths = [package.path, f"{root}/tests/{artifact}"]
+    if evidence_path is not None:
+        paths.append(f"{root}/{evidence_path}")
+    snapshot = _snapshot(*paths, components=(component,) if kind else (), packages=(package,))
+    if not substantive:
+        snapshot = _with_insubstantive_path(snapshot, f"{root}/{evidence_path}")
+    expected = [RuleId("repository/artifacts/operational-script-tests")] if prohibited else []
+    assert _rule_ids(snapshot) == expected
+
+
+@pytest.mark.parametrize(
+    ("root", "component_root", "artifact", "terraform_modules", "prohibited"),
+    [
+        pytest.param(_PACKAGE_ROOT, _PACKAGE_ROOT, _PACKAGE_TEST, (), False, id="exact-package"),
+        pytest.param(_PACKAGE_ROOT, "libraries", _PACKAGE_TEST, (), True, id="ancestor-component"),
+        pytest.param(
+            _PACKAGE_ROOT, _PACKAGE_ROOT, "src/test_inputs.py", (), True, id="source-location"
+        ),
+        pytest.param(
+            _PACKAGE_ROOT,
+            _PACKAGE_ROOT,
+            "deploy/tests/test_inputs.py",
+            (),
+            True,
+            id="package-deployment",
+        ),
+        pytest.param(
+            _PACKAGE_ROOT,
+            _PACKAGE_ROOT,
+            "tests/deploy/test_inputs.py",
+            (),
+            True,
+            id="nested-deployment",
+        ),
+        pytest.param(
+            "scripts/infra", "scripts/infra", _PACKAGE_TEST, (), True, id="top-operational-root"
+        ),
+        pytest.param(
+            ".github/actions/infra",
+            ".github/actions/infra",
+            _PACKAGE_TEST,
+            (),
+            True,
+            id="github-automation",
+        ),
+        pytest.param(
+            _PACKAGE_ROOT,
+            _PACKAGE_ROOT,
+            _PACKAGE_TEST,
+            (_PACKAGE_ROOT,),
+            True,
+            id="terraform-module",
+        ),
+        pytest.param(_PACKAGE_ROOT, _PACKAGE_ROOT, _PACKAGE_TEST, ("",), True, id="root-terraform"),
+    ],
+)
+def test_operational_boundaries_precede_declared_package_tests(
+    root: str,
+    component_root: str,
+    artifact: str,
+    terraform_modules: tuple[str, ...],
+    prohibited: bool,
+) -> None:
+    package = _root_package(
+        "python",
+        f"{root}/pyproject.toml",
+        "input-library",
+        workspace_root=False,
+    )
+    component = Component(
+        ComponentId("shared.input-library"),
+        "shared-library",
+        component_root,
+        "input-library",
+        capability="input-library",
+    )
+    expected = [RuleId("repository/artifacts/operational-script-tests")] if prohibited else []
+    assert (
+        _rule_ids(
+            _snapshot(
+                package.path,
+                f"{root}/uv.lock",
+                f"{root}/{artifact}",
+                components=(component,),
+                packages=(package,),
+                terraform_modules=terraform_modules,
+            )
+        )
+        == expected
     )
 
 
