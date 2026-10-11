@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14, <3.16"
 
 [[package]]
@@ -407,7 +407,7 @@ wheels = [
 
 [[package]]
 name = "repo-standards"
-version = "6.4.2"
+version = "6.4.3"
 source = { editable = "." }
 dependencies = [
     { name = "conventional-pre-commit" },

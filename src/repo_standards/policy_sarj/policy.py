@@ -265,11 +265,15 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/operational-script-tests"),
-        version=2,
+        version=3,
         default_severity="warning",
         title="Keep script tests out of operational trees",
         description=(
             "Executable script test/spec artifacts are prohibited in operational trees. "
+            "An exact declared nonoperational native package may own conventional tests "
+            "when substantive tracked lockfile or source-entrypoint evidence supports it. "
+            "This package exception excludes top-level operational roots, package-local "
+            "operational directories, GitHub automation, and native Terraform modules. "
             "Repository Standards owns this path boundary; semantic workflow analysis belongs "
             "in Code Standards."
         ),
@@ -377,12 +381,17 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/documentation/placement"),
-        version=3,
+        version=4,
         default_severity="error",
         title="Keep Markdown in durable owned locations",
         description="Tracked Markdown must have a durable documentation or tool-contract role.",
         why="Owned documentation stays discoverable instead of becoming repository debris.",
-        fix="Move durable guidance into an approved docs root or delete transient notes.",
+        fix=(
+            "Move durable guidance into an approved docs root or delete transient notes. "
+            "Before relocating required skill references, review the owning SKILL.md and "
+            "preserve its relative-path contract. This path-only rule does not resolve "
+            "Markdown references; a plugin or references directory alone proves no ownership."
+        ),
         taxonomy=taxonomy(CHANGE_SAFETY, DOCUMENTATION),
         examples=(
             _example(
@@ -458,7 +467,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=20,
+    policy_version=21,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -472,6 +481,12 @@ def _repository_artifact_diagnostics(
     snapshot: RepositorySnapshot,
 ) -> tuple[Diagnostic, ...]:
     package_test_roots = _owned_package_roots(snapshot)
+    tracked_files = {item.path: item.substantive for item in snapshot.inspection.tracked_files}
+    standalone_package_roots = frozenset(
+        _parent_path(project.path)
+        for project in snapshot.inspection.packages
+        if _has_standalone_package_evidence(project, _parent_path(project.path), tracked_files)
+    )
     document_package_roots = _DocumentPackageRoots(
         package_test_roots,
         _owned_python_import_roots(snapshot, package_test_roots),
@@ -480,7 +495,11 @@ def _repository_artifact_diagnostics(
     for tracked in snapshot.inspection.tracked_files:
         diagnostics.extend(
             _tracked_artifact_diagnostics(
-                snapshot, tracked.path, package_test_roots, document_package_roots
+                snapshot,
+                tracked.path,
+                package_test_roots,
+                document_package_roots,
+                standalone_package_roots,
             )
         )
     return tuple(
@@ -493,6 +512,7 @@ def _tracked_artifact_diagnostics(
     path: str,
     package_test_roots: frozenset[str],
     document_package_roots: _DocumentPackageRoots,
+    standalone_package_roots: frozenset[str],
 ) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
     component = _nearest_component(path, snapshot.manifest.components)
@@ -561,7 +581,9 @@ def _tracked_artifact_diagnostics(
         and (
             is_terraform_path
             or is_github_automation_path
-            or not _is_owned_tool_test(path, component, package_test_roots)
+            or not _is_owned_nonoperational_test(
+                path, component, package_test_roots, standalone_package_roots
+            )
         )
     )
     is_bespoke_verifier = basename in _RETIRED_IAC_VERIFIER_NAMES or (
@@ -667,6 +689,10 @@ def _tracked_artifact_diagnostics(
                         "Move durable guidance to an owned documentation surface or remove it."
                     ),
                     steps=(
+                        (
+                            "Review required relative references in the owning SKILL.md "
+                            "before moving them."
+                        ),
                         "Move durable guidance beneath docs, architecture, or adr.",
                         ("Delete transient plans, handoffs, summaries, and implementation notes."),
                     ),
@@ -923,10 +949,11 @@ def _is_owned_package_code_path(path: str, package_roots: frozenset[str]) -> boo
     return bool(parts) and parts[0].casefold() in owned_directories
 
 
-def _is_owned_tool_test(
+def _is_owned_nonoperational_test(
     path: str,
     component: Component | None,
     package_roots: frozenset[str],
+    standalone_package_roots: frozenset[str],
 ) -> bool:
     return (
         component is not None
@@ -934,6 +961,25 @@ def _is_owned_tool_test(
         and PurePosixPath(component.path).parts[:1] == ("tools",)
         and component.path in package_roots
         and _is_owned_package_test(path, package_roots)
+    ) or _is_owned_declared_package_test(path, component, standalone_package_roots)
+
+
+def _is_owned_declared_package_test(
+    path: str,
+    component: Component | None,
+    standalone_package_roots: frozenset[str],
+) -> bool:
+    return (
+        component is not None
+        and component.kind in _NON_OPERATIONAL_COMPONENT_KINDS
+        and component.path in standalone_package_roots
+        and component.path.partition("/")[0].casefold() not in _CONVENTIONAL_OPERATIONAL_ROOTS
+        and _is_owned_package_test(path, frozenset({component.path}))
+        and not _is_operational_path(
+            PurePosixPath(path).relative_to(component.path).as_posix(),
+            component=None,
+            terraform_modules=(),
+        )
     )
 
 
