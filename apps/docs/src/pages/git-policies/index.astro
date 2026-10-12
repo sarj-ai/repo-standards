@@ -9,7 +9,7 @@ const hookCommand = 'repo-standards commit-message .git/COMMIT_EDITMSG --fix-saf
 
 <ReferencePage
   title="Git policies"
-  description="Commit-message and pull-request history policies enforced outside the repository rule registry."
+  description="Commit-message, pull-request history, and pull-request description policies."
 >
   <article class="git-policies">
     <header class="section-heading">
@@ -40,6 +40,49 @@ const hookCommand = 'repo-standards commit-message .git/COMMIT_EDITMSG --fix-saf
         <p>Pull requests may contain up to five direct commits by default. Longer histories must use a complete, ordered <code>(1/N)</code> through <code>(N/N)</code> series.</p>
         <p>The local hook is advisory because it cannot know the final base and head refs. CI evaluates the direct commits in the submitted pull request.</p>
         <p><a href="/cli/#pull-request.commits">Pull-request commit command reference</a></p>
+      </section>
+    </div>
+
+    <header class="section-heading">
+      <p class="eyebrow">Pull-request descriptions</p>
+      <h2 id="pull-request-descriptions">Pull-request descriptions</h2>
+      <p class="lede">A reviewer should understand the change, its risk, and how to test it without opening the ticket.</p>
+    </header>
+
+    <div class="capability-grid git-policy-grid">
+      <section class="capability-card" aria-labelledby="required-body-sections">
+        <p class="data-line">review policy · CI authoritative</p>
+        <h2 id="required-body-sections">Required sections</h2>
+        <p>Each repository lists its required headings in <code>pull_request.review_policy.required_body_sections</code>. The review policy fails a pull request when one of them is missing or holds only HTML comments.</p>
+        <p>The <a href="/rules/pull-request-template-sections/"><code>repository/documentation/pull-request-template-sections</code></a> rule checks that the pull-request template has every required heading.</p>
+      </section>
+
+      <section class="capability-card" aria-labelledby="show-the-change">
+        <p class="data-line">picture · own section</p>
+        <h2 id="show-the-change">Show the change</h2>
+        <p>Put one small picture in its own section, not at the top of the body. Pick the smallest one that makes the point: pseudocode, a call tree, a component tree, a file tree, a Mermaid diagram, or a diff of one of these. Keep only the parts that changed and their direct neighbors.</p>
+        <p>For evidence, show before and after. A screenshot is best for a visual change. Next best is a test that failed before the change and passes after it.</p>
+      </section>
+
+      <section class="capability-card" aria-labelledby="door-and-qa">
+        <p class="data-line">risk · rollback</p>
+        <h2 id="door-and-qa">One-way or two-way door</h2>
+        <p>A two-way door is a change a revert undoes. A one-way door is a change a revert can't undo, such as deleted data, a migration, a public API change, or a message already sent. Say which one and why. For a one-way door, say how you would recover.</p>
+        <p>End the blast-radius section with numbered test steps a QA agent can follow: setup, one action per step, and what the tester should see.</p>
+      </section>
+
+      <section class="capability-card" aria-labelledby="writing-style">
+        <p class="data-line">prose · plain English</p>
+        <h2 id="writing-style">Writing style</h2>
+        <p>Use very simple language. Someone new to the team should understand what the change does from the body alone.</p>
+        <ul>
+          <li>Say what changes for the user or the caller before how the code does it: "Publish now shows an error", not "adds a validator".</li>
+          <li>Use short sentences with one idea each, in active voice.</li>
+          <li>Use plain words: "use", not "leverage".</li>
+          <li>Give the number or the mechanism, not a feeling: "p95 drops from 900 ms to 300 ms", not "much faster".</li>
+          <li>Cut filler and hedging. Write whole sentences, not arrows or shorthand.</li>
+          <li>Don't use em dashes or bold labels that repeat the line.</li>
+        </ul>
       </section>
     </div>
   </article>

@@ -407,12 +407,19 @@ class RepositoryInspection:
 
 
 @dataclass(frozen=True, slots=True)
+class PullRequestTemplate:
+    path: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
 class RepositorySnapshot:
     manifest: Manifest
     baseline: Baseline | None
     inspection: RepositoryInspection
     provenance: InputProvenance
     makefile_comparison: MakefileComparison | None = None
+    pull_request_templates: tuple[PullRequestTemplate, ...] = ()
 
 
 @runtime_checkable

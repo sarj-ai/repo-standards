@@ -34,6 +34,16 @@ def missing_required_body_sections(
     return tuple(missing)
 
 
+def missing_template_sections(
+    template: str,
+    required_sections: tuple[str, ...],
+) -> tuple[str, ...]:
+    titles = {heading.title for heading in _headings(_HTML_COMMENT.sub("", template).splitlines())}
+    return tuple(
+        required for required in required_sections if _normalized_title(required) not in titles
+    )
+
+
 def _headings(lines: list[str]) -> tuple[_Heading, ...]:
     headings: list[_Heading] = []
     fence: str | None = None

@@ -30,6 +30,10 @@ from repo_standards.core.taxonomy import (
 )
 
 from .makefiles import MAKEFILE_GROWTH_RULE_ID, makefile_diagnostics
+from .pull_request_templates import (
+    PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
+    pull_request_template_diagnostics,
+)
 from .spec import (
     PATH_TEMPLATES,
     PROFILE_ID,
@@ -403,6 +407,45 @@ RULES = (
             ),
         ),
     ),
+    Rule(
+        rule_id=PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Keep the PR template in sync with required sections",
+        description=(
+            "Each required PR section needs a heading in the PR template. "
+            "Required sections are listed in required_body_sections."
+        ),
+        why=(
+            "People write PRs from the template. "
+            "If a required heading is not there, their PR fails the check."
+        ),
+        fix="Add the missing heading to the PR template.",
+        taxonomy=taxonomy(CHANGE_SAFETY, DOCUMENTATION),
+        examples=(
+            _example(
+                example_id="sarj-documentation-pull-request-template-sections",
+                title="The PR template has no Test evidence heading",
+                language="json",
+                before=(
+                    '{"required":["What & why","Test evidence"],"template":"## What & why\\n"}'
+                ),
+                after=(
+                    '{"required":["What & why","Test evidence"],'
+                    '"template":"## What & why\\n\\n## Test evidence\\n"}'
+                ),
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-documentation-pull-request-template-absent",
+                title="There is no PR template",
+                language="json",
+                before='{"required":["What & why"],"template":null}',
+                after='{"required":["What & why"],"template":"## What & why\\n"}',
+                expected_severity="warning",
+            ),
+        ),
+    ),
 )
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
@@ -414,6 +457,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("repository/artifacts/terraform-test-files"): RuleClassification.OBJECTIVE,
         MAKEFILE_GROWTH_RULE_ID: RuleClassification.JUDGMENT,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
+        PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID: RuleClassification.OBJECTIVE,
     }
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
@@ -425,6 +469,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("repository/artifacts/terraform-test-files"): 47,
         MAKEFILE_GROWTH_RULE_ID: 48,
         RuleId("repository/documentation/placement"): 50,
+        PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID: 52,
     }
 )
 _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = MappingProxyType(
@@ -467,7 +512,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=21,
+    policy_version=22,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1058,6 +1103,10 @@ def _is_github_automation_path(path: str) -> bool:
     }
 
 
+def _rule(rule_id: RuleId) -> Rule:
+    return next(item for item in RULES if item.rule_id == rule_id)
+
+
 def _repository_diagnostic(  # ruff: ignore[too-many-arguments] - fields are explicit
     *,
     rule_id: RuleId,
@@ -1102,8 +1151,11 @@ class SarjPolicy:
 
     @staticmethod
     def evaluate_repository(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
-        diagnostics = _repository_artifact_diagnostics(snapshot)
+        diagnostics = _repository_artifact_diagnostics(snapshot) + (
+            pull_request_template_diagnostics(
+                snapshot, rule=_rule(PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID)
+            )
+        )
         if snapshot.makefile_comparison is None:
             return diagnostics
-        rule = next(item for item in RULES if item.rule_id == MAKEFILE_GROWTH_RULE_ID)
-        return diagnostics + makefile_diagnostics(snapshot, rule=rule)
+        return diagnostics + makefile_diagnostics(snapshot, rule=_rule(MAKEFILE_GROWTH_RULE_ID))
