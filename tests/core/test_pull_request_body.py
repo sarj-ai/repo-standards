@@ -1,4 +1,7 @@
-from repo_standards.core.pull_request_body import missing_required_body_sections
+from repo_standards.core.pull_request_body import (
+    missing_required_body_sections,
+    missing_template_sections,
+)
 
 
 REQUIRED = ("What & why", "QA impact / blast radius", "Manual test checklist")
@@ -40,3 +43,22 @@ Manual test checklist
 """
 
     assert missing_required_body_sections(body, REQUIRED) == ()
+
+
+def test_template_sections_need_headings_but_not_content() -> None:
+    template = """
+## **What & why**
+<!-- Explain the change. -->
+
+## qa impact / BLAST RADIUS:
+
+<!--
+## Manual test checklist
+-->
+
+```markdown
+## Manual test checklist
+```
+"""
+
+    assert missing_template_sections(template, REQUIRED) == ("Manual test checklist",)

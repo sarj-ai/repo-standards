@@ -27,6 +27,7 @@ from .models import (
     InventoryUnit,
     Manifest,
     PackageEvidence,
+    PullRequestTemplate,
     RepositoryInspection,
     RepositorySnapshot,
     TrackedFileEvidence,
@@ -46,6 +47,9 @@ _MAX_SELECTED_BLOB_BYTES = 5_242_880
 _MAX_TOTAL_SELECTED_BLOB_BYTES = 20_971_520
 _MAX_SELECTED_BLOBS = 100
 _UNBORN_REVISION = "0" * 40
+_PULL_REQUEST_TEMPLATE = re.compile(
+    r"(?:\.github/|docs/)?(?i:pull_request_template)(?:\.(?i:md|txt))?\Z"
+)
 _GIT_TREE_FIELD_COUNT = 3
 _GIT_INDEX_FIELD_COUNT = 3
 _ASCII_CONTROL_LIMIT = 32
@@ -254,6 +258,7 @@ def load_repository_snapshot(
         manifest=manifest,
         baseline=(parse_baseline_bytes(baseline_content) if baseline_content is not None else None),
         inspection=inspection,
+        pull_request_templates=_pull_request_templates(resolved, manifest, blobs),
         provenance=InputProvenance(
             mode=identity.mode,
             source_revision=identity.source_revision,
@@ -293,6 +298,7 @@ def load_calibration_snapshot(
         manifest=manifest,
         baseline=None,
         inspection=inspection,
+        pull_request_templates=_pull_request_templates(resolved, manifest, blobs),
         provenance=InputProvenance(
             mode=identity.mode,
             source_revision=identity.source_revision,
@@ -301,6 +307,23 @@ def load_calibration_snapshot(
             manifest_object_id=None,
             manifest_digest=_content_digest(manifest_content),
         ),
+    )
+
+
+def _pull_request_templates(
+    root: Path, manifest: Manifest, blobs: tuple[TrackedBlob, ...]
+) -> tuple[PullRequestTemplate, ...]:
+    if manifest.pull_request is None or manifest.pull_request.review_policy is None:
+        return ()
+    selected = tuple(blob for blob in blobs if _PULL_REQUEST_TEMPLATE.match(blob.path))
+    contents, issues = _read_metadata_batch(root, selected)
+    if issues:
+        ConfigurationError.fail("pull-request template exceeds the per-file safety limit")
+    return tuple(
+        PullRequestTemplate(
+            blob.path, _required_content(contents, blob).decode("utf-8", errors="replace")
+        )
+        for blob in selected
     )
 
 
