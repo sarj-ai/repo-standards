@@ -30,6 +30,7 @@ _INCOMPLETE_EXIT: Final = 2
 # and the merge queue starts a merge group as soon as that status turns green.
 _RUN_COMPLETION_TIMEOUT_SECONDS: Final = 300
 _RUN_COMPLETION_POLL_SECONDS: Final = 5
+_MAX_STACK_DEPTH: Final = 10
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}\Z")
 _MERGE_GROUP_REF = re.compile(
     r"refs/heads/gh-readonly-queue/(?P<base_ref>.+)/"
@@ -893,6 +894,82 @@ def merge_queue_head_sha(client: GitHubClient, number: int) -> str:
     return sha
 
 
+def queued_pull_request_at(
+    client: GitHubClient,
+    *,
+    base_ref: str,
+    sha: str,
+) -> MergeGroupPullRequest | None:
+    refs = client.request(
+        "GET",
+        f"/repos/{client.repository}/git/matching-refs/heads/gh-readonly-queue/{quote(base_ref)}/",
+    )
+    if not isinstance(refs, list):
+        raise ReconciliationError("merge queue refs response must be an array")
+    matches: list[MergeGroupPullRequest] = []
+    for raw in refs:
+        ref = _mapping(raw, "merge queue ref")
+        target = _mapping(ref.get("object"), "merge queue ref object")
+        if target.get("sha") != sha:
+            continue
+        entry = merge_group_pull_request(_string(ref.get("ref"), "merge queue ref name"))
+        if entry.base_ref == base_ref:
+            matches.append(entry)
+    if len(matches) > 1:
+        raise ReconciliationError(f"more than one merge queue entry builds {sha}")
+    return matches[0] if matches else None
+
+
+def queued_stack_block_reason(  # ruff: ignore[too-many-return-statements] - each refusal names one stack invariant
+    client: GitHubClient,
+    snapshot: PullRequestSnapshot,
+    *,
+    base_ref: str,
+    queue_parent_sha: str,
+    workflow_path: str,
+) -> str | None:
+    child = snapshot
+    parent_sha = queue_parent_sha
+    for _ in range(_MAX_STACK_DEPTH):
+        if child.base_ref == base_ref:
+            return None
+        entry = queued_pull_request_at(client, base_ref=base_ref, sha=parent_sha)
+        if entry is None:
+            return f"its base pull request is not queued directly below #{child.number}"
+        parent = pull_request_snapshot(client, entry.number)
+        if parent.state != "open":
+            return f"base pull request #{parent.number} is not open"
+        if (
+            parent.head_ref != child.base_ref
+            or parent.head_repository_id != child.base_repository_id
+        ):
+            return f"#{child.number} does not target the head branch of queued #{parent.number}"
+        if merge_queue_head_sha(client, parent.number) != parent_sha:
+            raise ReconciliationError(
+                f"stacked base pull request {parent.number} queue entry changed during reconciliation"
+            )
+        if not _contains_commit(client, head=child.head_sha, ancestor=parent.head_sha):
+            return f"#{child.number} does not contain the head of #{parent.number}; rebase it"
+        statuses = client.rest_pages(
+            f"/repos/{client.repository}/commits/{parent.head_sha}/statuses"
+        )
+        if not review_policy_status_passed(client, statuses, workflow_path=workflow_path):
+            return f"base pull request #{parent.number} has no passing review policy receipt"
+        child, parent_sha = parent, entry.parent_sha
+    return f"pull request stack is deeper than {_MAX_STACK_DEPTH}"
+
+
+def _contains_commit(client: GitHubClient, *, head: str, ancestor: str) -> bool:
+    comparison = _mapping(
+        client.request("GET", f"/repos/{client.repository}/compare/{ancestor}...{head}"),
+        "commit comparison",
+    )
+    behind_by = comparison.get("behind_by")
+    if not isinstance(behind_by, int) or isinstance(behind_by, bool) or behind_by < 0:
+        raise ReconciliationError("commit comparison behind_by must be a non-negative integer")
+    return behind_by == 0
+
+
 def reconcile_merge_group(
     *,
     client: GitHubClient,
@@ -926,24 +1003,27 @@ def reconcile_merge_group(
         target_url=_workflow_url(),
     )
     snapshot = pull_request_snapshot(client, number)
-    if snapshot.base_ref != base_ref:
-        raise ReconciliationError(
-            f"pull request {number} targets {snapshot.base_ref!r}, not merge-group base {base_ref!r}"
-        )
     if snapshot.state != "open":
         raise ReconciliationError(f"merge-group pull request {number} is not open")
     if merge_queue_head_sha(client, number) != head_sha:
         raise ReconciliationError(
             f"pull request {number} queue entry changed during reconciliation"
         )
+    stack_block = queued_stack_block_reason(
+        client,
+        snapshot,
+        base_ref=base_ref,
+        queue_parent_sha=queue_parent_sha,
+        workflow_path=workflow_path,
+    )
     statuses = client.rest_pages(f"/repos/{client.repository}/commits/{snapshot.head_sha}/statuses")
-    passed = review_policy_status_passed(
+    passed = stack_block is None and review_policy_status_passed(
         client,
         statuses,
         workflow_path=workflow_path,
     )
     refreshed = pull_request_snapshot(client, snapshot.number)
-    if refreshed.head_sha != snapshot.head_sha:
+    if refreshed.head_sha != snapshot.head_sha or refreshed.base_ref != snapshot.base_ref:
         raise ReconciliationError(
             f"pull request {snapshot.number} changed during merge-group reconciliation"
         )
@@ -957,11 +1037,12 @@ def reconcile_merge_group(
     )
     if refreshed_commit.get("sha") != head_sha:
         raise ReconciliationError("merge group changed during reconciliation")
-    description = (
-        f"Pull request {number} review policy receipt passed"
-        if passed
-        else f"Pull request {number} review policy receipt blocked"
-    )
+    if stack_block is not None:
+        description = f"Pull request {number} blocked: {stack_block}"
+    elif passed:
+        description = f"Pull request {number} review policy receipt passed"
+    else:
+        description = f"Pull request {number} review policy receipt blocked"
     post_status(
         client,
         head_sha=head_sha,
