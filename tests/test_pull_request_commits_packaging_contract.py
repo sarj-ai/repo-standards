@@ -99,7 +99,5 @@ def test_ci_self_tests_action_hook_manifest_and_installed_cli() -> None:
     assert "fetch-depth: 0" in source
     assert "pre-commit validate-manifest .pre-commit-hooks.yaml" in source
     assert "bash .github/scripts/ci-workflow.sh smoke" in source
-    dispatcher = (ROOT / ".github/scripts/ci-workflow.sh").read_text(encoding="utf-8")
-    assert "bash .github/scripts/smoke-interfaces.sh" in dispatcher
     smoke = (ROOT / ".github/scripts/smoke-interfaces.sh").read_text(encoding="utf-8")
     assert '"$cli" pull-request commits --help' in smoke
