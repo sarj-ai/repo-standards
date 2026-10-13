@@ -7,7 +7,7 @@ import subprocess
 import sys
 from typing import NotRequired, TypedDict
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 import pytest
 from typer.testing import CliRunner
 import yaml

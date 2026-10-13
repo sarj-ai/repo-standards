@@ -17,6 +17,10 @@ permissions:
   contents: read
   actions: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -57,22 +61,7 @@ jobs:
         if: steps.reviewed.outputs.reused != 'true'
         env:
           TEST_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
-        run: |
-          run_check() {
-            label="$1"; shift
-            started=$SECONDS
-            "$@" && result=0 || result=$?
-            printf '%s: %ss (exit %s)\n' "$label" "$((SECONDS - started))" "$result" >> "$GITHUB_STEP_SUMMARY"
-            return "$result"
-          }
-          run_check Ruff uv run --no-sync ruff check . & lint_pid=$!
-          run_check Typecheck uv run --no-sync basedpyright & types_pid=$!
-          run_check Tests uv run --no-sync python test_selection.py --run --base "$TEST_BASE" --report "$RUNNER_TEMP/test-plan.json" --summary "$GITHUB_STEP_SUMMARY" & tests_pid=$!
-          result=0
-          wait "$lint_pid" || result=1
-          wait "$types_pid" || result=1
-          wait "$tests_pid" || result=1
-          exit "$result"
+        run: bash .github/scripts/ci-workflow.sh python
       - name: Record successful full PR validation
         if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
         run: >-
@@ -164,26 +153,14 @@ jobs:
           FIXTURE_ROOT: ${{ runner.temp }}/repo-standards-fixture
           REPORT_PATH: ${{ runner.temp }}/repo-standards-report.json
           SMOKE_ENV: ${{ runner.temp }}/repo-standards-smoke
-        run: |
-          bash .github/scripts/smoke-interfaces.sh
-          mkdir -p "$FIXTURE_ROOT/.repo-standards"
-          cp tests/fixtures/smoke/.repo-standards/repository.toml \
-            "$FIXTURE_ROOT/.repo-standards/repository.toml"
-          git -C "$FIXTURE_ROOT" init --quiet
-          git -C "$FIXTURE_ROOT" add .
-          git -C "$FIXTURE_ROOT" -c user.name='Repository Lint' \
-            -c user.email='repository-lint@example.invalid' commit --quiet -m fixture
-          "$SMOKE_ENV/bin/repo-standards" report "$FIXTURE_ROOT" \
-            --format json > "$REPORT_PATH"
-          "$SMOKE_ENV/bin/python" -c \
-            'import json, os; from importlib.metadata import version; p=json.load(open(os.environ["REPORT_PATH"])); assert p["completion"] == "complete"; assert p["tool"]["version"] == version("repo-standards")'
+        run: bash .github/scripts/ci-workflow.sh smoke
       - name: Add consumer action size fixture
         env:
           FIXTURE_ROOT: ${{ runner.temp }}/repo-standards-fixture
         run: |
           mkdir -p "$FIXTURE_ROOT/tests"
-          printf 'assert True\n' > "$FIXTURE_ROOT/tests/test_fixture.py"
-          printf 'value = 1\n' > "$FIXTURE_ROOT/production.py"
+          printf 'assert True\n' >"$FIXTURE_ROOT/tests/test_fixture.py"
+          printf 'value = 1\n' >"$FIXTURE_ROOT/production.py"
           git -C "$FIXTURE_ROOT" add .
           git -C "$FIXTURE_ROOT" -c user.name='Repository Lint' \
             -c user.email='repository-lint@example.invalid' commit --quiet -m size-fixture
@@ -205,9 +182,7 @@ jobs:
           test "$TOTAL_LINES" = 2
       - name: Bind tested packages to exact main
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          printf '%s\n' "$GITHUB_SHA" > dist/repo-standards/SOURCE_COMMIT
+        run: bash .github/scripts/ci-workflow.sh bind dist/repo-standards
       - name: Keep immutable tested main packages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -241,13 +216,7 @@ jobs:
           cache: npm
           cache-dependency-path: apps/docs/package-lock.json
       - name: Install locked toolchains
-        run: |
-          uv sync --locked --python 3.15 --no-dev & python_pid=$!
-          npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund & node_pid=$!
-          result=0
-          wait "$python_pid" || result=1
-          wait "$node_pid" || result=1
-          exit "$result"
+        run: bash .github/scripts/ci-workflow.sh dependencies
       - name: Audit documentation dependency graph
         run: npm --prefix apps/docs audit --audit-level=high
       - name: Verify native TypeScript compiler
@@ -260,9 +229,7 @@ jobs:
           uv run --frozen --no-dev --group artifacts python -m repo_standards.verify_release_artifacts --site apps/docs/dist
       - name: Bind verified site to exact main
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          printf '%s\n' "$GITHUB_SHA" > apps/docs/dist/SOURCE_COMMIT
+        run: bash .github/scripts/ci-workflow.sh bind apps/docs/dist
       - name: Keep immutable verified main site
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

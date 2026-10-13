@@ -5,7 +5,7 @@ import re
 import tomllib
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic JSON/schema infrastructure validates open typed mappings, rather than a domain object.
 
 from .canonical import canonical_path
 from .errors import ConfigurationError

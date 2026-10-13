@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from jsonschema import Draft202012Validator, validate
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter, ValidationError  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 import pytest
 from typer.testing import CliRunner
 

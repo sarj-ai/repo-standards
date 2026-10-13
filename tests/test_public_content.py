@@ -5,7 +5,7 @@ import re
 import tomllib
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 import yaml
 
 from repo_standards.core.models import JSONValue

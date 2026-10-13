@@ -3,6 +3,7 @@ name: Standards
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
 
@@ -18,20 +19,26 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: '0.12.18'
+          version: '0.13.0'
           enable-cache: true
           cache-dependency-glob: |
             .sarj-standards.toml
             **/uv.lock
       - name: Install Python dependencies
         run: uv sync --locked
+      - name: Install the pinned native tool bootstrap
+        env:
+          UV_PYTHON_DOWNLOADS_JSON_URL: https://raw.githubusercontent.com/astral-sh/uv/4ecd0eff2a81e3ffdcd7cfee10d08936e4747c17/crates/uv-python-managed/download-metadata.json
+        run: uv run --no-config --no-project --python 3.15.0 --with code-standards==8.55.1 python -m sarj_standards.libs.adoption.native_bootstrap
+      - name: Install and attest applicable native tools
+        run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards setup --tools-only
       - name: Run standards
         env:
-          SARJ_STANDARDS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          SARJ_STANDARDS_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards check --trust-repository-code --format github

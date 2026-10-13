@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 from typer.testing import CliRunner
 
 from repo_standards.cli import BaseRepositoryId, HeadRepositoryId, app

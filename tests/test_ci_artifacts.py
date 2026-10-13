@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from zipfile import ZipFile
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 import pytest
 import yaml
 
