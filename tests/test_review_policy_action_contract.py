@@ -732,9 +732,6 @@ def _git_http_handler(project_root: Path) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:
             self._serve(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
 
-        def log_message(self, format: str, *args: object) -> None:  # ruff: ignore[builtin-argument-shadowing] - BaseHTTPRequestHandler signature
-            del format, args
-
         def _serve(self, body: bytes) -> None:
             if self.headers.get_all("Authorization") != [_basic(_TOKEN)]:
                 self.send_response(401)

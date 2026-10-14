@@ -318,11 +318,6 @@ def fetch_reviewed_commits(
     token: str,
     server_url: str,
 ) -> dict[str, str]:
-    """Fetch approved commits a force-push removed, returning why each unavailable one failed.
-
-    The checkout does not persist credentials, so a private repository needs the token passed to
-    this fetch alone. It travels in the environment, never in .git/config.
-    """
     reviewed = sorted(
         {
             commit_sha
@@ -359,8 +354,9 @@ def _fetch_environment(*, token: str, server_url: str) -> dict[str, str]:
     environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     if not token:
         return environment
-    # An empty value first clears a header actions/checkout persisted for the same URL, because
-    # GitHub rejects a request that carries two Authorization headers.
+    # The checkout persists no credentials, so the token reaches this fetch through the
+    # environment and never .git/config. An empty value first clears a header actions/checkout
+    # persisted for the same URL, because GitHub rejects two Authorization headers.
     key = f"http.{server_url.rstrip('/')}/.extraheader"
     credential = base64.b64encode(f"x-access-token:{token}".encode()).decode()
     count = int(environment.get("GIT_CONFIG_COUNT", "0"))
