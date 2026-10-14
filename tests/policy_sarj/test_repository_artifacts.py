@@ -312,11 +312,20 @@ def test_root_terraform_module_verifier_is_rejected() -> None:
         pytest.param("services/bell/deploy/preview.test.cjs", id="derived-terraform-root"),
     ],
 )
-def test_operational_script_tests_are_rejected(path: str) -> None:
+def test_operational_script_tests_require_contract_review(path: str) -> None:
     terraform_modules = ("services/bell/deploy",) if "services/bell/deploy" in path else ()
-    assert _rule_ids(_snapshot(path, terraform_modules=terraform_modules)) == [
+    diagnostics = SarjPolicy.evaluate_repository(
+        _snapshot(path, terraform_modules=terraform_modules)
+    )
+    assert [item.rule_id for item in diagnostics] == [
         RuleId("repository/artifacts/operational-script-tests")
     ]
+    assert diagnostics[0].severity == "warning"
+    assert "review its contract" in diagnostics[0].message
+    remediation = diagnostics[0].remediation
+    assert remediation is not None
+    assert "Retain tests" in remediation.steps[0]
+    assert "only after demonstrating equivalent existing coverage" in remediation.steps[1]
 
 
 @pytest.mark.parametrize(

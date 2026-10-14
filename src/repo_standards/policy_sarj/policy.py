@@ -269,11 +269,11 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/operational-script-tests"),
-        version=3,
+        version=4,
         default_severity="warning",
-        title="Keep script tests out of operational trees",
+        title="Review operational script tests for duplicate contracts",
         description=(
-            "Executable script test/spec artifacts are prohibited in operational trees. "
+            "Tracked script test/spec artifacts in operational trees are review candidates. "
             "An exact declared nonoperational native package may own conventional tests "
             "when substantive tracked lockfile or source-entrypoint evidence supports it. "
             "This package exception excludes top-level operational roots, package-local "
@@ -282,23 +282,24 @@ RULES = (
             "in Code Standards."
         ),
         why=(
-            "Bespoke deployment tests create parallel contracts that drift from "
-            "Terraform, providers, shared policy, and runtime behavior. Workflow contents are "
-            "outside this exact-tree rule's evidence boundary."
+            "Deployment tests can repeat contracts owned by Terraform, providers, shared "
+            "policy, or runtime behavior. Filenames and placement do not establish "
+            "redundancy or test value; workflow contents are outside this rule's evidence."
         ),
         fix=(
-            "Delete the operational test and every invocation. Moving or renaming it is not "
-            "remediation; express the invariant in Terraform, shared policy, provider state, "
-            "or runtime behavior."
+            "Review the asserted contract and existing checks. Remove a test and its "
+            "invocations only when existing coverage rejects the same wrong outcomes. "
+            "Retain distinct behavior and safety coverage; moving or renaming does not "
+            "resolve contract duplication."
         ),
         taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
         examples=(
             _example(
                 example_id="sarj-artifact-no-operational-script-tests",
-                title="Operational source-coupled test",
+                title="Operational test requiring contract review",
                 language="text",
                 before="iac/bell/preview-contract.test.ts",
-                after="Terraform validation, precondition, or shared policy",
+                after="Retained distinct coverage or an equivalent existing check",
                 expected_severity="warning",
             ),
         ),
@@ -512,7 +513,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=22,
+    policy_version=23,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -670,19 +671,22 @@ def _tracked_artifact_diagnostics(
                 component=component,
                 subject_kind="tracked-operational-script-test",
                 observed=path,
-                expected="no tracked operational script test artifact",
-                message="tracked operational script test creates a parallel contract",
+                expected="review operational script tests for redundant contracts",
+                message="tracked script test is in an operational tree; review its contract",
                 path=path,
                 remediation=Remediation(
-                    summary="Remove the operational test instead of relocating it.",
+                    summary="Review the asserted contract and existing coverage.",
                     steps=(
-                        "Delete the test and every workflow invocation.",
+                        "Retain tests that reject distinct behavior or safety regressions.",
                         (
-                            "Express durable safety in Terraform, shared policy, provider "
-                            "state, or runtime behavior."
+                            "Delete the test and its invocations only after demonstrating "
+                            "equivalent existing coverage; moving or renaming does not "
+                            "resolve duplication."
                         ),
                     ),
-                    validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    validation=(
+                        "Run focused tests for retained contracts and rerun repo-standards.",
+                    ),
                 ),
             )
         )
