@@ -15,6 +15,17 @@ elapsed time, duplicate locations, exclusions, blind spots, and exact reproducti
 cold and warm candidate runs with the same runner and corpus baseline. A new judgment-heavy rule may
 be recommended only as `ship-warning`; promotion is a later reviewed release.
 
+Run the developer-only helper from the repository root:
+
+```bash
+uv run python .agents/skills/repo-rule-authoring/scripts/calibrate_rules.py verify \
+  --corpus "$PRIVATE_CORPUS"
+uv run python .agents/skills/repo-rule-authoring/scripts/calibrate_rules.py evaluate \
+  --corpus "$PRIVATE_CORPUS" --rule RULE_ID --fixtures-passed \
+  --private-output /private/tmp/rule-private.json \
+  --public-output /private/tmp/rule-public.json
+```
+
 Corpus JSON shape:
 
 ```json
