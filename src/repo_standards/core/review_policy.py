@@ -344,7 +344,7 @@ def _carries_forward(
 ) -> bool:
     return (
         since_review is not None
-        and since_review.counted_lines < config.zero_review_below_lines
+        and since_review.counted_lines <= config.one_review_maximum_lines
         and not _touches_migration(
             changed_paths=since_review.changed_paths,
             migration_roots=config.migration_roots,
