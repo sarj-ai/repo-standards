@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import replace
+import base64
+from dataclasses import dataclass, replace
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import threading
+from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -30,6 +35,10 @@ from repo_standards.github_review_policy import (
     review_policy_status_passed,
     trusted_manifest,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 ROOT = Path(__file__).parents[1]
@@ -619,11 +628,18 @@ def test_comment_explains_each_earlier_approval() -> None:
                     "counted_lines_since_review": None,
                     "carried_forward": False,
                 },
+                {
+                    "reviewer": "22:gone",
+                    "commit_sha": "d" * 40,
+                    "counted_lines_since_review": None,
+                    "carried_forward": False,
+                },
             ]
         ),
         final_passed=True,
         lane_enabled=False,
         operational_reason=None,
+        unavailable={"d" * 40: "fatal: remote error: upload-pack: not our ref"},
     )
 
     assert (
@@ -632,6 +648,10 @@ def test_comment_explains_each_earlier_approval() -> None:
     ) in comment
     assert (
         f"- Earlier approval by @stale on `{'c' * 12}`: not measurable, **needs re-approval**\n"
+    ) in comment
+    assert (
+        f"- Earlier approval by @gone on `{'d' * 12}`: approved commit unavailable "
+        "(`fatal: remote error: upload-pack: not our ref`), **needs re-approval**\n"
     ) in comment
 
 
@@ -681,6 +701,170 @@ def test_force_pushed_approved_commit_is_fetched_by_object_id(tmp_path: Path) ->
         {"reviewer": "21:missing", "state": "approved", "commit_sha": "f" * 40},
     )
 
-    fetch_reviewed_commits(clone, reviews, head_sha=head)
+    unavailable = fetch_reviewed_commits(
+        clone, reviews, head_sha=head, token="", server_url="https://github.com"
+    )
 
     assert _git(clone, "cat-file", "-t", reviewed) == "commit"
+    assert set(unavailable) == {"f" * 40}
+    assert unavailable["f" * 40].startswith(("fatal:", "error:"))
+
+
+_TOKEN = "test-token"
+
+
+def _basic(token: str) -> str:
+    return "basic " + base64.b64encode(f"x-access-token:{token}".encode()).decode()
+
+
+@dataclass(frozen=True, slots=True)
+class _PrivateOrigin:
+    url: str
+    reviewed: str
+    head: str
+
+
+def _git_http_handler(project_root: Path) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self._serve(b"")
+
+        def do_POST(self) -> None:
+            self._serve(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+
+        def _serve(self, body: bytes) -> None:
+            if self.headers.get_all("Authorization") != [_basic(_TOKEN)]:
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="private"')
+                self.end_headers()
+                return
+            parsed = urlsplit(self.path)
+            backend = subprocess.run(
+                ["git", "http-backend"],
+                input=body,
+                capture_output=True,
+                check=True,
+                timeout=10,
+                env={
+                    "GIT_PROJECT_ROOT": str(project_root),
+                    "GIT_HTTP_EXPORT_ALL": "1",
+                    "PATH_INFO": parsed.path,
+                    "QUERY_STRING": parsed.query,
+                    "REQUEST_METHOD": self.command,
+                    "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+                    "GIT_PROTOCOL": self.headers.get("Git-Protocol", ""),
+                    "REMOTE_ADDR": "127.0.0.1",
+                },
+            )
+            head, _, payload = backend.stdout.partition(b"\r\n\r\n")
+            headers = [line.split(": ", 1) for line in head.decode().split("\r\n")]
+            status = next((int(value[:3]) for name, value in headers if name == "Status"), 200)
+            self.send_response(status)
+            for name, value in headers:
+                if name != "Status":
+                    self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(payload)
+
+    return Handler
+
+
+@pytest.fixture
+def private_origin(tmp_path: Path) -> Iterator[_PrivateOrigin]:
+    origin = tmp_path / "srv" / "origin.git"
+    origin.mkdir(parents=True)
+    _git(origin, "init", "--quiet")
+    _git(origin, "config", "uploadpack.allowAnySHA1InWant", "true")
+    base = _commit(origin, "base")
+    reviewed = _commit(origin, "reviewed")
+    _git(origin, "reset", "--quiet", "--hard", base)
+    head = _commit(origin, "rewritten")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _git_http_handler(origin.parent))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield _PrivateOrigin(
+            f"http://127.0.0.1:{server.server_address[1]}/origin.git", reviewed, head
+        )
+    finally:
+        server.shutdown()
+        thread.join()
+
+
+def _clone_without_credentials(origin: _PrivateOrigin, destination: Path) -> Path:
+    _git(
+        destination.parent,
+        "-c",
+        f"http.extraheader=AUTHORIZATION: {_basic(_TOKEN)}",
+        "clone",
+        "--quiet",
+        origin.url,
+        str(destination),
+    )
+    return destination
+
+
+def _approved(origin: _PrivateOrigin) -> tuple[dict[str, str | None], ...]:
+    return ({"reviewer": "20:reviewer", "state": "approved", "commit_sha": origin.reviewed},)
+
+
+def _server_url(origin: _PrivateOrigin) -> str:
+    return origin.url.removesuffix("/origin.git")
+
+
+def test_force_pushed_approved_commit_is_fetched_from_a_private_origin_with_the_token(
+    tmp_path: Path, private_origin: _PrivateOrigin
+) -> None:
+    clone = _clone_without_credentials(private_origin, tmp_path / "clone")
+
+    unavailable = fetch_reviewed_commits(
+        clone,
+        _approved(private_origin),
+        head_sha=private_origin.head,
+        token=_TOKEN,
+        server_url=_server_url(private_origin),
+    )
+
+    assert unavailable == {}
+    assert _git(clone, "cat-file", "-t", private_origin.reviewed) == "commit"
+    assert _TOKEN not in (clone / ".git" / "config").read_text(encoding="utf-8")
+
+
+def test_reviewed_commit_fetch_replaces_a_header_left_by_checkout(
+    tmp_path: Path, private_origin: _PrivateOrigin
+) -> None:
+    clone = _clone_without_credentials(private_origin, tmp_path / "clone")
+    _git(
+        clone,
+        "config",
+        f"http.{_server_url(private_origin)}/.extraheader",
+        f"AUTHORIZATION: {_basic('expired-token')}",
+    )
+
+    unavailable = fetch_reviewed_commits(
+        clone,
+        _approved(private_origin),
+        head_sha=private_origin.head,
+        token=_TOKEN,
+        server_url=_server_url(private_origin),
+    )
+
+    assert unavailable == {}
+    assert _git(clone, "cat-file", "-t", private_origin.reviewed) == "commit"
+
+
+def test_unauthenticated_reviewed_commit_fetch_reports_why_it_failed(
+    tmp_path: Path, private_origin: _PrivateOrigin
+) -> None:
+    clone = _clone_without_credentials(private_origin, tmp_path / "clone")
+
+    unavailable = fetch_reviewed_commits(
+        clone,
+        _approved(private_origin),
+        head_sha=private_origin.head,
+        token="",
+        server_url=_server_url(private_origin),
+    )
+
+    assert set(unavailable) == {private_origin.reviewed}
+    assert unavailable[private_origin.reviewed].startswith("fatal:")

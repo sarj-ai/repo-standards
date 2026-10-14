@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import json
@@ -314,7 +315,9 @@ def fetch_reviewed_commits(
     reviews: Sequence[Mapping[str, str | None]],
     *,
     head_sha: str,
-) -> None:
+    token: str,
+    server_url: str,
+) -> dict[str, str]:
     reviewed = sorted(
         {
             commit_sha
@@ -324,18 +327,47 @@ def fetch_reviewed_commits(
             and commit_sha != head_sha
         }
     )
+    environment = _fetch_environment(token=token, server_url=server_url)
+    unavailable: dict[str, str] = {}
     for revision in reviewed:
         present = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed executable and exact provider SHA
             ("git", "-C", str(root), "cat-file", "-e", f"{revision}^{{commit}}"),
             check=False,
             capture_output=True,
         )
-        if present.returncode != 0:
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed executable and exact provider SHA
-                ("git", "-C", str(root), "fetch", "--no-tags", "origin", revision),
-                check=False,
-                capture_output=True,
-            )
+        if present.returncode == 0:
+            continue
+        fetched = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed executable and exact provider SHA
+            ("git", "-C", str(root), "fetch", "--no-tags", "origin", revision),
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        if fetched.returncode != 0:
+            lines = [line for line in fetched.stderr.splitlines() if line.strip()]
+            unavailable[revision] = lines[-1].strip() if lines else "git fetch failed"
+    return unavailable
+
+
+def _fetch_environment(*, token: str, server_url: str) -> dict[str, str]:
+    environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    if not token:
+        return environment
+    # The checkout persists no credentials, so the token reaches this fetch through the
+    # environment and never .git/config. An empty value first clears a header actions/checkout
+    # persisted for the same URL, because GitHub rejects two Authorization headers.
+    key = f"http.{server_url.rstrip('/')}/.extraheader"
+    credential = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    count = int(environment.get("GIT_CONFIG_COUNT", "0"))
+    environment |= {
+        "GIT_CONFIG_COUNT": str(count + 2),
+        f"GIT_CONFIG_KEY_{count}": key,
+        f"GIT_CONFIG_VALUE_{count}": "",
+        f"GIT_CONFIG_KEY_{count + 1}": key,
+        f"GIT_CONFIG_VALUE_{count + 1}": f"AUTHORIZATION: basic {credential}",
+    }
+    return environment
 
 
 def trusted_manifest(
@@ -702,6 +734,7 @@ def render_comment(
     final_passed: bool,
     lane_enabled: bool,
     operational_reason: str | None,
+    unavailable: Mapping[str, str],
 ) -> str:
     summary = _summary(receipt)
     size = _mapping(receipt.get("size"), "review policy receipt size")
@@ -714,7 +747,7 @@ def render_comment(
     lane = "enabled" if lane_enabled else "disabled"
     earlier = receipt.get("earlier_approvals")
     earlier_lines = "".join(
-        _earlier_approval_line(_mapping(item, "earlier approval"))
+        _earlier_approval_line(_mapping(item, "earlier approval"), unavailable)
         for item in (earlier if isinstance(earlier, list) else ())
     )
     return (
@@ -734,11 +767,18 @@ def render_comment(
     )
 
 
-def _earlier_approval_line(approval: Mapping[str, object]) -> str:
+def _earlier_approval_line(approval: Mapping[str, object], unavailable: Mapping[str, str]) -> str:
     reviewer = str(approval.get("reviewer", "unknown")).rpartition(":")[2]
-    commit = str(approval.get("commit_sha", ""))[:12]
+    commit_sha = str(approval.get("commit_sha", ""))
+    commit = commit_sha[:12]
     lines = approval.get("counted_lines_since_review")
-    measured = "not measurable" if lines is None else f"{lines} counted lines since"
+    reason = unavailable.get(commit_sha)
+    if reason is not None:
+        measured = f"approved commit unavailable (`{reason}`)"
+    elif lines is None:
+        measured = "not measurable"
+    else:
+        measured = f"{lines} counted lines since"
     outcome = "carried forward" if approval.get("carried_forward") is True else "needs re-approval"
     return f"- Earlier approval by @{reviewer} on `{commit}`: {measured}, **{outcome}**\n"
 
@@ -1140,7 +1180,13 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
         )
         if collected.snapshot != snapshot:
             raise ReconciliationError("pull request changed before evidence collection completed")
-        fetch_reviewed_commits(root, collected.reviews, head_sha=snapshot.head_sha)
+        unavailable = fetch_reviewed_commits(
+            root,
+            collected.reviews,
+            head_sha=snapshot.head_sha,
+            token=github_token,
+            server_url=os.environ.get("GITHUB_SERVER_URL", "https://github.com"),
+        )
         evidence = {
             "schema_version": 1,
             "evaluated_head_sha": snapshot.head_sha,
@@ -1224,6 +1270,7 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
         final_passed=final_passed,
         lane_enabled=args.review_optional_enabled,
         operational_reason=operational_reason,
+        unavailable=unavailable,
     )
     upsert_comment(client, args.pr_number, comment)
     _write_step_summary(comment)

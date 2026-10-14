@@ -248,10 +248,10 @@ def test_stale_approval_does_not_count_toward_required_reviews() -> None:
     assert ReviewPolicyReason.APPROVALS_MISSING in result.reasons
 
 
-@pytest.mark.parametrize("lines", [0, 199])
-def test_approval_carries_forward_below_zero_review_threshold(lines: int) -> None:
+@pytest.mark.parametrize("lines", [0, 200, 800])
+def test_approval_carries_forward_up_to_two_review_threshold(lines: int) -> None:
     result = evaluate_review_policy(
-        _evidence(counted_lines=500, latest_human_reviews=(_earlier_approval(lines),))
+        _evidence(counted_lines=800, latest_human_reviews=(_earlier_approval(lines),))
     )
 
     assert result.current_human_approvals == 1
@@ -260,9 +260,9 @@ def test_approval_carries_forward_below_zero_review_threshold(lines: int) -> Non
     assert ReviewPolicyReason.STALE_APPROVAL not in result.reasons
 
 
-def test_approval_goes_stale_at_zero_review_threshold() -> None:
+def test_approval_goes_stale_above_two_review_threshold() -> None:
     result = evaluate_review_policy(
-        _evidence(counted_lines=500, latest_human_reviews=(_earlier_approval(200),))
+        _evidence(counted_lines=801, latest_human_reviews=(_earlier_approval(801),))
     )
 
     assert result.current_human_approvals == 0
@@ -271,16 +271,19 @@ def test_approval_goes_stale_at_zero_review_threshold() -> None:
     assert ReviewPolicyReason.APPROVAL_CARRIED_FORWARD not in result.reasons
 
 
-def test_carry_forward_follows_configured_zero_review_threshold() -> None:
+@pytest.mark.parametrize(("lines", "carried"), [(20, True), (21, False)])
+def test_carry_forward_follows_configured_two_review_threshold(
+    *, lines: int, carried: bool
+) -> None:
     policy = ReviewPolicyConfig(zero_review_below_lines=10, one_review_maximum_lines=20)
 
     result = evaluate_review_policy(
-        _evidence(counted_lines=15, latest_human_reviews=(_earlier_approval(10),)),
+        _evidence(counted_lines=20, latest_human_reviews=(_earlier_approval(lines),)),
         policy,
     )
 
-    assert not result.merge_ready
-    assert ReviewPolicyReason.STALE_APPROVAL in result.reasons
+    assert result.merge_ready is carried
+    assert (ReviewPolicyReason.STALE_APPROVAL in result.reasons) is not carried
 
 
 def test_migration_change_since_review_does_not_carry_forward() -> None:

@@ -484,8 +484,8 @@ def _rebased_after_review(repository: Path, *, edit_lines: int) -> RebasedReview
     ("edit_lines", "carried_forward", "reasons"),
     [
         (0, True, ["one_review_threshold", "approval_carried_forward"]),
-        (199, True, ["one_review_threshold", "approval_carried_forward"]),
-        (200, False, ["one_review_threshold", "stale_approval", "approvals_missing"]),
+        (500, True, ["one_review_threshold", "approval_carried_forward"]),
+        (801, False, ["two_review_threshold", "stale_approval", "approvals_missing"]),
     ],
 )
 def test_pull_request_review_policy_carries_approval_across_rebase(
