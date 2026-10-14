@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 2,
+  "provenance": {
+    "bundleVersion": "8.55.2",
+    "consumerBaseSha": "2c3b0aeb01c58fda389df435d9f4e702795cc980",
+    "catalogDigest": "58afa348a9b2f8e4dc8114afcfdbc5f13211ad83454662d22a6f05f3ebdeb152"
+  },
+  "diagnostics": [
+    {
+      "fingerprint": "0df69625305029b30875748b141b9c9e648b89401e9d57fa8a56952bed2f4396",
+      "source": "sarj-python-lint",
+      "ruleId": "fakes-in-shared-location",
+      "path": "tests/test_review_policy_stacked_merge_group.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "0cd327de08039ada22fa3e62d4a74090fa0cee56033a4d3c3b947ac5279f8887",
+      "source": "sarj-python-lint",
+      "ruleId": "no-any-mapping-types",
+      "path": "src/repo_standards/github_review_policy.py",
+      "count": 14
+    },
+    {
+      "fingerprint": "eb3958e8bf74d6b752c8d0317f11755366ad93fa7cff2d22188a4a939a2e01d5",
+      "source": "sarj-python-lint",
+      "ruleId": "no-any-mapping-types",
+      "path": "src/repo_standards/github_review_policy.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "a41e281cdc93915584b7f02938a32b17d9bdd12e1ed6fb6f2912a9a31c45b2a9",
+      "source": "sarj-python-lint",
+      "ruleId": "no-broad-keyword-capture",
+      "path": "tests/test_ci_artifacts.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "0b38534fba7b90d792a7b9b6d06e731ef2bff21b670cb2c2fed8115777e43047",
+      "source": "sarj-python-lint",
+      "ruleId": "no-broad-keyword-capture",
+      "path": "tests/test_review_policy_action_contract.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "5a4a564b36edf24c776b8ea67567524a5777482a63129eec746db33ea403bcb4",
+      "source": "sarj-python-lint",
+      "ruleId": "no-broad-keyword-capture",
+      "path": "tests/test_review_policy_action_contract.py",
+      "count": 7
+    },
+    {
+      "fingerprint": "586453350dd31c6139e12427cc83822e248531b0bb5145d43ae2dcb8a640bd46",
+      "source": "sarj-python-lint",
+      "ruleId": "no-broad-keyword-capture",
+      "path": "tests/test_review_policy_stacked_merge_group.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "9b08a42e7c254015360963f98ba8be7ee77308126cd05d3f89f05c8a07262c4d",
+      "source": "sarj-python-lint",
+      "ruleId": "no-broad-keyword-capture",
+      "path": "tests/test_review_policy_stacked_merge_group.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "21c7be8325f3e4ccae03db0312f9d00b1671040d490bb8f6537f3a61b7b2ab9b",
+      "source": "sarj-python-lint",
+      "ruleId": "no-broad-keyword-capture",
+      "path": "tests/test_test_selection.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "ccba24f720ee8e7d29b4aff69485f1383459f84c790ba0613adf86e8a40856e2",
+      "source": "sarj-python-lint",
+      "ruleId": "no-input-model-mutation",
+      "path": "src/repo_standards/catalog.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "0d0877299763c13e2e0e84d298b260005af8850b56468b4a291197fef125ed80",
+      "source": "sarj-python-lint",
+      "ruleId": "no-raw-source-text-test-oracle",
+      "path": "tests/test_pull_request_commits_packaging_contract.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "c4e541a368f3ae7867cd56ca98a2402aa440bb6094db3c509231f83af8cb9de3",
+      "source": "sarj-python-lint",
+      "ruleId": "no-raw-source-text-test-oracle",
+      "path": "tests/test_review_policy_action_contract.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "1b5af9d741538746d4134cf7829fc4ff8ba03d673c25f5ee7f390ac49f8f6a72",
+      "source": "sarj-python-lint",
+      "ruleId": "no-test-method-grafting",
+      "path": "tests/test_review_policy_action_contract.py",
+      "count": 6
+    },
+    {
+      "fingerprint": "229ee6557ea3043733c13ac33c5505c1eefeef4cf3821204bf3078c210f17906",
+      "source": "sarj-python-lint",
+      "ruleId": "no-test-method-grafting",
+      "path": "tests/test_review_policy_action_contract.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "f7b89dfe7d3924e4089926c7172e96210be584bc2cd889f941133acd196f0c85",
+      "source": "sarj-python-lint",
+      "ruleId": "no-test-method-grafting",
+      "path": "tests/test_review_policy_action_contract.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "0e9573e6b5285c038c7a18b6ba2ef780a0c793b5f6a3dab32287e995c580c58d",
+      "source": "sarj-python-lint",
+      "ruleId": "opaque-parametrize-case-needs-id",
+      "path": "tests/test_pull_request_documentation.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "d9321ad70b57f86d72425814a9c97f8f20d81869d522688fe5faea7cd1008471",
+      "source": "sarj-python-lint",
+      "ruleId": "opaque-parametrize-case-needs-id",
+      "path": "tests/test_pull_request_documentation.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "9a1e5a04d7234d481d39315e3b07879c985b4454607b02591af2c2a69e41ff71",
+      "source": "sarj-python-lint",
+      "ruleId": "opaque-parametrize-case-needs-id",
+      "path": "tests/test_review_policy_action_contract.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "d8e543b44c0b4eaab8349eafc281b861bd277101d37eba3666aeca55e0fd15fc",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-fstring-over-concat",
+      "path": "tests/test_test_selection.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "bf13e66452496a5ecb6d6cb31cf360830adb6b667cfa43c229a3e0db00665992",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-immutable-module-constant",
+      "path": "ci_artifacts.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "a8e4c2fca1db2e4bd9d1f7224443dd8ffbccd3421b56f781e8bc0cbd07370258",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-match-value-dispatch",
+      "path": "tests/test_ci_artifacts.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "f625ca64237577db18c60f4b45b8beb82d5f51c6b3867b01fdfd5b30cf95e6db",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-nominal-id-types",
+      "path": "src/repo_standards/catalog.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "bee32939fadf2b5fb2fecb3fd35edd3d41e03526a2440ff09b7ad1726299a1f4",
+      "source": "sarj-text-lint",
+      "ruleId": "workflow-embedded-program",
+      "path": ".github/workflows/ci.yml",
+      "count": 3
+    },
+    {
+      "fingerprint": "33e5fa37851c3f8add297cfa8012b47339401aa14e896a48ca09acd8cb167570",
+      "source": "sarj-text-lint",
+      "ruleId": "workflow-embedded-program",
+      "path": ".github/workflows/docs.yml",
+      "count": 3
+    },
+    {
+      "fingerprint": "5d1bce47f69ddf6d4c82cef10652d93ad8bb08c4df94c7acb69a5eb2eff7f7cb",
+      "source": "sarj-text-lint",
+      "ruleId": "workflow-embedded-program",
+      "path": ".github/workflows/publish.yml",
+      "count": 4
+    },
+    {
+      "fingerprint": "40c9153551ca01da24f6e8ed09af3b3715d75f1749c8eef075a985d44d95280f",
+      "source": "sarj-text-lint",
+      "ruleId": "workflow-embedded-program",
+      "path": "action.yml",
+      "count": 1
+    },
+    {
+      "fingerprint": "f45420363acdbe0a9fa0e8bc51e56e0b51cc8b780908e0ae7467634814003b45",
+      "source": "sarj-text-lint",
+      "ruleId": "workflow-embedded-program",
+      "path": "documentation/action.yml",
+      "count": 1
+    },
+    {
+      "fingerprint": "f7da881c4a56f166bd14a787ce19dfdb754cfd167db95edea993e35ed6db101e",
+      "source": "sarj-text-lint",
+      "ruleId": "workflow-embedded-program",
+      "path": "pull-request-review-policy/action.yml",
+      "count": 1
+    },
+    {
+      "fingerprint": "3716d44465bc44c4f0bf5ecbc44c430a531eb9e7be886d10147a08ed8295bc02",
+      "source": "shellcheck",
+      "ruleId": "SC2312",
+      "path": ".github/workflows/ci.yml",
+      "count": 3
+    },
+    {
+      "fingerprint": "94a0ec9f53495eff30df7816ccee1f44d4dad68548d07cd23ab95f1644b42fee",
+      "source": "shellcheck",
+      "ruleId": "SC2312",
+      "path": ".github/workflows/docs.yml",
+      "count": 1
+    },
+    {
+      "fingerprint": "f02454cf1e23ac1155b75f0a84949da0143d207fddf3c386ca2d3540a0b6bdb6",
+      "source": "shellcheck",
+      "ruleId": "SC2312",
+      "path": ".github/workflows/publish.yml",
+      "count": 2
+    },
+    {
+      "fingerprint": "1cecd28091ad1d894d4dfb4373292281605af3c498ac08661de2da44627a2938",
+      "source": "shfmt",
+      "ruleId": "format",
+      "path": ".github/scripts/smoke-interfaces.sh",
+      "count": 1
+    },
+    {
+      "fingerprint": "206853cc4aaa448b6582e62273ce36484e9a3ba42ca25aca1d1ad4aaaba33a33",
+      "source": "shfmt",
+      "ruleId": "format",
+      "path": ".github/scripts/verify-python.sh",
+      "count": 1
+    },
+    {
+      "fingerprint": "69697a81bd54766dcc04c31844fcb288f181cc522fc51daf250ce07671d84d75",
+      "source": "shfmt",
+      "ruleId": "format",
+      "path": ".github/scripts/verify-reference.sh",
+      "count": 1
+    },
+    {
+      "fingerprint": "c1b4f2122a0fb1b846e34d3047832495b1331f48a47108d17b7ddf6aaf9abe7d",
+      "source": "shfmt",
+      "ruleId": "format",
+      "path": ".github/workflows/docs.yml",
+      "count": 2
+    },
+    {
+      "fingerprint": "948aa6fd6f4f5c5048642b9a35630f5c8914748e20516a2e9a1fe3f18b6c6c5a",
+      "source": "shfmt",
+      "ruleId": "format",
+      "path": ".github/workflows/publish.yml",
+      "count": 1
+    },
+    {
+      "fingerprint": "67bf7aed5f40a032644cf32900b00f2c22661c40fef228833a36245e990cad6b",
+      "source": "shfmt",
+      "ruleId": "format",
+      "path": "action.yml",
+      "count": 1
+    },
+    {
+      "fingerprint": "def3300d03a7727242ea726befac955a45425fb42a91eb5650c1fa68e3f01f54",
+      "source": "shfmt",
+      "ruleId": "format",
+      "path": "documentation/action.yml",
+      "count": 1
+    }
+  ]
+}

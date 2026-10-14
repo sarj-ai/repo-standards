@@ -1,5 +1,5 @@
 # Managed by `code-standards setup`; commit this file.
-bundle = "8.13.3"
+bundle = "8.55.2"
 rule_profile = "all"
 schema = 4
 
@@ -13,6 +13,8 @@ disable = [
   "mobile-security",
   "zizmor",
   "checkov",
+  "jscpd",
+  "knip",
 ]
 
 [artifacts]
@@ -26,6 +28,9 @@ typescript = "apps/docs"
 
 [hooks]
 manager = "pre-commit"
+
+[baseline]
+diagnostics = "diagnostic-baseline.json"
 
 [ci]
 runner = "blacksmith-2vcpu-ubuntu-2404"

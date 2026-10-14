@@ -22,7 +22,7 @@ from typing import (
 )
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator  # ruff: ignore[banned-api] -- generic JSON/schema infrastructure validates open typed mappings, rather than a domain object.
 from typer.models import ArgumentInfo, CommandInfo, DefaultPlaceholder, OptionInfo, TyperInfo
 
 from repo_standards.core.canonical import canonical_json

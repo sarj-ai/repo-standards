@@ -8,7 +8,7 @@ import subprocess
 import sys
 from typing import NamedTuple
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 
 
 _SCRIPT = (

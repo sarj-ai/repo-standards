@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 import yaml
 
 
@@ -98,6 +98,6 @@ def test_ci_self_tests_action_hook_manifest_and_installed_cli() -> None:
     assert "uses: ./pull-request-commits" in source
     assert "fetch-depth: 0" in source
     assert "pre-commit validate-manifest .pre-commit-hooks.yaml" in source
-    assert "bash .github/scripts/smoke-interfaces.sh" in source
+    assert "bash .github/scripts/ci-workflow.sh smoke" in source
     smoke = (ROOT / ".github/scripts/smoke-interfaces.sh").read_text(encoding="utf-8")
     assert '"$cli" pull-request commits --help' in smoke

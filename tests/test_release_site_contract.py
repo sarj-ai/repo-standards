@@ -4,7 +4,7 @@ from copy import deepcopy
 from importlib.metadata import version
 from typing import TYPE_CHECKING, NamedTuple
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 import pytest
 
 from repo_standards.catalog import build_catalog, catalog_schema

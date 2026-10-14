@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from pydantic import ConfigDict, TypeAdapter
+from pydantic import ConfigDict, TypeAdapter  # ruff: ignore[banned-api] -- generic JSON/schema infrastructure validates open typed mappings, rather than a domain object.
 
 from .models import JSONValue
 
