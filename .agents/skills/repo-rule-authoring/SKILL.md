@@ -1,37 +1,28 @@
 ---
 name: repo-rule-authoring
-description: Propose, implement, and calibrate repo-standards lint rules when deterministic evidence, false-positive review, or pending-rule governance matters.
+description: Propose, implement, and calibrate repository-policy rules using deterministic Git-tree evidence and warning-first governance.
 ---
 
 # Repo rule authoring
 
-Use this skill for repository-policy rules, not ordinary application lint fixes.
+State `Routing: repo-standards, because <evidence>`. Source/configuration semantics
+belong in code-standards; filename, topology, ownership, and Git facts belong here.
 
-## Modes
+- **Propose:** read only. Return the defect, owner/gap, harm, overlap, labeled
+  cases, severity, limitations, and required authorization.
+- **Implement:** read [rule-anatomy.md](references/rule-anatomy.md). Add source,
+  metadata, versions, and governance atomically; write meaningful cases first. Reuse adequate
+  coverage instead of requiring a new test for every review comment.
+- **Calibrate:** read [calibration.md](references/calibration.md). Verify immutable
+  local corpora, classify findings, and compare correctness and performance.
+- **Review/promote:** require a separate immutable review commit. Authoring does
+  not approve the rule or authorize consumer activation.
 
-- **Propose:** read only. Return a RuleProblem, upstream/catalog overlap, labeled cases,
-  severity, limitations, and the authorization needed for implementation. Do not write files.
-- **Implement:** read [rule-anatomy.md](references/rule-anatomy.md), write labeled cases first,
-  then add implementation, catalog metadata, governance, versions, and tests atomically.
-- **Calibrate:** read [calibration.md](references/calibration.md), verify immutable corpora, run
-  the helper, inspect and classify findings, compare performance, and refine until clean.
-- **Review or promote:** require a separate immutable review commit. Never approve a rule in its
-  authoring commit or activate consumers without explicit rollout authorization.
+Start judgment-heavy rules as pending warnings. Preserve safe false negatives,
+use syntax-aware evidence, and emit one diagnostic per defect. Do not infer authorship or intent.
+A placement warning cannot justify deleting a test; review the asserted contract.
 
-New judgment-heavy rules start as pending warnings. Prefer syntax-aware evidence, emit one
-diagnostic per semantic defect, and preserve false negatives when avoiding them would require
-guessing. Never infer AI authorship or intent.
-
-The calibration helper is developer-only and is not a shipped CLI:
-
-```bash
-uv run python .agents/skills/repo-rule-authoring/scripts/calibrate_rules.py verify \
-  --corpus "$PRIVATE_CORPUS"
-uv run python .agents/skills/repo-rule-authoring/scripts/calibrate_rules.py evaluate \
-  --corpus "$PRIVATE_CORPUS" --rule RULE_ID --fixtures-passed \
-  --private-output /private/tmp/rule-private.json \
-  --public-output /private/tmp/rule-public.json
-```
-
-Do not clone, fetch, install, publish, commit, or mutate consumers unless the user separately
-authorizes that action.
+The developer-only calibration helper is
+`scripts/calibrate_rules.py`; its commands and private-report rules are in the
+calibration reference. Cloning, fetching, installation, publishing, commits, and consumer
+mutation require session authorization. Never activate consumers implicitly.
