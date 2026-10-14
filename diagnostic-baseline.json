@@ -2,10 +2,17 @@
   "schemaVersion": 2,
   "provenance": {
     "bundleVersion": "8.55.2",
-    "consumerBaseSha": "766abab6163309237feacaec8a18c2a91d71ed0f",
+    "consumerBaseSha": "2c3b0aeb01c58fda389df435d9f4e702795cc980",
     "catalogDigest": "58afa348a9b2f8e4dc8114afcfdbc5f13211ad83454662d22a6f05f3ebdeb152"
   },
   "diagnostics": [
+    {
+      "fingerprint": "0df69625305029b30875748b141b9c9e648b89401e9d57fa8a56952bed2f4396",
+      "source": "sarj-python-lint",
+      "ruleId": "fakes-in-shared-location",
+      "path": "tests/test_review_policy_stacked_merge_group.py",
+      "count": 1
+    },
     {
       "fingerprint": "0cd327de08039ada22fa3e62d4a74090fa0cee56033a4d3c3b947ac5279f8887",
       "source": "sarj-python-lint",
@@ -40,6 +47,20 @@
       "ruleId": "no-broad-keyword-capture",
       "path": "tests/test_review_policy_action_contract.py",
       "count": 7
+    },
+    {
+      "fingerprint": "586453350dd31c6139e12427cc83822e248531b0bb5145d43ae2dcb8a640bd46",
+      "source": "sarj-python-lint",
+      "ruleId": "no-broad-keyword-capture",
+      "path": "tests/test_review_policy_stacked_merge_group.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "9b08a42e7c254015360963f98ba8be7ee77308126cd05d3f89f05c8a07262c4d",
+      "source": "sarj-python-lint",
+      "ruleId": "no-broad-keyword-capture",
+      "path": "tests/test_review_policy_stacked_merge_group.py",
+      "count": 1
     },
     {
       "fingerprint": "21c7be8325f3e4ccae03db0312f9d00b1671040d490bb8f6537f3a61b7b2ab9b",
