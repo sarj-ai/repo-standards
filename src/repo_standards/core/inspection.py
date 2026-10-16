@@ -17,6 +17,7 @@ from typing import ClassVar, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 import yaml
+from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 from ._json import parse_json_object
 from .canonical import canonical_path
@@ -879,7 +880,7 @@ def parse_workspace_metadata(relative: str, content: bytes) -> WorkspaceEvidence
 
 
 def _pnpm_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None:
-    document: object = yaml.safe_load(content.decode("utf-8"))  # pyright: ignore[reportAny]
+    document = _pnpm_document(content)
     packages = _PnpmWorkspace.model_validate(document).packages
     members = [item for item in packages if not item.startswith("!") or item.startswith("!(")]
     excludes = [
@@ -897,6 +898,43 @@ def _pnpm_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None:
         member_patterns=member_patterns,
         exclude_patterns=exclude_patterns,
     )
+
+
+def _pnpm_document(content: bytes) -> object:
+    loader = yaml.SafeLoader(content.decode("utf-8"))
+    try:
+        node = loader.get_single_node()
+        if node is None:
+            return None
+        _unique_pnpm_selectors(node)
+        return loader.construct_document(node)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- construct only after validating declared workspace selectors.
+    finally:
+        loader.dispose()  # pyright: ignore[reportUnknownMemberType] -- PyYAML parser lifetime boundary.
+
+
+def _unique_pnpm_selectors(root: Node) -> None:
+    pending = [root]
+    seen: set[int] = set()
+    while pending:
+        node = pending.pop()
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        if isinstance(node, MappingNode):
+            pairs: list[tuple[Node, Node]] = node.value  # pyright: ignore[reportAny] -- PyYAML mapping-node boundary.
+            if sum(_pnpm_packages_key(key) for key, _value in pairs) > 1:
+                ConfigurationError.fail("pnpm workspace repeats the packages field")
+            pending.extend(child for pair in pairs for child in pair)
+        elif isinstance(node, SequenceNode):
+            items: list[Node] = node.value  # pyright: ignore[reportAny] -- PyYAML sequence-node boundary.
+            pending.extend(items)
+
+
+def _pnpm_packages_key(node: Node) -> bool:
+    if not isinstance(node, ScalarNode) or node.tag != "tag:yaml.org,2002:str":
+        return False
+    value: object = node.value  # pyright: ignore[reportAny] -- PyYAML scalar-node boundary.
+    return value == "packages"
 
 
 def _required_content(contents: dict[str, bytes], blob: TrackedBlob) -> bytes:
