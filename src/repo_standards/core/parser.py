@@ -54,12 +54,11 @@ _ASCII_DELETE = 127
 
 def _read_bounded(path: Path, kind: str) -> bytes:
     try:
-        size = path.stat().st_size
-        if size > _MAX_INPUT_BYTES:
-            ConfigurationError.fail(f"{kind} exceeds {_MAX_INPUT_BYTES} bytes: {path.name}")
-        return path.read_bytes()
+        with path.open("rb") as stream:
+            content = stream.read(_MAX_INPUT_BYTES + 1)
     except OSError:
         ConfigurationError.fail(f"cannot read {kind}: {path.name}")
+    return _bounded_content(content, kind)
 
 
 def _bounded_content(content: bytes, kind: str) -> bytes:

@@ -94,6 +94,24 @@ def test_invalid_npm_metadata_types_are_classified(content: bytes) -> None:
         parse_project_metadata("package.json", content)
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        b'{"name":"first","name":"second"}',
+        b'{"private":true,"private":false}',
+        b'{"workspaces":["apps/*"],"workspaces":["outside/*"]}',
+        b'{"workspaces":{"packages":["apps/*"],"packages":["outside/*"]}}',
+        b'{"custom":NaN}',
+        b'{"custom":1e999}',
+    ],
+)
+def test_ambiguous_npm_metadata_is_not_trusted(content: bytes) -> None:
+    with pytest.raises(ConfigurationError, match="metadata is malformed"):
+        parse_project_metadata("package.json", content)
+    with pytest.raises(ConfigurationError, match="metadata is malformed"):
+        parse_workspace_metadata("package.json", content)
+
+
 def test_workspace_metadata_is_typed_without_expanding_globs() -> None:
     npm = parse_workspace_metadata(
         "package.json", b'{"workspaces":{"packages":["apps/*","packages/*"]}}'
@@ -122,6 +140,20 @@ def test_workspace_metadata_rejects_unsafe_patterns() -> None:
         parse_workspace_metadata("package.json", b'{"workspaces":["../outside"]}')
     with pytest.raises(ConfigurationError, match="metadata is malformed"):
         parse_workspace_metadata("pnpm-workspace.yaml", b"packages:\n  - ../outside\n")
+
+
+@pytest.mark.parametrize("pattern", ["!../outside", "!/absolute", "!", "!packages/\\n"])
+def test_exclusion_only_workspace_still_validates_its_patterns(pattern: str) -> None:
+    with pytest.raises(ConfigurationError, match="metadata is malformed"):
+        parse_workspace_metadata("pnpm-workspace.yaml", f'packages: ["{pattern}"]\n'.encode())
+
+
+@pytest.mark.parametrize("control", ["\\n", "\\r", "\\t", "\\u007f"])
+def test_workspace_globs_reject_filename_controls(control: str) -> None:
+    with pytest.raises(ConfigurationError, match="metadata is malformed"):
+        parse_workspace_metadata(
+            "package.json", f'{{"workspaces":["packages/{control}*"]}}'.encode()
+        )
 
 
 @pytest.mark.parametrize(

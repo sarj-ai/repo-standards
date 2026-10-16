@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import PurePosixPath
 import re
 import tomllib
@@ -13,6 +12,8 @@ from typing import (
     NoReturn,
     cast,  # ruff: ignore[banned-api] - checks precede narrowing
 )
+
+from repo_standards.core._json import parse_json_object
 
 
 if TYPE_CHECKING:
@@ -384,7 +385,6 @@ def detect_instrumentation(files: tuple[TrackedFile, ...]) -> InstrumentationDet
             detected = _detect_file(tracked, basename)
         except (
             InstrumentationInputError,
-            json.JSONDecodeError,
             tomllib.TOMLDecodeError,
             UnicodeDecodeError,
         ) as error:
@@ -529,22 +529,11 @@ def _mapped_manifest(
 
 
 def _json_object(content: bytes) -> dict[str, object]:
-    parsed: object = json.loads(  # pyright: ignore[reportAny]
-        content.decode("utf-8"), object_pairs_hook=_duplicate_object
-    )
-    result = _mapping(parsed)
-    if result is None:
-        InstrumentationInputError.fail("JSON manifest root must be an object")
-    return result
-
-
-def _duplicate_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            InstrumentationInputError.fail("JSON contains a duplicate object key")
-        result[key] = value
-    return result
+    try:
+        parsed = parse_json_object(content)
+    except ValueError, RecursionError:
+        InstrumentationInputError.fail("JSON must be a finite UTF-8 object with unique keys")
+    return dict(parsed)
 
 
 def _package_json_dependencies(content: bytes) -> set[str]:
@@ -737,10 +726,7 @@ def _yaml_spec_marker(content: bytes) -> str | None:
 def parse_api_operation_map(content: bytes) -> ApiOperationMap:
     if len(content) > _MAX_OPERATION_MAP_BYTES:
         InstrumentationInputError.fail("operation map exceeds byte limit")
-    try:
-        root = _json_object(content)
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        InstrumentationInputError.fail("cannot parse operation map JSON", cause=error)
+    root = _json_object(content)
     if set(root) != {"schema_version", "openapi_sha256", "operations"}:
         InstrumentationInputError.fail("operation map keys must match api-operation-map.v2")
     if root["schema_version"] != "api-operation-map.v2":

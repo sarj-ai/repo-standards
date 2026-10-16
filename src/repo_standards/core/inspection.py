@@ -18,6 +18,7 @@ from typing import ClassVar, Literal, NamedTuple
 from pydantic import BaseModel, ConfigDict, Field
 import yaml
 
+from ._json import parse_json_object
 from .canonical import canonical_path
 from .errors import ConfigurationError, ManifestAbsentError
 from .models import (
@@ -886,13 +887,15 @@ def _pnpm_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None:
         for item in packages
         if item.startswith("!") and not item.startswith("!(")
     ]
-    if not members:
+    member_patterns = _workspace_patterns(members, f"pnpm packages: {relative}")
+    exclude_patterns = _workspace_patterns(excludes, f"pnpm exclusions: {relative}")
+    if not member_patterns:
         return None
     return WorkspaceEvidence(
         ecosystem="npm",
         path=relative,
-        member_patterns=_workspace_patterns(members, f"pnpm packages: {relative}"),
-        exclude_patterns=_workspace_patterns(excludes, f"pnpm exclusions: {relative}"),
+        member_patterns=member_patterns,
+        exclude_patterns=exclude_patterns,
     )
 
 
@@ -1125,7 +1128,7 @@ def _parse_batch_contents(
 
 
 def _npm_project(relative: str, content: bytes) -> ProjectCoordinate:
-    package = _NpmPackage.model_validate_json(content)
+    package = _NpmPackage.model_validate(parse_json_object(content))
     return ProjectCoordinate(
         ecosystem="npm",
         path=relative,
@@ -1136,7 +1139,7 @@ def _npm_project(relative: str, content: bytes) -> ProjectCoordinate:
 
 
 def _npm_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None:
-    workspaces = _NpmPackage.model_validate_json(content).workspaces
+    workspaces = _NpmPackage.model_validate(parse_json_object(content)).workspaces
     if workspaces is None:
         return None
     match workspaces:
@@ -1222,7 +1225,12 @@ def _workspace_patterns(value: object, context: str) -> tuple[str, ...]:
     for item in value:  # pyright: ignore[reportUnknownVariableType]
         if not isinstance(item, str) or not item:
             ConfigurationError.fail(f"{context} entries must be non-empty strings")
-        if "\\" in item or item.startswith("/") or "\x00" in item or ".." in Path(item).parts:
+        if (
+            "\\" in item
+            or item.startswith("/")
+            or re.search(r"[\x00-\x1f\x7f]", item) is not None
+            or ".." in Path(item).parts
+        ):
             ConfigurationError.fail(f"{context} contains an unsafe pattern")
         if any(token in item for token in ("{", "}", "@(", "+(", "?(", "*(", "!(")):
             ConfigurationError.fail(f"{context} contains unsupported glob syntax")

@@ -170,6 +170,27 @@ def test_github_context_enforces_event_size_bound(tmp_path: Path) -> None:
         load_github_pull_request_context(event_path, event_name="pull_request")
 
 
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
+def test_github_context_requires_utf8_event_data(tmp_path: Path, encoding: str) -> None:
+    event_path = tmp_path / "event.json"
+    event_path.write_bytes(json.dumps(_event()).encode(encoding))
+
+    with pytest.raises(ConfigurationError, match="UTF-8 JSON"):
+        load_github_pull_request_context(event_path, event_name="pull_request")
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity", "1e999"])
+def test_github_context_rejects_nonfinite_json_even_in_unknown_fields(
+    tmp_path: Path, constant: str
+) -> None:
+    event_path = tmp_path / "event.json"
+    contents = json.dumps(_event())
+    event_path.write_text(contents[:-1] + ', "extra": ' + constant + "}", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="UTF-8 JSON"):
+        load_github_pull_request_context(event_path, event_name="pull_request")
+
+
 def test_merge_group_is_explicitly_not_applicable(tmp_path: Path) -> None:
     event_path = tmp_path / "event.json"
     _write_json(event_path, {"action": "checks_requested", "merge_group": {"id": 1}})
