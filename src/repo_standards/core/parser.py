@@ -5,8 +5,7 @@ import re
 import tomllib
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic JSON/schema infrastructure validates open typed mappings, rather than a domain object.
-
+from ._json import parse_json_object
 from .canonical import canonical_path
 from .errors import ConfigurationError
 from .models import (
@@ -51,7 +50,6 @@ _MAXIMUM_SHA_PREFIX_LENGTH = 40
 _MAXIMUM_LOGICAL_REF_BYTES = 1_024
 _ASCII_CONTROL_LIMIT = 32
 _ASCII_DELETE = 127
-_OBJECT_MAPPING = TypeAdapter(dict[str, object])
 
 
 def _read_bounded(path: Path, kind: str) -> bytes:
@@ -642,7 +640,7 @@ def load_manifest(path: Path) -> Manifest:
 
 def parse_baseline_bytes(content: bytes) -> Baseline:
     try:
-        data = _OBJECT_MAPPING.validate_json(_bounded_content(content, "baseline"), strict=True)
+        data = _mapping(parse_json_object(_bounded_content(content, "baseline")), "baseline")
     except OSError, RecursionError, UnicodeError, ValueError:
         ConfigurationError.fail("cannot read baseline")
     fields = {
@@ -654,7 +652,7 @@ def parse_baseline_bytes(content: bytes) -> Baseline:
         "fingerprints",
     }
     _strict_keys(data, fields, fields, "baseline")
-    if data["schema_version"] != _BASELINE_SCHEMA_VERSION:
+    if _integer(data, "schema_version", "baseline", default=0) != _BASELINE_SCHEMA_VERSION:
         ConfigurationError.fail(f"baseline.schema_version must be {_BASELINE_SCHEMA_VERSION}")
     raw_fingerprints = _list(data["fingerprints"], "baseline.fingerprints")
     if not all(isinstance(item, str) for item in raw_fingerprints):
@@ -664,9 +662,7 @@ def parse_baseline_bytes(content: bytes) -> Baseline:
         ConfigurationError.fail("baseline fingerprints must be SHA-256 hex strings")
     if len(fingerprints) != len(set(fingerprints)):
         ConfigurationError.fail("baseline contains duplicate fingerprints")
-    policy_version = data["policy_version"]
-    if not isinstance(policy_version, int) or isinstance(policy_version, bool):
-        ConfigurationError.fail("baseline.policy_version must be an integer")
+    policy_version = _integer(data, "policy_version", "baseline", default=0)
     return Baseline(
         repository_id=RepositoryId(_string(data, "repository_id", "baseline")),
         policy_id=PolicyId(_string(data, "policy", "baseline")),

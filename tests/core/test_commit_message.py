@@ -8,10 +8,27 @@ import pytest
 
 from repo_standards.core.commit_message import (
     analyze_commit_header,
+    analyze_commit_message_bytes,
     check_commit_message_file,
     check_local_commit_message_file,
 )
 from repo_standards.core.errors import ConfigurationError
+
+
+@pytest.mark.parametrize("control", [b"\x0b", b"\x0c", b"\x1c", b"\x1d", b"\x1e"])
+def test_non_lf_line_separators_cannot_hide_header_controls(control: bytes, tmp_path: Path) -> None:
+    content = b"fix: valid" + control + b"hidden\n"
+    result = analyze_commit_message_bytes(content)
+
+    assert not result.satisfied
+    assert result.findings[0].code == "commit-message.control-character"
+    path = tmp_path / "COMMIT_EDITMSG"
+    path.write_bytes(b"fixup! " + content)
+    assert not check_commit_message_file(path, allow_temporary=True).satisfied
+
+
+def test_header_analysis_does_not_scan_body_controls() -> None:
+    assert analyze_commit_message_bytes(b"fix: valid\r\n\nBody\x0bdata").satisfied
 
 
 @pytest.mark.parametrize(
@@ -121,9 +138,7 @@ def test_local_hook_rejects_noncanonical_or_empty_amend_subjects(
 def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> None:
     git = shutil.which("git")
     assert git is not None
-    subprocess.run(
-        (git, "init", "-q"), cwd=tmp_path, check=True, env={}
-    )
+    subprocess.run((git, "init", "-q"), cwd=tmp_path, check=True, env={})
     message_path = subprocess.run(
         (git, "rev-parse", "--git-path", "COMMIT_EDITMSG"),
         cwd=tmp_path,
@@ -157,9 +172,7 @@ def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> N
 def test_merge_state_does_not_bypass_message_file_safety(tmp_path: Path) -> None:
     git = shutil.which("git")
     assert git is not None
-    subprocess.run(
-        (git, "init", "-q"), cwd=tmp_path, check=True, env={}
-    )
+    subprocess.run((git, "init", "-q"), cwd=tmp_path, check=True, env={})
     git_dir = tmp_path / ".git"
     (git_dir / "MERGE_HEAD").write_text("0" * 40 + "\n")
     message = git_dir / "COMMIT_EDITMSG"
@@ -179,9 +192,7 @@ def test_merge_state_cannot_exempt_another_repository_message(tmp_path: Path) ->
     first.mkdir()
     second.mkdir()
     for root in (first, second):
-        subprocess.run(
-            (git, "init", "-q"), cwd=root, check=True, env={}
-        )
+        subprocess.run((git, "init", "-q"), cwd=root, check=True, env={})
     (first / ".git" / "MERGE_HEAD").write_text("0" * 40 + "\n")
     message = second / ".git" / "COMMIT_EDITMSG"
     message.write_text("Merge branch 'feature'\n")

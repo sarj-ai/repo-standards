@@ -93,8 +93,7 @@ def semantic_fingerprint(diagnostic: Diagnostic) -> str:
             diagnostic.expected if diagnostic.expected_value is None else diagnostic.expected_value
         ),
     )
-    payload = b"".join(len(part.encode()).to_bytes(4, "big") + part.encode() for part in parts)
-    return hashlib.sha256(payload).hexdigest()
+    return _hash_parts(parts)
 
 
 def semantic_finding_key(diagnostic: Diagnostic) -> str:
@@ -105,7 +104,12 @@ def semantic_finding_key(diagnostic: Diagnostic) -> str:
         diagnostic.subject_kind,
         diagnostic.manifest_anchor,
     )
-    payload = b"".join(len(part.encode()).to_bytes(4, "big") + part.encode() for part in parts)
+    return _hash_parts(parts)
+
+
+def _hash_parts(parts: tuple[str, ...]) -> str:
+    encoded = (part.encode() for part in parts)
+    payload = b"".join(len(part).to_bytes(4, "big") + part for part in encoded)
     return hashlib.sha256(payload).hexdigest()
 
 
