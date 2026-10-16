@@ -1813,7 +1813,38 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
         ),
     ] = False,
 ) -> None:
-    """Analyze one repository manifest."""
+    """Analyze one repository manifest.
+
+    Explicitly enable repository/artifacts/untyped-javascript in enabled_rules
+    or with --enable-rule to review tracked .js, .jsx, .mjs and .cjs paths
+    case-insensitively. Typed variants and source maps remain outside this rule.
+    Migrations must update loaders, callers, type checks and runtime tests.
+
+    Required JavaScript uses exact [[javascript.artifacts]] records in the
+    manifest: path, kind and a nonblank reason. Allowed kinds are tool-config,
+    generated, vendor, fixture and runtime. Only generated requires and accepts
+    source: a distinct tracked non-JavaScript file, including Python or schemas.
+    Paths must be canonical repository-relative regular files in the selected
+    Git tree or index. Globs, duplicates, stale paths and over 1,000 records fail.
+    Names and folders grant no exemptions. Declarations record intent; they
+    prove neither generation nor runtime necessity. No application code runs.
+    Independent verifier and operational-test rules still apply.
+
+    Warnings remain advisory in strict/report mode. To block new warnings,
+    first resolve violations and review required artifact declarations. Print
+    native JSON with `repo-standards baseline . --ratchet-warnings`, review it,
+    then commit it at .repo-standards/baseline.json. Run this command with
+    --mode ratchet --ratchet-warnings; use --staged on both for exact index input.
+    Baseline creation explicitly accepts eligible current findings. Its optional
+    include_warnings setting defaults to false for existing schema-2 baselines.
+    Comparison settings must match; stale scope, policy and entries fail closed.
+    Warning opt-in covers all enabled rules without changing their severity.
+    Uncappable rules remain uncappable. Use `repo-standards schema baseline`
+    for the wire format. Python callers create baselines with
+    baseline_from_report(report, include_warnings=True), serialize with
+    baseline_dict, and analyze with RepositoryAnalysisRequest using both
+    mode=Mode.RATCHET and include_warnings=True.
+    """
     raise typer.Exit(
         _run_check(
             root=root,

@@ -22,65 +22,6 @@ enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]
 The locked Repo Standards release supplies the current reviewed implementation. Manifests and
 one-off `--enable-rule` checks select current rules by stable, versionless ID.
 
-`repository/artifacts/untyped-javascript` is an opt-in warning for every tracked `.js`, `.jsx`,
-`.mjs`, or `.cjs` path, case-insensitively. Prefer typed TypeScript for authored application and
-tooling source. Review module loading, callers, type checks and runtime tests before migrating;
-renaming an extension alone does not establish safety. TypeScript variants, source maps and
-other languages are outside this rule.
-
-Required JavaScript artifacts use exact declarations in the repository manifest:
-
-```toml
-[[javascript.artifacts]]
-path = "eslint.config.mjs"
-kind = "tool-config"
-reason = "The installed tool loads this ESM configuration."
-
-[[javascript.artifacts]]
-path = "generated/selected-rules.mjs"
-kind = "generated"
-source = "scripts/generate_rules.py"
-reason = "External JavaScript tools consume this generated module."
-```
-
-Allowed kinds are `tool-config`, `generated`, `vendor`, `fixture`, and `runtime`. Every record
-requires a nonblank reason. Only `generated` requires and accepts `source`, naming a distinct
-tracked non-JavaScript file such as TypeScript, Python or a schema. Both paths must be exact,
-canonical repository-relative regular files in the selected Git tree or staged index.
-Declarations cannot use globs, duplicate paths, or stale paths. A renamed or removed artifact
-or generation input requires updating its declaration in the same change. At most 1,000
-artifact declarations are accepted.
-
-Config names and directories such as `vendor`, `generated`, `tests`, `fixtures`, `dist`, or
-`node_modules` grant no automatic exemption when files are tracked. An artifact declaration
-records reviewed intent; it does not prove generation, authorship, or runtime necessity.
-Repo Standards verifies exact Git membership without executing a generator or application.
-These declarations affect only the JavaScript warning; independent verifier and operational
-test rules still apply. The retired `repository/artifacts/mjs-files` ID is not restored.
-
-Warnings remain advisory in `report` and ordinary strict `check`. To reject new warnings,
-explicitly opt into a reviewed warning baseline and the same comparison setting:
-
-```bash
-repo-standards baseline . --ratchet-warnings > /tmp/repository-baseline.json
-# Review the findings and JSON before installing this baseline in the repository.
-repo-standards check . --mode ratchet --ratchet-warnings
-```
-
-The baseline command prints JSON without writing repository files. After review, place it at
-`.repo-standards/baseline.json` and commit it with the enabled rules and artifact declarations.
-Use `--staged` on both commands when evaluating the index. Baseline creation is an explicit
-acceptance of eligible current findings, so establish zero JavaScript violations before
-installing this rule's initial baseline. `repo-standards schema baseline` describes the format.
-
-Baseline schema v2 accepts optional `include_warnings`, defaulting to `false` for existing
-baselines. `--ratchet-warnings` requires `check --mode ratchet`, and the baseline JSON must set
-`"include_warnings": true`. Mismatched warning settings, policy versions, declaration scope,
-and resolved stale entries fail closed. The option includes warnings from all explicitly
-enabled rules without changing their severity; uncappable rules remain uncappable. Python
-callers can use `baseline_from_report(report, include_warnings=True)` and `baseline_dict`, then
-set `RepositoryAnalysisRequest(include_warnings=True, mode=Mode.RATCHET, ...)`.
-
 ## Run it
 
 Sarj repositories should use the single Code Standards setup path. It installs the canonical
