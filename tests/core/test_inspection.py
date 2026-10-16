@@ -135,6 +135,30 @@ def test_workspace_metadata_is_typed_without_expanding_globs() -> None:
     assert parse_workspace_metadata("pnpm-workspace.yaml", b"catalog:\n  react: 19.0.0\n") is None
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"packages: [apps/*]\npackages: [outside/*]\n",
+        b"packages: [apps/*]\n'packages': [outside/*]\n",
+        b'packages: [apps/*]\n"pack\\u0061ges": [outside/*]\n',
+        b"defaults: &defaults {packages: [apps/*], packages: [outside/*]}\n<<: *defaults\n",
+        b"? &key packages\n: [apps/*]\n? *key\n: [outside/*]\n",
+    ],
+)
+def test_pnpm_workspace_rejects_repeated_package_selectors(content: bytes) -> None:
+    with pytest.raises(ConfigurationError, match="metadata is malformed"):
+        parse_workspace_metadata("pnpm-workspace.yaml", content)
+
+
+def test_pnpm_workspace_preserves_native_merge_overrides() -> None:
+    workspace = parse_workspace_metadata(
+        "pnpm-workspace.yaml",
+        b"defaults: &defaults {packages: [packages/*]}\n<<: *defaults\npackages: [apps/*]\n",
+    )
+    assert workspace is not None
+    assert workspace.member_patterns == ("apps/*",)
+
+
 def test_workspace_metadata_rejects_unsafe_patterns() -> None:
     with pytest.raises(ConfigurationError, match="metadata is malformed"):
         parse_workspace_metadata("package.json", b'{"workspaces":["../outside"]}')
