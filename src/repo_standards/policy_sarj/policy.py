@@ -234,7 +234,7 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
-        version=5,
+        version=6,
         default_severity="error",
         title="Do not commit bespoke verifier scripts",
         description=(
@@ -250,8 +250,10 @@ RULES = (
             "executable verification belongs in an objectively owned tool or harness."
         ),
         fix=(
-            "Delete the one-off verifier and every invocation. Express the invariant in "
-            "Terraform, shared policy, or a provider or runtime contract; if executable "
+            "Identify each distinct behavior and safety contract the verifier checks. "
+            "Before deleting it and its invocations, demonstrate that retained or replacement "
+            "checks reject the same wrong outcomes through Terraform, shared policy, or a "
+            "provider or runtime contract; if executable "
             "verification is durable product code, place it in conventional source inside a "
             "declared or workspace-backed tool or harness. Relocating, renaming, or translating "
             "the same check, including to TypeScript, is not remediation."
@@ -306,7 +308,7 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/terraform-test-files"),
-        version=1,
+        version=2,
         default_severity="error",
         title="Do not commit native Terraform test files",
         description=(
@@ -319,8 +321,10 @@ RULES = (
             "infrastructure checks discoverable and consistent."
         ),
         fix=(
-            "Delete the Terraform-native test file and move the durable assertion into shared "
-            "rendered-plan, provider, or runtime validation."
+            "Identify each distinct behavior and safety contract the test checks. Before "
+            "deleting it and its invocations, demonstrate that retained or replacement shared "
+            "rendered-plan, provider, or runtime checks reject the same wrong outcomes. "
+            "Passing runs or equal coverage counts alone do not establish equivalence."
         ),
         taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
         examples=(
@@ -513,7 +517,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=23,
+    policy_version=24,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -652,15 +656,21 @@ def _tracked_artifact_diagnostics(
                 message="tracked retired, operational, or unowned verifier is prohibited",
                 path=path,
                 remediation=Remediation(
-                    summary=("Remove the operational verifier instead of relocating it."),
+                    summary="Preserve distinct contracts before removing the verifier.",
                     steps=(
-                        "Delete the verifier and every workflow invocation.",
                         (
-                            "Express durable safety in Terraform, shared policy, provider "
-                            "state, or runtime behavior."
+                            "Identify each behavior and safety contract and demonstrate that "
+                            "retained or replacement Terraform, shared-policy, provider, or "
+                            "runtime checks reject the same wrong outcomes."
+                        ),
+                        (
+                            "Then delete the verifier and every invocation; relocating it "
+                            "is not remediation."
                         ),
                     ),
-                    validation=("Inspect the selected Git tree and rerun repo-standards.",),
+                    validation=(
+                        "Run focused checks for the retained contracts and rerun repo-standards.",
+                    ),
                 ),
             )
         )
@@ -701,15 +711,21 @@ def _tracked_artifact_diagnostics(
                 message="tracked native Terraform test file is prohibited by repository policy",
                 path=path,
                 remediation=Remediation(
-                    summary="Move the assertion into the shared validation path.",
+                    summary="Preserve distinct contracts in the shared validation path.",
                     steps=(
-                        "Delete the tracked Terraform-native test file.",
                         (
-                            "Validate the behavior through a rendered plan, provider, or "
-                            "runtime contract."
+                            "Identify each behavior and safety contract and demonstrate that "
+                            "retained or replacement shared rendered-plan, provider, or runtime "
+                            "checks reject the same wrong outcomes."
+                        ),
+                        "Then delete the tracked Terraform-native test file and its invocations.",
+                    ),
+                    validation=(
+                        (
+                            "Run focused checks for retained contracts and rerun repo-standards; "
+                            "passing runs or equal coverage counts alone do not prove equivalence."
                         ),
                     ),
-                    validation=("Inspect the selected Git tree and rerun repo-standards.",),
                 ),
             )
         )
