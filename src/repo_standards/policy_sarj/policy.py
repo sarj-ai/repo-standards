@@ -29,6 +29,7 @@ from repo_standards.core.taxonomy import (
     taxonomy,
 )
 
+from .javascript import UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics
 from .makefiles import MAKEFILE_GROWTH_RULE_ID, makefile_diagnostics
 from .pull_request_templates import (
     PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
@@ -181,6 +182,56 @@ def _example(  # ruff: ignore[too-many-arguments] - keyword-only declarative fix
 
 
 RULES = (
+    Rule(
+        rule_id=UNTYPED_JAVASCRIPT_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Prefer typed source and declare required JavaScript artifacts",
+        description=(
+            "Tracked .js, .jsx, .mjs and .cjs paths, case-insensitively, need an exact "
+            "javascript.artifacts declaration or migration to typed source. Config, vendor, "
+            "generated and test names do not grant automatic exemptions."
+        ),
+        why=(
+            "Authored JavaScript can escape the TypeScript checking contract. Runtime, "
+            "tool, vendor and fixture artifacts may require JavaScript; explicit declarations "
+            "make that intent reviewable without inferring it from a filename."
+        ),
+        fix=(
+            "Review module loading and callers before migrating authored code to typed "
+            "TypeScript. For required JavaScript, declare the exact path, artifact kind and "
+            "reason; generated output also needs a tracked non-JavaScript source. A declaration "
+            "records intent and does not prove generation or semantic necessity."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-artifact-untyped-javascript-source",
+                title="Typed tooling source",
+                language="text",
+                before="scripts/generate-catalog.mjs",
+                after="scripts/generate-catalog.ts",
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-artifact-untyped-javascript-generated",
+                title="Required Python-generated JavaScript",
+                language="json",
+                before=(
+                    '{"tracked":["generated/rules.mjs","scripts/generate.py"],'
+                    '"manifest":"repository_id = \\"example-repository\\"\\ncomponents = []\\n"}'
+                ),
+                after=(
+                    '{"tracked":["generated/rules.mjs","scripts/generate.py"],'
+                    '"manifest":"repository_id = \\"example-repository\\"\\ncomponents = []\\n'
+                    '[[javascript.artifacts]]\\npath = \\"generated/rules.mjs\\"\\n'
+                    'kind = \\"generated\\"\\nsource = \\"scripts/generate.py\\"\\n'
+                    'reason = \\"External tools load this generated ESM artifact.\\"\\n"}'
+                ),
+                expected_severity="warning",
+            ),
+        ),
+    ),
     Rule(
         rule_id=RuleId("repository/artifacts/terraform-examples"),
         version=1,
@@ -455,6 +506,7 @@ RULES = (
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
     {
+        UNTYPED_JAVASCRIPT_RULE_ID: RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/schema-derived-config-examples"): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
@@ -467,6 +519,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
     {
+        UNTYPED_JAVASCRIPT_RULE_ID: 49,
         RuleId("repository/artifacts/terraform-examples"): 40,
         RuleId("repository/artifacts/schema-derived-config-examples"): 44,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
@@ -495,8 +548,13 @@ _UPSTREAM_BY_CLASSIFICATION: Mapping[RuleClassification, tuple[str, ...]] = Mapp
 
 _RULE_EVIDENCE: Mapping[RuleId, Literal["declared", "verified", "external"]] = MappingProxyType(
     {
-        rule.rule_id: ("verified" if str(rule.rule_id).startswith("repository/") else "declared")
-        for rule in RULES
+        **{
+            rule.rule_id: (
+                "verified" if str(rule.rule_id).startswith("repository/") else "declared"
+            )
+            for rule in RULES
+        },
+        UNTYPED_JAVASCRIPT_RULE_ID: "declared",
     }
 )
 
@@ -517,7 +575,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=24,
+    policy_version=25,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1171,10 +1229,14 @@ class SarjPolicy:
 
     @staticmethod
     def evaluate_repository(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
-        diagnostics = _repository_artifact_diagnostics(snapshot) + (
-            pull_request_template_diagnostics(
-                snapshot, rule=_rule(PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID)
+        diagnostics = (
+            _repository_artifact_diagnostics(snapshot)
+            + (
+                pull_request_template_diagnostics(
+                    snapshot, rule=_rule(PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID)
+                )
             )
+            + javascript_diagnostics(snapshot, rule=_rule(UNTYPED_JAVASCRIPT_RULE_ID))
         )
         if snapshot.makefile_comparison is None:
             return diagnostics

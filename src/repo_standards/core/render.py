@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
     from .models import (
         AnalysisReport,
+        Baseline,
         Diagnostic,
         InputProvenance,
         RatchetComparison,
@@ -142,6 +143,7 @@ def input_provenance_dict(provenance: InputProvenance) -> Mapping[str, object]:
 
 def ratchet_dict(comparison: RatchetComparison) -> Mapping[str, object]:
     return {
+        "include_warnings": comparison.include_warnings,
         "entries": [
             {
                 "fingerprint": item.fingerprint,
@@ -151,7 +153,49 @@ def ratchet_dict(comparison: RatchetComparison) -> Mapping[str, object]:
                 ),
             }
             for item in comparison.entries
-        ]
+        ],
+    }
+
+
+def baseline_dict(baseline: Baseline) -> Mapping[str, object]:
+    return {
+        "schema_version": 2,
+        "repository_id": baseline.repository_id,
+        "policy": baseline.policy_id,
+        "policy_version": baseline.policy_version,
+        "scope_digest": baseline.scope_digest,
+        "fingerprints": list(baseline.fingerprints),
+        "include_warnings": baseline.include_warnings,
+    }
+
+
+def baseline_schema() -> Mapping[str, object]:
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "urn:repo-standards:schema:baseline:v2",
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "repository_id",
+            "policy",
+            "policy_version",
+            "scope_digest",
+            "fingerprints",
+        ],
+        "properties": {
+            "schema_version": {"const": 2},
+            "repository_id": {"type": "string", "minLength": 1},
+            "policy": {"type": "string", "minLength": 1},
+            "policy_version": {"type": "integer", "minimum": 1},
+            "scope_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "fingerprints": {
+                "type": "array",
+                "uniqueItems": True,
+                "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            },
+            "include_warnings": {"type": "boolean", "default": False},
+        },
     }
 
 

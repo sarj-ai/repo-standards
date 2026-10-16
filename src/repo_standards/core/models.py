@@ -22,6 +22,7 @@ type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 MAX_RULE_TITLE_LENGTH = 72
 MAX_RULE_EXAMPLE_TITLE_LENGTH = 56
+MAX_REPOSITORY_INPUT_BYTES = 1_048_576
 
 
 class Mode(StrEnum):
@@ -83,6 +84,24 @@ class MakefileException:
     issue: str
     created_on: str
     expires_on: str
+
+
+class JavaScriptArtifactKind(StrEnum):
+    """Declared reason a tracked JavaScript artifact remains executable JavaScript."""
+
+    TOOL_CONFIG = "tool-config"
+    GENERATED = "generated"
+    VENDOR = "vendor"
+    FIXTURE = "fixture"
+    RUNTIME = "runtime"
+
+
+@dataclass(frozen=True, slots=True)
+class JavaScriptArtifact:
+    path: str
+    kind: JavaScriptArtifactKind
+    reason: str
+    source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +168,7 @@ class Manifest:
     pull_request: PullRequestConfig | None = None
     commit_message: CommitMessageConfig = field(default_factory=CommitMessageConfig)
     makefile_exceptions: tuple[MakefileException, ...] = ()
+    javascript_artifacts: tuple[JavaScriptArtifact, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,6 +338,7 @@ class Baseline:
     policy_version: int
     scope_digest: str
     fingerprints: tuple[str, ...]
+    include_warnings: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -437,6 +458,7 @@ class RatchetEntry:
 @dataclass(frozen=True, slots=True)
 class RatchetComparison:
     entries: tuple[RatchetEntry, ...]
+    include_warnings: bool = False
 
     def fingerprints(self, classification: RatchetClassification) -> tuple[str, ...]:
         return tuple(

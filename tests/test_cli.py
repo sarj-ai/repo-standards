@@ -1085,7 +1085,8 @@ def test_versioned_rule_selector_cannot_be_enabled(tmp_path: Path) -> None:
 
 def test_enable_rule_help_uses_current_rule_ids() -> None:
     result = runner.invoke(app, ["check", "--help"], terminal_width=160)
-    help_text = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", result.stdout).split())
+    uncolored = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    help_text = " ".join(re.sub(r"[│─╭╮╰╯]", " ", uncolored).split())
 
     assert result.exit_code == 0
     assert "--enable-rule" in help_text

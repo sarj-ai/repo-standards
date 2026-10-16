@@ -86,7 +86,13 @@ def _with_insubstantive_path(
 
 
 def _rule_ids(snapshot: RepositorySnapshot) -> list[RuleId]:
-    return [item.rule_id for item in SarjPolicy.evaluate_repository(snapshot)]
+    # These assertions isolate the existing artifact ownership rules. The JavaScript
+    # warning's domain, declarations and additive overlaps have dedicated contract cases.
+    return [
+        item.rule_id
+        for item in SarjPolicy.evaluate_repository(snapshot)
+        if item.rule_id != "repository/artifacts/untyped-javascript"
+    ]
 
 
 def _root_package(
@@ -199,7 +205,7 @@ def test_non_schema_derived_config_example_paths_are_clean(path: str) -> None:
         pytest.param(".dependency-cruiser.mjs", id="dependency-config"),
     ],
 )
-def test_mjs_files_are_not_rejected_by_extension(path: str) -> None:
+def test_mjs_extensions_do_not_trigger_other_artifact_rules(path: str) -> None:
     assert _rule_ids(_snapshot(path)) == []
 
 
@@ -314,8 +320,12 @@ def test_root_terraform_module_verifier_is_rejected() -> None:
 )
 def test_operational_script_tests_require_contract_review(path: str) -> None:
     terraform_modules = ("services/bell/deploy",) if "services/bell/deploy" in path else ()
-    diagnostics = SarjPolicy.evaluate_repository(
-        _snapshot(path, terraform_modules=terraform_modules)
+    diagnostics = tuple(
+        item
+        for item in SarjPolicy.evaluate_repository(
+            _snapshot(path, terraform_modules=terraform_modules)
+        )
+        if item.rule_id == "repository/artifacts/operational-script-tests"
     )
     assert [item.rule_id for item in diagnostics] == [
         RuleId("repository/artifacts/operational-script-tests")
@@ -1329,9 +1339,9 @@ def test_empty_workspace_manifest_does_not_own_verifier_source(
         exclude_patterns=(),
     )
 
-    assert _rule_ids(
-        _snapshot(artifact, packages=(package,), workspaces=(workspace,))
-    ) == [RuleId("repository/artifacts/bespoke-iac-verifiers")]
+    assert _rule_ids(_snapshot(artifact, packages=(package,), workspaces=(workspace,))) == [
+        RuleId("repository/artifacts/bespoke-iac-verifiers")
+    ]
 
 
 @pytest.mark.parametrize(
@@ -1442,14 +1452,12 @@ def test_flat_layout_python_import_package_document_ownership(
     )
 
     snapshot = _snapshot(
-                "python/bulbul/bulbul/__init__.py",
-                document,
-                packages=(package,),
-                workspaces=(workspace,),
-            )
-    snapshot = _with_insubstantive_path(
-        snapshot, "python/bulbul/bulbul/__init__.py"
+        "python/bulbul/bulbul/__init__.py",
+        document,
+        packages=(package,),
+        workspaces=(workspace,),
     )
+    snapshot = _with_insubstantive_path(snapshot, "python/bulbul/bulbul/__init__.py")
 
     assert _rule_ids(snapshot) == expected
 
@@ -1525,13 +1533,16 @@ def test_workspace_globstar_membership(
         exclude_patterns=excludes,
     )
 
-    assert _rule_ids(
-        _snapshot(
-            "packages/team/app/src/verify-plan.cjs",
-            packages=(package,),
-            workspaces=(workspace,),
+    assert (
+        _rule_ids(
+            _snapshot(
+                "packages/team/app/src/verify-plan.cjs",
+                packages=(package,),
+                workspaces=(workspace,),
+            )
         )
-    ) == expected
+        == expected
+    )
 
 
 def test_workflow_markdown_is_rejected() -> None:

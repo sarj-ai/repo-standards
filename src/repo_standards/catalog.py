@@ -34,7 +34,7 @@ from repo_standards.core.models import (
     RuleCategoryId,
     RuleId,
 )
-from repo_standards.core.render import analysis_outcome_schema, output_schema
+from repo_standards.core.render import analysis_outcome_schema, baseline_schema, output_schema
 from repo_standards.core.taxonomy import CATEGORIES
 from repo_standards.policy_sarj.policy import POLICY_SPEC, SarjPolicy
 from repo_standards.rest import instrumentation_capabilities
@@ -80,6 +80,7 @@ HttpsUrl = Annotated[str, Field(pattern=r"^https://")]
 
 _RULE_SLUGS = types.MappingProxyType(
     {
+        "repository/artifacts/untyped-javascript": "untyped-javascript",
         "repository/artifacts/terraform-examples": "terraform-examples",
         "repository/artifacts/schema-derived-config-examples": "schema-derived-config-examples",
         "repository/artifacts/bespoke-iac-verifiers": "bespoke-iac-verifiers",
@@ -736,7 +737,9 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
             summary="Inspect exact Git trees and evaluate versioned repository policy.",
             status="stable",
             command_ids=tuple(
-                item for item in command_ids if item in {"check", "inspect", "report", "rules"}
+                item
+                for item in command_ids
+                if item in {"baseline", "check", "inspect", "report", "rules"}
             ),
             input_kinds=("git-tree", "repository-manifest"),
         ),
@@ -779,6 +782,7 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
 
 def _schemas() -> tuple[SchemaDescriptor, ...]:
     documents = (
+        ("baseline", "Repository policy baseline", "baseline", _schema_object(baseline_schema())),
         ("report", "Repository analysis report", "report", _report_schema()),
         ("catalog", "Repo Standards public catalog", "catalog", _catalog_schema()),
     )
