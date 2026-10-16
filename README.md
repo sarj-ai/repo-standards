@@ -195,8 +195,7 @@ jobs:
 
 The Action emits counted, excluded, and total line counts plus canonical JSON. Tests are
 recognized across Python, JavaScript/TypeScript, Go, JVM, Android, Xcode/Swift, .NET, Ruby,
-and Bats conventions, including pytest `conftest.py` fixture modules at any depth.
-Mark generated or machine-owned artifacts in the trusted base revision:
+and Bats conventions. Mark generated or machine-owned artifacts in the trusted base revision:
 
 ```gitattributes
 path/to/generated/** pr-size-excluded
