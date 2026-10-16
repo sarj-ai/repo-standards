@@ -135,4 +135,14 @@ def scope_digest(manifest: Manifest) -> str:
             "maximum_added_pages": manifest.documentation.maximum_added_pages,
             "addition_exemptions": list(manifest.documentation.addition_exemptions),
         }
+    if manifest.javascript_artifacts:
+        payload["javascript"] = [
+            {
+                "path": artifact.path,
+                "kind": artifact.kind.value,
+                "reason": artifact.reason,
+                "source": artifact.source,
+            }
+            for artifact in sorted(manifest.javascript_artifacts, key=lambda item: item.path)
+        ]
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()

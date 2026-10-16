@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-from .canonical import scope_digest, with_fingerprint
+from .canonical import canonical_json, scope_digest, semantic_fingerprint, with_fingerprint
 from .errors import ConfigurationError
 from .models import (
+    MAX_REPOSITORY_INPUT_BYTES,
     AnalysisReport,
     Baseline,
     Diagnostic,
@@ -19,7 +20,11 @@ from .models import (
     RatchetComparison,
     RatchetEntry,
 )
+from .render import baseline_dict
 from .rule_reviews import RuleVersion
+
+
+_SHA256_HEX_LENGTH = 64
 
 
 def apply_exceptions(
@@ -168,8 +173,10 @@ def _selected_diagnostics(
     return diagnostics
 
 
-def check_baseline(report: AnalysisReport, baseline: Baseline) -> tuple[Diagnostic, ...]:
-    comparison = classify_baseline(report, baseline)
+def check_baseline(
+    report: AnalysisReport, baseline: Baseline, *, include_warnings: bool = False
+) -> tuple[Diagnostic, ...]:
+    comparison = classify_baseline(report, baseline, include_warnings=include_warnings)
     new = tuple(
         item.diagnostic
         for item in comparison.entries
@@ -181,7 +188,11 @@ def check_baseline(report: AnalysisReport, baseline: Baseline) -> tuple[Diagnost
     return tuple(sorted(new, key=lambda item: (item.rule_id, item.fingerprint)))
 
 
-def classify_baseline(report: AnalysisReport, baseline: Baseline) -> RatchetComparison:
+def classify_baseline(
+    report: AnalysisReport, baseline: Baseline, *, include_warnings: bool = False
+) -> RatchetComparison:
+    if baseline.include_warnings is not include_warnings:
+        ConfigurationError.fail("baseline include_warnings does not match the comparison setting")
     if baseline.repository_id != report.repository_id:
         ConfigurationError.fail("baseline repository_id does not match the manifest")
     if baseline.policy_id != report.policy_id or baseline.policy_version != report.policy_version:
@@ -190,8 +201,7 @@ def classify_baseline(report: AnalysisReport, baseline: Baseline) -> RatchetComp
         ConfigurationError.fail("baseline scope does not match the current manifest")
     current = {
         item.fingerprint: item
-        for item in report.diagnostics
-        if item.severity == "error" and item.disposition == "active"
+        for item in ratchet_findings(report, include_warnings=include_warnings)
     }
     known = set(baseline.fingerprints)
     entries = [
@@ -213,4 +223,52 @@ def classify_baseline(report: AnalysisReport, baseline: Baseline) -> RatchetComp
         )
         for fingerprint in sorted(known - set(current))
     )
-    return RatchetComparison(entries=tuple(entries))
+    return RatchetComparison(entries=tuple(entries), include_warnings=include_warnings)
+
+
+def ratchet_findings(
+    report: AnalysisReport, *, include_warnings: bool = False
+) -> tuple[Diagnostic, ...]:
+    return tuple(
+        item
+        for item in report.diagnostics
+        if item.disposition == "active" and (item.severity == "error" or include_warnings)
+    )
+
+
+def baseline_from_report(report: AnalysisReport, *, include_warnings: bool = False) -> Baseline:
+    if report.completion != "complete":
+        ConfigurationError.fail("cannot create a baseline from incomplete analysis")
+    if any(
+        (
+            isinstance(report.policy_version, bool),
+            report.policy_version < 1,
+            not report.repository_id,
+            not report.policy_id,
+            len(report.scope_digest) != _SHA256_HEX_LENGTH,
+            any(character not in "0123456789abcdef" for character in report.scope_digest),
+        )
+    ):
+        ConfigurationError.fail("cannot create a baseline from invalid report metadata")
+    fingerprints = tuple(item.fingerprint for item in report.diagnostics)
+    if len(fingerprints) != len(set(fingerprints)):
+        ConfigurationError.fail("cannot create a baseline from duplicate diagnostic fingerprints")
+    if any(item.fingerprint != semantic_fingerprint(item) for item in report.diagnostics):
+        ConfigurationError.fail("cannot create a baseline from invalid diagnostic fingerprints")
+    baseline = Baseline(
+        repository_id=report.repository_id,
+        policy_id=report.policy_id,
+        policy_version=report.policy_version,
+        scope_digest=report.scope_digest,
+        fingerprints=tuple(
+            sorted(
+                item.fingerprint
+                for item in ratchet_findings(report, include_warnings=include_warnings)
+                if item.baselineable
+            )
+        ),
+        include_warnings=include_warnings,
+    )
+    if len(canonical_json(baseline_dict(baseline)).encode("utf-8")) > MAX_REPOSITORY_INPUT_BYTES:
+        ConfigurationError.fail("baseline exceeds the parser's 1 MiB size limit")
+    return baseline

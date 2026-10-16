@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 from ._json import parse_json_object
 from .canonical import canonical_path
 from .errors import ConfigurationError
+from .javascript import is_javascript_path
 from .models import (
+    MAX_REPOSITORY_INPUT_BYTES,
     Baseline,
     CommitMessageConfig,
     CommitMessageEnforcement,
@@ -16,6 +18,8 @@ from .models import (
     ComponentId,
     DocumentationConfig,
     ExceptionRecord,
+    JavaScriptArtifact,
+    JavaScriptArtifactKind,
     MakefileException,
     Manifest,
     PolicyId,
@@ -35,7 +39,7 @@ if TYPE_CHECKING:
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MAX_EXCEPTION_DURATION = timedelta(days=90)
-_MAX_INPUT_BYTES = 1_048_576
+_MAX_INPUT_BYTES = MAX_REPOSITORY_INPUT_BYTES
 _MAX_COMPONENTS = 10_000
 _MAX_EXCEPTIONS = 1_000
 _BASELINE_SCHEMA_VERSION = 2
@@ -550,6 +554,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         "pull_request",
         "commit_message",
         "makefiles",
+        "javascript",
     }
     required = {"repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
@@ -581,7 +586,59 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         if "commit_message" in data
         else CommitMessageConfig(),
         makefile_exceptions=_makefile_exceptions(data["makefiles"]) if "makefiles" in data else (),
+        javascript_artifacts=_javascript_artifacts(data["javascript"])
+        if "javascript" in data
+        else (),
     )
+
+
+def _javascript_artifacts(value: object) -> tuple[JavaScriptArtifact, ...]:
+    data = _mapping(value, "javascript")
+    _strict_keys(data, {"artifacts"}, set(), "javascript")
+    records = _list(data.get("artifacts", []), "javascript.artifacts")
+    if len(records) > _MAX_EXCEPTIONS:
+        ConfigurationError.fail(f"javascript may contain at most {_MAX_EXCEPTIONS} artifacts")
+    artifacts = tuple(_javascript_artifact(item, index) for index, item in enumerate(records))
+    paths = tuple(item.path for item in artifacts)
+    if len(paths) != len(set(paths)):
+        ConfigurationError.fail("javascript.artifacts contains duplicate paths")
+    return artifacts
+
+
+def _javascript_artifact(value: object, index: int) -> JavaScriptArtifact:
+    context = f"javascript.artifacts[{index}]"
+    data = _mapping(value, context)
+    fields = {"path", "kind", "reason", "source"}
+    _strict_keys(data, fields, fields - {"source"}, context)
+    path = _exact_artifact_path(_string(data, "path", context), f"{context}.path")
+    if not is_javascript_path(path):
+        ConfigurationError.fail(
+            f"{context}.path must name a JavaScript .js, .jsx, .mjs or .cjs file"
+        )
+    try:
+        kind = JavaScriptArtifactKind(_string(data, "kind", context))
+    except ValueError:
+        ConfigurationError.fail(
+            f"{context}.kind must be tool-config, generated, vendor, fixture or runtime"
+        )
+    reason = _string(data, "reason", context)
+    if not any(character.isprintable() and not character.isspace() for character in reason):
+        ConfigurationError.fail(f"{context}.reason must contain text")
+    source: str | None = None
+    if kind is JavaScriptArtifactKind.GENERATED:
+        source = _exact_artifact_path(_string(data, "source", context), f"{context}.source")
+        if source == path or is_javascript_path(source):
+            ConfigurationError.fail(f"{context}.source must be a distinct non-JavaScript file")
+    elif "source" in data:
+        ConfigurationError.fail(f"{context}.source is only valid for generated artifacts")
+    return JavaScriptArtifact(path=path, kind=kind, reason=reason, source=source)
+
+
+def _exact_artifact_path(raw_path: str, context: str) -> str:
+    path = canonical_path(raw_path)
+    if path != raw_path or any(character in path for character in "*?[]"):
+        ConfigurationError.fail(f"{context} must be an exact canonical path without globs")
+    return path
 
 
 def _makefile_exceptions(value: object) -> tuple[MakefileException, ...]:
@@ -649,8 +706,9 @@ def parse_baseline_bytes(content: bytes) -> Baseline:
         "policy_version",
         "scope_digest",
         "fingerprints",
+        "include_warnings",
     }
-    _strict_keys(data, fields, fields, "baseline")
+    _strict_keys(data, fields, fields - {"include_warnings"}, "baseline")
     if _integer(data, "schema_version", "baseline", default=0) != _BASELINE_SCHEMA_VERSION:
         ConfigurationError.fail(f"baseline.schema_version must be {_BASELINE_SCHEMA_VERSION}")
     raw_fingerprints = _list(data["fingerprints"], "baseline.fingerprints")
@@ -668,6 +726,7 @@ def parse_baseline_bytes(content: bytes) -> Baseline:
         policy_version=policy_version,
         scope_digest=_string(data, "scope_digest", "baseline"),
         fingerprints=tuple(sorted(fingerprints)),
+        include_warnings=_boolean(data, "include_warnings", "baseline", default=False),
     )
 
 

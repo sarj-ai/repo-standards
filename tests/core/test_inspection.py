@@ -400,11 +400,14 @@ def test_exact_tree_marks_comment_only_ownership_evidence_insubstantial(
     )
 
     assert not tracked.substantive
+    expected_rules = [RuleId("repository/artifacts/bespoke-iac-verifiers")]
+    if verifier == "src/verify-plan.cjs":
+        expected_rules.append(RuleId("repository/artifacts/untyped-javascript"))
     assert [
         item.rule_id
         for item in SarjPolicy.evaluate_repository(snapshot)
         if item.path == f"packages/fake/{verifier}"
-    ] == [RuleId("repository/artifacts/bespoke-iac-verifiers")]
+    ] == expected_rules
 
 
 @pytest.mark.parametrize(
@@ -462,7 +465,10 @@ def test_oversized_ownership_decoys_fail_closed_in_the_exact_tree(
         item.rule_id
         for item in SarjPolicy.evaluate_repository(snapshot)
         if item.path == "packages/fake/src/verify-plan.cjs"
-    ] == [RuleId("repository/artifacts/bespoke-iac-verifiers")]
+    ] == [
+        RuleId("repository/artifacts/bespoke-iac-verifiers"),
+        RuleId("repository/artifacts/untyped-javascript"),
+    ]
 
 
 @pytest.mark.parametrize("ownership", ["workspace", "entrypoint"])
@@ -510,7 +516,7 @@ def test_oversized_lock_does_not_brick_independently_owned_package(
         item.rule_id
         for item in SarjPolicy.evaluate_repository(snapshot)
         if item.path == verifier.relative_to(repository).as_posix()
-    ] == []
+    ] == [RuleId("repository/artifacts/untyped-javascript")]
 
 
 def test_unrelated_oversized_blob_does_not_affect_inspection(tmp_path: Path) -> None:

@@ -31,6 +31,7 @@ class RepositoryAnalysisRequest:
     staged: bool = False
     enabled_rule_ids: tuple[str, ...] = ()
     base_revision: str | None = None
+    include_warnings: bool = False
 
 
 def analyze_repository(request: RepositoryAnalysisRequest) -> AnalysisReport:
@@ -49,6 +50,8 @@ def analyze_repository(request: RepositoryAnalysisRequest) -> AnalysisReport:
 
 
 def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> AnalysisReport:
+    if request.include_warnings and request.mode is not Mode.RATCHET:
+        ConfigurationError.fail("include_warnings requires ratchet analysis mode")
     root = request.root.resolve(strict=True)
     if request.mode is Mode.RATCHET and request.baseline_path is None:
         ConfigurationError.fail("ratchet analysis requires a baseline_path")
@@ -85,8 +88,11 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         baseline = snapshot.baseline
         if baseline is None:
             ConfigurationError.fail("selected ratchet baseline was not loaded")
-        check_baseline(report, baseline)
-        report = replace(report, ratchet=classify_baseline(report, baseline))
+        check_baseline(report, baseline, include_warnings=request.include_warnings)
+        report = replace(
+            report,
+            ratchet=classify_baseline(report, baseline, include_warnings=request.include_warnings),
+        )
     return report
 
 

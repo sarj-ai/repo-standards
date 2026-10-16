@@ -31,6 +31,7 @@ def capabilities_payload() -> dict[str, object]:
     return {
         **envelope("capabilities"),
         "commands": [
+            "baseline",
             "capabilities",
             "catalog",
             "check",
@@ -66,7 +67,7 @@ def capabilities_payload() -> dict[str, object]:
                 "application_code_execution": False,
             },
         },
-        "schemas": ["catalog", "report"],
+        "schemas": ["baseline", "catalog", "report"],
         "pagination": {"default_limit": 100, "maximum_limit": MAX_PAGE_SIZE},
     }
 

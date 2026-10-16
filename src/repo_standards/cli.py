@@ -22,7 +22,12 @@ from repo_standards._machine import (
 )
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.commit_message import CommitMessageResult, check_local_commit_message_file
-from repo_standards.core.engine import analyze, check_baseline
+from repo_standards.core.engine import (
+    analyze,
+    baseline_from_report,
+    check_baseline,
+    ratchet_findings,
+)
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import (
     GitIdentity,
@@ -71,7 +76,7 @@ from repo_standards.core.pull_request_size import (
     analyze_pull_request_size,
     analyze_size_since_review,
 )
-from repo_standards.core.render import render_text, report_dict
+from repo_standards.core.render import baseline_dict, baseline_schema, render_text, report_dict
 from repo_standards.core.review_policy import (
     CheckConclusion,
     HumanReviewEvidence,
@@ -219,6 +224,7 @@ class OutputFormat(StrEnum):
 
 
 class SchemaDocument(StrEnum):
+    BASELINE = "baseline"
     REPORT = "report"
     CATALOG = "catalog"
 
@@ -1800,6 +1806,12 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
             help="Activate a current rule ID for this run.",
         ),
     ] = None,
+    ratchet_warnings: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - explicit CLI opt-in, separate from severity.
+        bool,
+        typer.Option(
+            "--ratchet-warnings", help="Include active warnings in --mode ratchet comparisons."
+        ),
+    ] = False,
 ) -> None:
     """Analyze one repository manifest."""
     raise typer.Exit(
@@ -1813,8 +1825,51 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
             staged=staged,
             enabled_rule_ids=tuple(enable_rule or ()),
             base_revision=base,
+            include_warnings=ratchet_warnings,
         )
     )
+
+
+@app.command("baseline")
+def create_baseline(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - explicit inert CLI boundary
+    root: Annotated[Path, typer.Argument()] = Path(),
+    manifest: Annotated[str, typer.Option()] = ".repo-standards/repository.toml",
+    as_of: Annotated[str | None, typer.Option(help="Deterministic YYYY-MM-DD")] = None,
+    staged: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - select exact index bytes.
+        bool,
+        typer.Option(help="Read the staged Git index instead of the committed HEAD tree."),
+    ] = False,
+    enable_rule: Annotated[list[str] | None, typer.Option("--enable-rule")] = None,
+    ratchet_warnings: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - explicit comparison contract.
+        bool,
+        typer.Option(
+            "--ratchet-warnings", help="Include active warnings in the reviewed baseline."
+        ),
+    ] = False,
+) -> None:
+    """Print baseline JSON from exact Git evidence without writing files."""
+    try:
+        completed = _complete_analysis(
+            root=root,
+            manifest_path=manifest,
+            baseline_path=".repo-standards/baseline.json",
+            policy=_policy(),
+            mode=Mode.REPORT,
+            as_of=as_of,
+            staged=staged,
+            enabled_rule_ids=tuple(enable_rule or ()),
+            base_revision=None,
+        )
+        baseline = baseline_from_report(completed.report, include_warnings=ratchet_warnings)
+    except ConfigurationError as error:
+        _emit_command_error(
+            "baseline",
+            "baseline.incomplete",
+            str(error),
+            phase="analysis",
+            remediation="Complete repository analysis before creating a reviewed baseline.",
+        )
+    typer.echo(canonical_json(baseline_dict(baseline)))
 
 
 @app.command("report")
@@ -1862,6 +1917,7 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
     staged: bool,
     enabled_rule_ids: tuple[str, ...],
     base_revision: str | None,
+    include_warnings: bool = False,
 ) -> int:
     command = "report" if mode is Mode.REPORT else "check"
     baseline_state: Mapping[str, object] = {
@@ -1870,6 +1926,8 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
     }
     ratchet_state: Mapping[str, object] = {"status": "not-requested"}
     try:
+        if include_warnings and mode is not Mode.RATCHET:
+            ConfigurationError.fail("--ratchet-warnings requires --mode ratchet")
         policy = _policy()
         report, regressions, baseline_state, ratchet_state = _complete_analysis(
             root=root,
@@ -1881,6 +1939,7 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
             staged=staged,
             enabled_rule_ids=enabled_rule_ids,
             base_revision=base_revision,
+            include_warnings=include_warnings,
         )
     except ConfigurationError as error:
         report = _incomplete(SarjPolicy.policy_id, mode, str(error))
@@ -1938,6 +1997,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     staged: bool,
     enabled_rule_ids: tuple[str, ...],
     base_revision: str | None,
+    include_warnings: bool = False,
 ) -> _CompletedAnalysis:
     try:
         resolved_root = root.resolve(strict=True)
@@ -1990,22 +2050,26 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     if snapshot.baseline is None:
         message = "baseline is absent from the selected Git tree"
         raise BaselineError(message)
-    return _complete_ratchet_analysis(report, snapshot.baseline, baseline_path)
+    return _complete_ratchet_analysis(
+        report, snapshot.baseline, baseline_path, include_warnings=include_warnings
+    )
 
 
 def _complete_ratchet_analysis(
-    report: AnalysisReport, baseline: Baseline, baseline_path: str
+    report: AnalysisReport,
+    baseline: Baseline,
+    baseline_path: str,
+    *,
+    include_warnings: bool = False,
 ) -> _CompletedAnalysis:
     try:
-        regressions = check_baseline(report, baseline)
+        regressions = check_baseline(report, baseline, include_warnings=include_warnings)
     except ConfigurationError as error:
         raise BaselineError(str(error)) from error
     stale_rule = RuleId("core/baseline/stale-entry")
     stale = tuple(item for item in regressions if item.rule_id == stale_rule)
     new_count = len(regressions) - len(stale)
-    active_count = sum(
-        item.severity == "error" and item.disposition == "active" for item in report.diagnostics
-    )
+    active_count = len(ratchet_findings(report, include_warnings=include_warnings))
     ratchet_summary = {
         **report.summary,
         "ratchet_regressions": len(regressions),
@@ -2034,6 +2098,7 @@ def _complete_ratchet_analysis(
         "path": baseline_path,
         "fingerprints": len(baseline.fingerprints),
         "scope_digest": baseline.scope_digest,
+        "include_warnings": baseline.include_warnings,
     }
     ratchet_state: Mapping[str, object] = {
         "status": "regressions" if regressions else "clean",
@@ -2041,6 +2106,7 @@ def _complete_ratchet_analysis(
         "new": new_count,
         "stale": len(stale),
         "regressions": len(regressions),
+        "include_warnings": include_warnings,
     }
     return _CompletedAnalysis(report, regressions, baseline_state, ratchet_state)
 
@@ -2247,7 +2313,7 @@ def _emit_command_error(
 def print_schema(
     document: Annotated[str, typer.Argument()] = SchemaDocument.REPORT,
 ) -> None:
-    """Print repository report or catalog JSON Schema."""
+    """Print repository report, baseline or catalog JSON Schema."""
     try:
         selected = SchemaDocument(document)
     except ValueError:
@@ -2256,9 +2322,11 @@ def print_schema(
             "schema.unknown",
             f"unknown schema document: {document}",
             phase="request",
-            remediation="Request `report` or `catalog`.",
+            remediation="Request `report`, `baseline` or `catalog`.",
         )
     match selected:
+        case SchemaDocument.BASELINE:
+            payload = baseline_schema()
         case SchemaDocument.CATALOG:
             from repo_standards.catalog import catalog_schema  # ruff: ignore[import-outside-top-level] -- defer the catalog reference model for other commands.
 
