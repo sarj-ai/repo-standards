@@ -202,7 +202,8 @@ def is_test_path(path: str) -> bool:
         return True
     basename = pure.name.casefold()
     return (
-        _PYTHON_TEST.fullmatch(basename) is not None
+        basename == "conftest.py"
+        or _PYTHON_TEST.fullmatch(basename) is not None
         or _JAVASCRIPT_TEST.fullmatch(basename) is not None
         or _GO_TEST.fullmatch(basename) is not None
         or _JVM_TEST.fullmatch(basename) is not None
