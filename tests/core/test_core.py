@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
+import json
 from typing import ClassVar
 
 import pytest
 
-from repo_standards.core.canonical import canonical_json, canonical_path, semantic_fingerprint
+from repo_standards.core.canonical import (
+    canonical_json,
+    canonical_path,
+    semantic_finding_key,
+    semantic_fingerprint,
+)
 from repo_standards.core.engine import analyze, check_baseline, classify_baseline
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import (
@@ -28,6 +34,7 @@ from repo_standards.core.models import (
     Rule,
     RuleId,
 )
+from repo_standards.core.parser import parse_baseline_bytes
 from repo_standards.core.rule_reviews import RuleVersion
 
 
@@ -83,6 +90,17 @@ def _finding() -> Diagnostic:
     )
 
 
+def test_finding_identity_preserves_the_published_length_prefixed_encoding() -> None:
+    finding = _finding()
+
+    assert semantic_fingerprint(finding) == (
+        "7c5e074c8c033adb8cd692b7f34e65375f8415c06cf745e98349a1e9ab79c19b"
+    )
+    assert semantic_finding_key(finding) == (
+        "ff5b57c26d773f515ffaa8577fa6a8691789f23d26e6f9827b33d045fbe365d6"
+    )
+
+
 def test_analysis_report_variants_reject_empty_required_payloads() -> None:
     finding = analyze(
         _manifest(),
@@ -116,6 +134,30 @@ def test_analysis_report_variants_reject_empty_required_payloads() -> None:
 def test_canonical_json_rejects_non_finite_numbers() -> None:
     with pytest.raises(ConfigurationError, match="canonical JSON"):
         canonical_json({"value": float("nan")})
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        '"schema_version": 2.0',
+        '"schema_version": 2, "schema_version": 2',
+        '"schema_version": 2, "\\u0073chema_version": 2',
+    ],
+)
+def test_baseline_rejects_ambiguous_schema_identity(replacement: str) -> None:
+    payload = json.dumps(
+        {
+            "schema_version": 2,
+            "repository_id": "example",
+            "policy": "example",
+            "policy_version": 1,
+            "scope_digest": "a" * 64,
+            "fingerprints": [],
+        }
+    ).replace('"schema_version": 2', replacement)
+
+    with pytest.raises(ConfigurationError):
+        parse_baseline_bytes(payload.encode())
 
 
 def _manifest(*components: Component) -> Manifest:

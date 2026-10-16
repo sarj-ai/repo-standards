@@ -108,8 +108,7 @@ def analyze(  # ruff: ignore[too-many-arguments] - explicit rule activation is a
         )
     findings = apply_exceptions(findings, manifest, as_of)
     diagnostics = tuple(
-        with_fingerprint(item)
-        for item in sorted(
+        sorted(
             findings,
             key=lambda item: (item.path, item.rule_id, item.component_id, item.manifest_anchor),
         )

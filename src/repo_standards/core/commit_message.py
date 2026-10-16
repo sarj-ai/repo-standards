@@ -102,14 +102,17 @@ def analyze_commit_header(header: str) -> CommitMessageResult:
 
 
 def analyze_commit_message_bytes(content: bytes) -> CommitMessageResult:
+    return analyze_commit_header(_message_header(content))
+
+
+def _message_header(content: bytes) -> str:
     if len(content) > MAXIMUM_MESSAGE_BYTES:
         ConfigurationError.fail(f"commit message exceeds {MAXIMUM_MESSAGE_BYTES} bytes")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
         ConfigurationError.fail("commit message must be UTF-8")
-    header = text.splitlines()[0] if text.splitlines() else ""
-    return analyze_commit_header(header)
+    return text.partition("\n")[0].removesuffix("\r")
 
 
 def check_commit_message_file(
@@ -170,13 +173,7 @@ def check_local_commit_message_file(
 
 
 def _temporary_commit_result(content: bytes) -> CommitMessageResult | None:
-    if len(content) > MAXIMUM_MESSAGE_BYTES:
-        ConfigurationError.fail(f"commit message exceeds {MAXIMUM_MESSAGE_BYTES} bytes")
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        ConfigurationError.fail("commit message must be UTF-8")
-    header = text.splitlines()[0] if text.splitlines() else ""
+    header = _message_header(content)
     if _CONTROLS.search(header) is None and any(
         header.startswith(prefix) and header.removeprefix(prefix).strip()
         for prefix in ("fixup! ", "squash! ", "amend! ")
@@ -206,7 +203,7 @@ def _merge_in_progress(root: Path, *, message_file: Path) -> bool:
             timeout=5,
             env={"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C"},
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return False
     if completed.returncode != 0:
         return False

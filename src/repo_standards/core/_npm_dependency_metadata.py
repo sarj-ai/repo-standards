@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
-from pydantic import ConfigDict, TypeAdapter  # ruff: ignore[banned-api] -- generic JSON/schema infrastructure validates open typed mappings, rather than a domain object.
-
-from .models import JSONValue
+from ._json import parse_json_object
 
 
-_OBJECT = TypeAdapter(dict[str, JSONValue], config=ConfigDict(allow_inf_nan=False))
+if TYPE_CHECKING:
+    from .models import JSONValue
+
+
 _DEPENDENCY_FIELDS = frozenset(
     {"dependencies", "devDependencies", "peerDependencies", "optionalDependencies"}
 )
@@ -93,26 +95,6 @@ def _same_metadata(
 
 def _object(content: bytes) -> dict[str, JSONValue] | None:
     try:
-        parsed: object = json.loads(  # pyright: ignore[reportAny] -- strict JSON parser boundary.
-            content.decode("utf-8"),
-            object_pairs_hook=_unique_object,
-            parse_constant=_invalid_constant,
-        )
-        return _OBJECT.validate_python(parsed, strict=True)
+        return parse_json_object(content)
     except UnicodeError, ValueError, RecursionError:
         return None
-
-
-def _unique_object(pairs: list[tuple[str, JSONValue]]) -> dict[str, JSONValue]:
-    result: dict[str, JSONValue] = {}
-    for key, value in pairs:
-        if key in result:
-            message = "duplicate dependency metadata key"
-            raise ValueError(message)
-        result[key] = value
-    return result
-
-
-def _invalid_constant(value: str) -> JSONValue:
-    message = f"invalid JSON constant: {value}"
-    raise ValueError(message)

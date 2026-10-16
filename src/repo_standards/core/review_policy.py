@@ -5,6 +5,8 @@ from enum import StrEnum
 import re
 from typing import Literal
 
+from .canonical import canonical_path
+from .errors import ConfigurationError
 from .models import GitObjectId
 
 
@@ -73,16 +75,20 @@ class ReviewPolicyConfig:
     require_resolved_threads: bool = True
 
     def __post_init__(self) -> None:
-        if isinstance(self.zero_review_below_lines, bool) or self.zero_review_below_lines <= 0:
+        if type(self.zero_review_below_lines) is not int or self.zero_review_below_lines <= 0:
             message = "zero-review threshold must be a positive integer"
             raise ValueError(message)
         if (
-            isinstance(self.one_review_maximum_lines, bool)
+            type(self.one_review_maximum_lines) is not int
             or self.one_review_maximum_lines < self.zero_review_below_lines
         ):
             message = "one-review maximum must be at least the zero-review threshold"
             raise ValueError(message)
-        if self.migration_review_floor not in {0, 1, 2}:
+        if type(self.migration_review_floor) is not int or self.migration_review_floor not in {
+            0,
+            1,
+            2,
+        }:
             message = "migration review floor must be 0, 1, or 2"
             raise ValueError(message)
         _validate_paths(self.migration_roots, "migration root")
@@ -113,7 +119,7 @@ class SinceReviewEvidence:
     changed_paths: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if isinstance(self.counted_lines, bool) or self.counted_lines < 0:
+        if type(self.counted_lines) is not int or self.counted_lines < 0:
             message = "counted lines since review must be a non-negative integer"
             raise ValueError(message)
         _validate_paths(self.changed_paths, "changed path since review")
@@ -146,7 +152,7 @@ class ReviewPolicyEvidence:
     threads_resolved: bool | None
 
     def __post_init__(self) -> None:
-        if isinstance(self.counted_lines, bool) or self.counted_lines < 0:
+        if type(self.counted_lines) is not int or self.counted_lines < 0:
             message = "counted lines must be a non-negative integer"
             raise ValueError(message)
         if _OBJECT_ID.fullmatch(self.evaluated_head_sha) is None:
@@ -241,7 +247,12 @@ def _validate_paths(paths: tuple[str, ...], kind: str) -> None:
         message = f"{kind}s must be unique"
         raise ValueError(message)
     for path in paths:
-        if not path or path != path.strip("/") or "//" in path:
+        try:
+            normalized = canonical_path(path)
+        except ConfigurationError as error:
+            message = f"{kind} must be a normalized repository-relative path: {path!r}"
+            raise ValueError(message) from error
+        if normalized != path:
             message = f"{kind} must be a normalized repository-relative path: {path!r}"
             raise ValueError(message)
 

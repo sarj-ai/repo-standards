@@ -51,6 +51,36 @@ def _evidence(  # ruff: ignore[too-many-arguments] - evidence dimensions are ind
     )
 
 
+@pytest.mark.parametrize("lines", [0.5, float("nan"), float("inf")])
+def test_fractional_or_nonfinite_line_counts_are_rejected(lines: float) -> None:
+    with pytest.raises(ValueError, match="integer"):
+        _evidence(counted_lines=lines)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="integer"):
+        SinceReviewEvidence(counted_lines=lines, changed_paths=())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="integer"):
+        ReviewPolicyConfig(zero_review_below_lines=lines)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="one-review maximum"):
+        ReviewPolicyConfig(one_review_maximum_lines=lines)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("floor", [True, 1.0])
+def test_migration_review_floor_requires_an_actual_integer(floor: bool | float) -> None:
+    with pytest.raises(ValueError, match="migration review floor"):
+        ReviewPolicyConfig(migration_review_floor=floor)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "path", ["db/../other", "./db", "db/./001.sql", "db\\001.sql", "db/\x00.sql"]
+)
+def test_review_paths_must_be_canonical_before_migration_matching(path: str) -> None:
+    with pytest.raises(ValueError, match="normalized"):
+        _evidence(changed_paths=(path,))
+    with pytest.raises(ValueError, match="normalized"):
+        SinceReviewEvidence(counted_lines=0, changed_paths=(path,))
+    with pytest.raises(ValueError, match="normalized"):
+        ReviewPolicyConfig(migration_roots=(path,))
+
+
 def _approval(
     reviewer: str = "reviewer",
     *,
@@ -502,6 +532,4 @@ def test_invalid_policy_is_rejected() -> None:
     with pytest.raises(ValueError, match="accepted check conclusions"):
         ReviewPolicyConfig(accepted_check_conclusions=frozenset())
     with pytest.raises(ValueError, match="accepted check conclusions"):
-        ReviewPolicyConfig(
-            accepted_check_conclusions=frozenset({CheckConclusion.FAILURE})
-        )
+        ReviewPolicyConfig(accepted_check_conclusions=frozenset({CheckConclusion.FAILURE}))
