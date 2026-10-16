@@ -12,12 +12,13 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed Git meta
 import tempfile
 import threading
 import tomllib
-from types import MappingProxyType
 from typing import ClassVar, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 import yaml
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
+
+from repo_standards._git_environment import GIT_ENVIRONMENT
 
 from ._json import parse_json_object
 from .canonical import canonical_path
@@ -55,17 +56,6 @@ _PULL_REQUEST_TEMPLATE = re.compile(
 _GIT_TREE_FIELD_COUNT = 3
 _GIT_INDEX_FIELD_COUNT = 3
 _ASCII_CONTROL_LIMIT = 32
-_GIT_ENVIRONMENT = MappingProxyType(
-    {
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_NO_LAZY_FETCH": "1",
-        "GIT_NO_REPLACE_OBJECTS": "1",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_TERMINAL_PROMPT": "0",
-        "LC_ALL": "C",
-    }
-)
 _OWNERSHIP_LOCK_NAMES = frozenset(
     {
         "Pipfile.lock",
@@ -605,7 +595,7 @@ def _git_process(root: Path, arguments: list[str]) -> subprocess.CompletedProces
             capture_output=True,
             timeout=30,
             text=True,
-            env=_GIT_ENVIRONMENT,
+            env=GIT_ENVIRONMENT,
         )
     except OSError, UnicodeError, subprocess.SubprocessError:
         ConfigurationError.fail("cannot inspect the comparison Git object")
@@ -762,7 +752,7 @@ def _bounded_git_payload(command: list[str], *, noun: str) -> bytes:
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env=_GIT_ENVIRONMENT,
+            env=GIT_ENVIRONMENT,
         )
     except OSError:
         ConfigurationError.fail(f"cannot enumerate {noun}")
@@ -1110,7 +1100,7 @@ def _run_git_batch(
             capture_output=True,
             stdin=batch_input,
             timeout=30,
-            env=_GIT_ENVIRONMENT,
+            env=GIT_ENVIRONMENT,
         )
 
 

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from datetime import timedelta
-import os
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git queries
-from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from repo_standards._git_environment import GIT_NO_PAGER_ENVIRONMENT
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import GitObjectId
 
@@ -21,18 +20,6 @@ if TYPE_CHECKING:
 _OBJECT_ID = re.compile(rb"[0-9a-f]{40}\Z")
 _SAFE_REF = re.compile(r"[^\x00-\x20\x7f]{1,1024}\Z")
 _GIT_TIMEOUT = timedelta(seconds=10)
-_GIT_ENVIRONMENT = MappingProxyType(
-    {
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_NO_LAZY_FETCH": "1",
-        "GIT_NO_REPLACE_OBJECTS": "1",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_PAGER": "cat",
-        "GIT_TERMINAL_PROMPT": "0",
-        "LC_ALL": "C",
-    }
-)
 
 
 def resolve_local_advisory_context(
@@ -79,8 +66,7 @@ def _base_ref_for_branch(
     matches = {
         base_ref
         for prefix, base_ref, sha_prefix_length in transition_bases
-        if re.fullmatch(rf"{re.escape(prefix)}[0-9a-f]{{{sha_prefix_length}}}", branch)
-        is not None
+        if re.fullmatch(rf"{re.escape(prefix)}[0-9a-f]{{{sha_prefix_length}}}", branch) is not None
     }
     if len(matches) > 1:
         ConfigurationError.fail("local branch matches multiple transition destinations")
@@ -106,9 +92,9 @@ def _git(root: Path, *arguments: str) -> bytes:
             check=False,
             capture_output=True,
             timeout=_GIT_TIMEOUT.total_seconds(),
-            env=_GIT_ENVIRONMENT,
+            env=GIT_NO_PAGER_ENVIRONMENT,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         ConfigurationError.fail("Git could not resolve local pull-request context")
     if completed.returncode != 0:
         ConfigurationError.fail("Git could not resolve local pull-request context")

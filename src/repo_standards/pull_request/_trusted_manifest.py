@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
-import os
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git queries
-from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from repo_standards._git_environment import GIT_NO_PAGER_ENVIRONMENT
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import GitObjectId, Manifest
 from repo_standards.core.parser import parse_manifest_bytes
@@ -23,18 +22,6 @@ MAXIMUM_MANIFEST_BYTES = 1024 * 1024
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}\Z")
 _SIZE = re.compile(rb"[0-9]+\Z")
 _GIT_TIMEOUT = timedelta(seconds=10)
-_GIT_ENVIRONMENT = MappingProxyType(
-    {
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_NO_LAZY_FETCH": "1",
-        "GIT_NO_REPLACE_OBJECTS": "1",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_PAGER": "cat",
-        "GIT_TERMINAL_PROMPT": "0",
-        "LC_ALL": "C",
-    }
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +94,7 @@ def _git(
             check=False,
             capture_output=True,
             timeout=_GIT_TIMEOUT.total_seconds(),
-            env=_GIT_ENVIRONMENT,
+            env=GIT_NO_PAGER_ENVIRONMENT,
         )
     except OSError, subprocess.TimeoutExpired:
         ConfigurationError.fail("Git could not load trusted pull-request policy")
