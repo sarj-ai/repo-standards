@@ -8,13 +8,14 @@ import selectors
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git queries
 import time
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, NamedTuple, NewType
 
 
 if TYPE_CHECKING:
     from pathlib import Path
     from typing import NoReturn
+
+from repo_standards._git_environment import GIT_NO_PAGER_ENVIRONMENT
 
 from .commit_message import CommitMessageFinding, analyze_commit_header
 from .errors import ConfigurationError
@@ -35,18 +36,6 @@ _GIT_TIMEOUT = timedelta(seconds=10)
 _READ_CHUNK_BYTES = 64 * 1024
 _OBJECT_ID = re.compile(rb"[0-9a-f]{40}\Z")
 _NUMBERED_SUBJECT = re.compile(rb"\(([1-9][0-9]*)/([1-9][0-9]*)\) ([^\s].*)\Z")
-_GIT_ENVIRONMENT = MappingProxyType(
-    {
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_NO_LAZY_FETCH": "1",
-        "GIT_NO_REPLACE_OBJECTS": "1",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_PAGER": "cat",
-        "GIT_TERMINAL_PROMPT": "0",
-        "LC_ALL": "C",
-    }
-)
 
 
 NumberingIssue = Literal[
@@ -442,7 +431,7 @@ def _is_ancestor(root: Path, ancestor: GitObjectId, descendant: GitObjectId) -> 
             check=False,
             capture_output=True,
             timeout=_GIT_TIMEOUT.total_seconds(),
-            env=_GIT_ENVIRONMENT,
+            env=GIT_NO_PAGER_ENVIRONMENT,
         )
     except OSError, subprocess.TimeoutExpired:
         ConfigurationError.fail("Git could not verify transition ancestry")
@@ -460,7 +449,7 @@ def _git(root: Path, *arguments: str, failure: str) -> bytes:
             [executable, "-C", str(root), *arguments],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env=_GIT_ENVIRONMENT,
+            env=GIT_NO_PAGER_ENVIRONMENT,
         )
     except OSError:
         ConfigurationError.fail(failure)

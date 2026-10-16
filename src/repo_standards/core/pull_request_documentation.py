@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git queries
-from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from repo_standards._git_environment import GIT_ENVIRONMENT
 from repo_standards.pull_request._trusted_manifest import load_trusted_base_manifest
 
 from ._npm_dependency_metadata import lock_dependency_update, package_dependency_update
@@ -19,17 +18,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-_GIT_ENVIRONMENT = MappingProxyType(
-    {
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_NO_LAZY_FETCH": "1",
-        "GIT_NO_REPLACE_OBJECTS": "1",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_TERMINAL_PROMPT": "0",
-        "LC_ALL": "C",
-    }
-)
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}\Z")
 _DEFAULT_POLICY = DocumentationConfig(entrypoints=("README.md",))
 
@@ -310,7 +298,7 @@ def _git(root: Path, *arguments: str, input_bytes: bytes | None = None) -> bytes
             capture_output=True,
             input=input_bytes,
             timeout=30,
-            env=_GIT_ENVIRONMENT,
+            env=GIT_ENVIRONMENT,
         )
     except OSError, subprocess.TimeoutExpired:
         ConfigurationError.fail("Git could not complete pull-request documentation analysis")

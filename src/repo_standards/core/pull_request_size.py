@@ -1,28 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git queries
-from types import MappingProxyType
 from typing import Literal
+
+from repo_standards._git_environment import GIT_ENVIRONMENT
 
 from .errors import ConfigurationError
 
 
-_GIT_ENVIRONMENT = MappingProxyType(
-    {
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_NO_LAZY_FETCH": "1",
-        "GIT_NO_REPLACE_OBJECTS": "1",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_TERMINAL_PROMPT": "0",
-        "LC_ALL": "C",
-    }
-)
 _TEST_COMPONENTS = frozenset({"test", "tests", "__tests__", "__snapshots__"})
 _PYTHON_TEST = re.compile(r"(?:test_.+|.+_test)\.py\Z")
 _JAVASCRIPT_TEST = re.compile(r".+\.(?:test|spec)\.(?:[cm]?[jt]sx?)\Z")
@@ -402,7 +391,7 @@ def _git(
             capture_output=True,
             input=input_bytes,
             timeout=30,
-            env=_GIT_ENVIRONMENT,
+            env=GIT_ENVIRONMENT,
         )
     except OSError, subprocess.TimeoutExpired:
         ConfigurationError.fail("Git could not complete pull-request size analysis")

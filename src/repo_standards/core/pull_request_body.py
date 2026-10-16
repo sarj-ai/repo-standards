@@ -5,10 +5,11 @@ import re
 from typing import NamedTuple
 
 
-_ATX_HEADING = re.compile(r"^[ \t]{0,3}(?P<marks>#{1,6})(?:[ \t]+(?P<title>.*?))?[ \t]*$")
+_ATX_HEADING = re.compile(r"^ {0,3}(?P<marks>#{1,6})(?:[ \t]+(?P<title>.*?))?[ \t]*$")
 _ATX_CLOSING = re.compile(r"[ \t]+#+[ \t]*$")
-_SETEXT_HEADING = re.compile(r"^[ \t]{0,3}(?P<marks>=+|-+)[ \t]*$")
-_FENCE = re.compile(r"^[ \t]{0,3}(?P<marks>`{3,}|~{3,})(?P<tail>.*)$")
+_SETEXT_HEADING = re.compile(r"^ {0,3}(?P<marks>=+|-+)[ \t]*$")
+_SETEXT_TEXT = re.compile(r"^ {0,3}[^ \t]")
+_FENCE = re.compile(r"^ {0,3}(?P<marks>`{3,}|~{3,})(?P<tail>.*)$")
 _HEADING_DECORATION = re.compile(r"[*_`]+")
 
 
@@ -31,13 +32,10 @@ def missing_required_body_sections(
 ) -> tuple[str, ...]:
     lines = _markdown_lines(body)
     headings = _headings(lines)
-    missing: list[str] = []
-    for required in required_sections:
-        expected = _normalized_title(required)
-        matching = tuple(heading for heading in headings if heading.title == expected)
-        if not matching or not any(_has_content(lines, heading, headings) for heading in matching):
-            missing.append(required)
-    return tuple(missing)
+    filled = _filled_sections(lines, headings)
+    return tuple(
+        required for required in required_sections if _normalized_title(required) not in filled
+    )
 
 
 def missing_template_sections(
@@ -54,7 +52,7 @@ def _markdown_lines(body: str) -> list[str]:
     lines: list[str] = []
     fence: str | None = None
     comment = False
-    for line in body.splitlines():
+    for line in re.split(r"\r\n?|\n", body):
         if not comment and (matched := _FENCE.match(line)) is not None:
             fence = _fence_state(matched, fence)
             lines.append(line)
@@ -123,7 +121,7 @@ def _heading_at(lines: list[str], index: int) -> _Heading | None:
             content_start=index + 1,
             line_index=index,
         )
-    if index + 1 >= len(lines) or not line.strip():
+    if index + 1 >= len(lines) or not line.strip() or _SETEXT_TEXT.match(line) is None:
         return None
     if (setext := _SETEXT_HEADING.match(lines[index + 1])) is None:
         return None
@@ -135,27 +133,17 @@ def _heading_at(lines: list[str], index: int) -> _Heading | None:
     )
 
 
-def _has_content(
-    lines: list[str],
-    heading: _Heading,
-    headings: tuple[_Heading, ...],
-) -> bool:
-    end = len(lines)
-    for candidate in headings:
-        if candidate.line_index > heading.line_index and candidate.level <= heading.level:
-            end = candidate.line_index
-            break
-    heading_lines = {
-        index
-        for candidate in headings
-        for index in range(candidate.line_index, candidate.content_start)
-    }
-    content = "\n".join(
-        line
-        for index, line in enumerate(lines[heading.content_start : end], heading.content_start)
-        if index not in heading_lines
-    )
-    return bool(content.strip())
+def _filled_sections(lines: list[str], headings: tuple[_Heading, ...]) -> frozenset[str]:
+    active: list[_Heading] = []
+    filled: set[str] = set()
+    for index, heading in enumerate(headings):
+        while active and active[-1].level >= heading.level:
+            active.pop()
+        active.append(heading)
+        end = headings[index + 1].line_index if index + 1 < len(headings) else len(lines)
+        if any(line.strip() for line in lines[heading.content_start : end]):
+            filled.update(ancestor.title for ancestor in active)
+    return frozenset(filled)
 
 
 def _normalized_title(value: str) -> str:
