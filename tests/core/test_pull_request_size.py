@@ -70,6 +70,8 @@ def _repository(tmp_path: Path) -> RepositoryFixture:
         "scripts/verify.spec.mjs",
         "python/unit_test.py",
         "python/test_unit.py",
+        "conftest.py",
+        "python/project/conftest.py",
         "typescript/app/__snapshots__/service.snap",
     ],
 )
@@ -79,7 +81,15 @@ def test_test_conventions_are_excluded(path: str) -> None:
 
 @pytest.mark.parametrize(
     "path",
-    ["src/contest.py", "src/testimonials.ts", "vitest.config.ts", "migrations/test_data.sql"],
+    [
+        "src/contest.py",
+        "src/testimonials.ts",
+        "vitest.config.ts",
+        "migrations/test_data.sql",
+        "src/conftest_helpers.py",
+        "src/my_conftest.py",
+        "templates/conftest.py.in",
+    ],
 )
 def test_test_near_misses_are_counted(path: str) -> None:
     assert not is_test_path(path)
@@ -146,10 +156,14 @@ def test_policy_is_loaded_from_base_not_head(tmp_path: Path) -> None:
     assert [directory.path for directory in result.directory_sizes()] == [".", "src"]
 
 
-def test_production_to_test_move_counts_the_deleted_source(tmp_path: Path) -> None:
+@pytest.mark.parametrize("destination", ["tests/test_app.py", "conftest.py"])
+def test_production_to_test_move_counts_the_deleted_source(
+    tmp_path: Path, destination: str
+) -> None:
     repository, base = _repository(tmp_path)
-    (repository / "tests").mkdir()
-    (repository / "src" / "app.py").rename(repository / "tests" / "test_app.py")
+    target = repository / destination
+    target.parent.mkdir(exist_ok=True)
+    (repository / "src" / "app.py").rename(target)
     head = _commit(repository, "move")
 
     result = analyze_pull_request_size(repository, base=base, head=head)
@@ -283,10 +297,12 @@ def test_conflict_resolution_is_counted_since_review(tmp_path: Path) -> None:
     assert [item.path for item in result.files] == ["src/app.py"]
 
 
-def test_test_edits_since_review_are_excluded(tmp_path: Path) -> None:
+@pytest.mark.parametrize("path", ["tests/test_app.py", "package/conftest.py"])
+def test_test_edits_since_review_are_excluded(tmp_path: Path, path: str) -> None:
     branch = _reviewed_branch(tmp_path)
-    (branch.path / "tests").mkdir()
-    (branch.path / "tests" / "test_app.py").write_text("assert True\n" * 40, encoding="utf-8")
+    target = branch.path / path
+    target.parent.mkdir(exist_ok=True)
+    target.write_text("assert True\n" * 40, encoding="utf-8")
 
     head = _commit(branch.path, "more tests")
     result = analyze_size_since_review(
