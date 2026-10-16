@@ -99,6 +99,52 @@ schema = ["drf-spectacular~=1"]
     ]
 
 
+@pytest.mark.parametrize(
+    ("path", "content"),
+    [
+        ("requirements.txt", b"DRF._--spectacular[sidecar]>=1\n"),
+        ("pyproject.toml", b'[project]\ndependencies = ["DRF._--spectacular>=1"]\n'),
+        ("pyproject.toml", b'[tool.poetry.dependencies]\n"DRF._--spectacular" = "^1"\n'),
+        ("pyproject.toml", b'[project]\nname = "DRF._--spectacular"\n'),
+    ],
+    ids=("requirements", "project-dependency", "poetry-dependency", "project-name"),
+)
+def test_python_names_collapse_separator_runs(path: str, content: bytes) -> None:
+    report = detect_instrumentation((TrackedFile(path, content),))
+
+    assert report.completion == "complete"
+    assert [item.capability.capability_id for item in report.candidates] == [
+        "django-drf-spectacular"
+    ]
+    assert report.candidates[0].evidence[0].value == "drf-spectacular"
+
+
+@pytest.mark.parametrize(
+    ("path", "content"),
+    [
+        ("pyproject.toml", b"value=" + b"[" * 2_000 + b"0" + b"]" * 2_000),
+        ("Cargo.toml", b"value=" + b"{a=" * 2_000 + b"0" + b"}" * 2_000),
+    ],
+    ids=("nested-arrays", "nested-inline-tables"),
+)
+def test_recursive_toml_parser_failure_is_an_incomplete_report(path: str, content: bytes) -> None:
+    report = detect_instrumentation((TrackedFile(path, content),))
+
+    assert report.completion == "incomplete"
+    assert report.candidates == ()
+    assert len(report.issues) == 1
+    assert report.issues[0].code == "instrumentation.manifest-invalid"
+
+
+def test_deep_cargo_tables_are_detected_without_recursive_traversal() -> None:
+    content = b"nested." * 998 + b'dependencies.axum = "0.8"\n'
+
+    report = detect_instrumentation((TrackedFile("Cargo.toml", content),))
+
+    assert report.completion == "complete"
+    assert [item.capability.capability_id for item in report.candidates] == ["rust-axum"]
+
+
 def test_framework_project_name_is_detection_evidence() -> None:
     files = (
         TrackedFile(
@@ -219,6 +265,9 @@ def test_detection_is_order_independent_and_reports_malformed_manifest() -> None
     "files",
     [
         pytest.param((TrackedFile("../package.json", b"{}"),), id="traversal"),
+        pytest.param((TrackedFile("control\n/package.json", b"{}"),), id="control-character"),
+        pytest.param((TrackedFile("bidi\u202e/package.json", b"{}"),), id="unicode-format-control"),
+        pytest.param((TrackedFile("cafe\u0301/package.json", b"{}"),), id="noncanonical-unicode"),
         pytest.param(
             (TrackedFile("package.json", b"{}"), TrackedFile("package.json", b"{}")),
             id="duplicate-path",

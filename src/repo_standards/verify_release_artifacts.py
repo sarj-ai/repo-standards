@@ -18,7 +18,8 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError  # ruff: ignore[banned-api] -- generic JSON/schema infrastructure validates open typed mappings, rather than a domain object.
 import typer
 
-from repo_standards.core.canonical import canonical_json
+from repo_standards.core.canonical import canonical_json, canonical_path
+from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import JSONValue
 
 
@@ -236,10 +237,13 @@ class InlineScripts(HTMLParser):
 
 
 def _safe_path(raw_path: str) -> PurePosixPath:
-    path = PurePosixPath(raw_path)
-    if path.is_absolute() or ".." in path.parts or not path.parts:
+    try:
+        normalized = canonical_path(raw_path)
+    except ConfigurationError as error:
+        raise UnsafeArtifactPathError(raw_path) from error
+    if normalized != raw_path:
         raise UnsafeArtifactPathError(raw_path)
-    return path
+    return PurePosixPath(normalized)
 
 
 def _scan_identity(name: str, content: bytes) -> list[str]:

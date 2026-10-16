@@ -14,6 +14,8 @@ from typing import (
 )
 
 from repo_standards.core._json import parse_json_object
+from repo_standards.core.canonical import canonical_path
+from repo_standards.core.errors import ConfigurationError
 
 
 if TYPE_CHECKING:
@@ -385,6 +387,7 @@ def detect_instrumentation(files: tuple[TrackedFile, ...]) -> InstrumentationDet
             detected = _detect_file(tracked, basename)
         except (
             InstrumentationInputError,
+            RecursionError,
             tomllib.TOMLDecodeError,
             UnicodeDecodeError,
         ) as error:
@@ -425,14 +428,13 @@ def _validate_files(files: tuple[TrackedFile, ...]) -> _ValidatedFiles:
     paths: set[str] = set()
     total = 0
     for tracked in files:
-        path = PurePosixPath(tracked.path)
-        if (
-            not tracked.path
-            or "\\" in tracked.path
-            or path.is_absolute()
-            or any(part in {"", ".", ".."} for part in path.parts)
-            or path.as_posix() != tracked.path
-        ):
+        try:
+            normalized = canonical_path(tracked.path)
+        except ConfigurationError as error:
+            InstrumentationInputError.fail(
+                "tracked file path must be canonical and relative", cause=error
+            )
+        if normalized != tracked.path:
             InstrumentationInputError.fail("tracked file path must be canonical and relative")
         if tracked.path in paths:
             InstrumentationInputError.fail("tracked file paths must be unique")
@@ -469,15 +471,17 @@ def _detect_file(tracked: TrackedFile, basename: str) -> tuple[EvidenceTriple, .
         marker = _spec_marker(tracked.content, basename)
         result = (("committed-openapi", "committed-spec", marker),) if marker is not None else ()
     elif basename == "package.json":
+        root = _json_object(tracked.content)
         result = _mapped_manifest(
-            _package_json_dependencies(tracked.content),
-            _package_json_project_name(tracked.content),
+            _package_json_dependencies(root),
+            _package_json_project_name(root),
             _NPM_DEPENDENCIES,
         )
     elif basename == "pyproject.toml":
+        root = _toml_object(tracked.content)
         result = _mapped_manifest(
-            _pyproject_dependencies(tracked.content),
-            _pyproject_project_name(tracked.content),
+            _pyproject_dependencies(root),
+            _pyproject_project_name(root),
             _PYTHON_DEPENDENCIES,
         )
     elif basename.startswith("requirements") and basename.endswith((".txt", ".in")):
@@ -536,8 +540,7 @@ def _json_object(content: bytes) -> dict[str, object]:
     return dict(parsed)
 
 
-def _package_json_dependencies(content: bytes) -> set[str]:
-    root = _json_object(content)
+def _package_json_dependencies(root: dict[str, object]) -> set[str]:
     dependencies: set[str] = set()
     for field in ("dependencies", "optionalDependencies", "peerDependencies"):
         value = root.get(field)
@@ -547,8 +550,8 @@ def _package_json_dependencies(content: bytes) -> set[str]:
     return dependencies
 
 
-def _package_json_project_name(content: bytes) -> str | None:
-    name = _json_object(content).get("name")
+def _package_json_project_name(root: dict[str, object]) -> str | None:
+    name = root.get("name")
     return name if isinstance(name, str) else None
 
 
@@ -560,7 +563,7 @@ def _dependency_name(requirement: str) -> str | None:
     match = _PEP508_NAME_RE.match(requirement)
     if match is None:
         return None
-    return match.group(1).lower().replace("_", "-").replace(".", "-")
+    return re.sub(r"[-_.]+", "-", match.group(1)).lower()
 
 
 def _mapping(value: object) -> dict[str, object] | None:
@@ -572,8 +575,7 @@ def _mapping(value: object) -> dict[str, object] | None:
     return {key: item for key, item in raw.items() if isinstance(key, str)}
 
 
-def _pyproject_dependencies(content: bytes) -> set[str]:
-    root = _toml_object(content)
+def _pyproject_dependencies(root: dict[str, object]) -> set[str]:
     result: set[str] = set()
     project = _mapping(root.get("project"))
     if project is not None:
@@ -592,8 +594,8 @@ def _pyproject_dependencies(content: bytes) -> set[str]:
     return result
 
 
-def _pyproject_project_name(content: bytes) -> str | None:
-    project = _mapping(_toml_object(content).get("project"))
+def _pyproject_project_name(root: dict[str, object]) -> str | None:
+    project = _mapping(root.get("project"))
     if project is None:
         return None
     name = project.get("name")
@@ -674,23 +676,29 @@ def _go_dependencies(content: bytes) -> set[str]:
 def _cargo_dependencies(content: bytes) -> set[str]:
     root = _toml_object(content)
     result: set[str] = set()
-
-    def visit(value: object, path: tuple[str, ...]) -> None:
+    pending: list[tuple[object, str]] = [(root, "")]
+    while pending:
+        value, section = pending.pop()
         current = _mapping(value)
         if current is None:
-            return
-        if path and path[-1] == "dependencies":
-            for name, declaration in current.items():
-                details = _mapping(declaration)
-                package = details.get("package") if details is not None else None
-                result.add(package if isinstance(package, str) else name)
-            return
-        for key, child in current.items():
-            if key in {"dev-dependencies", "build-dependencies"}:
-                continue
-            visit(child, (*path, key))
+            continue
+        if section == "dependencies":
+            result.update(_cargo_dependency_names(current))
+            continue
+        pending.extend(
+            (child, key)
+            for key, child in current.items()
+            if key not in {"dev-dependencies", "build-dependencies"}
+        )
+    return result
 
-    visit(root, ())
+
+def _cargo_dependency_names(dependencies: dict[str, object]) -> set[str]:
+    result: set[str] = set()
+    for name, declaration in dependencies.items():
+        details = _mapping(declaration)
+        package = details.get("package") if details is not None else None
+        result.add(package if isinstance(package, str) else name)
     return result
 
 

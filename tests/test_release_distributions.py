@@ -7,7 +7,7 @@ import zipfile
 
 import pytest
 
-from repo_standards.verify_release_artifacts import verify_distributions
+from repo_standards.verify_release_artifacts import UnsafeArtifactPathError, verify_distributions
 
 
 if TYPE_CHECKING:
@@ -48,6 +48,33 @@ def test_distribution_verification_accepts_public_package_members(tmp_path: Path
     )
 
     assert verify_distributions(tmp_path) == []
+
+
+@pytest.mark.parametrize("kind", ["wheel", "sdist"])
+@pytest.mark.parametrize(
+    "member", ["..\\escaped.py", "control\nname.py", "cafe\u0301.py", "./same.py"]
+)
+def test_distribution_members_use_canonical_repository_paths(
+    tmp_path: Path, kind: str, member: str
+) -> None:
+    wheel = {
+        "repo_standards/__init__.py": b"",
+        f"{_DIST_INFO}/METADATA": _METADATA,
+        f"{_DIST_INFO}/licenses/LICENSE": b"MIT",
+    }
+    sdist = {
+        f"{_ROOT}/src/repo_standards/__init__.py": b"",
+        f"{_ROOT}/PKG-INFO": _METADATA,
+        f"{_ROOT}/LICENSE": b"MIT",
+    }
+    if kind == "wheel":
+        wheel[f"repo_standards/{member}"] = b""
+    else:
+        sdist[f"{_ROOT}/src/repo_standards/{member}"] = b""
+    _archives(tmp_path, wheel, sdist)
+
+    with pytest.raises(UnsafeArtifactPathError):
+        verify_distributions(tmp_path)
 
 
 @pytest.mark.parametrize(
