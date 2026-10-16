@@ -15,7 +15,12 @@ from repo_standards.cli import app
 from repo_standards.core.canonical import with_fingerprint
 from repo_standards.core.engine import baseline_from_report, check_baseline
 from repo_standards.core.errors import ConfigurationError
-from repo_standards.core.models import FindingsReport, JSONValue, Mode
+from repo_standards.core.models import (
+    MAX_REPOSITORY_INPUT_BYTES,
+    FindingsReport,
+    JSONValue,
+    Mode,
+)
 from repo_standards.core.parser import parse_baseline_bytes
 from repo_standards.repository import RepositoryAnalysisRequest, analyze_repository
 
@@ -310,3 +315,37 @@ def test_native_baseline_creation_respects_its_parser_size_boundary(tmp_path: Pa
     oversized = replace(report, diagnostics=findings)
     with pytest.raises(ConfigurationError, match="size"):
         baseline_from_report(oversized, include_warnings=True)
+
+
+@pytest.mark.parametrize(
+    "extra_bytes",
+    [
+        pytest.param(0, id="exact-reader-bound"),
+        pytest.param(1, id="one-byte-over-reader-bound"),
+    ],
+)
+def test_native_baseline_cli_wire_size_includes_its_trailing_newline(
+    tmp_path: Path, extra_bytes: int
+) -> None:
+    root = _repository(tmp_path, javascript=False)
+    initial = _RUNNER.invoke(app, ["baseline", str(root), "--ratchet-warnings"])
+    assert initial.exit_code == 0
+    repository_id_length = (
+        MAX_REPOSITORY_INPUT_BYTES
+        - len(initial.stdout.encode())
+        + len("ratchet-example")
+        + extra_bytes
+    )
+    manifest = _MANIFEST.replace("ratchet-example", "a" * repository_id_length)
+    assert len(manifest.encode()) < MAX_REPOSITORY_INPUT_BYTES
+    (root / ".repo-standards/repository.toml").write_text(manifest, encoding="utf-8")
+    _commit(root)
+    result = _RUNNER.invoke(app, ["baseline", str(root), "--ratchet-warnings"])
+    if extra_bytes:
+        assert result.exit_code == 2
+        assert "size limit" in result.stdout
+    else:
+        assert result.exit_code == 0
+        assert result.stdout.endswith("\n")
+        assert len(result.stdout.encode()) == MAX_REPOSITORY_INPUT_BYTES
+        assert parse_baseline_bytes(result.stdout.encode()).include_warnings is True

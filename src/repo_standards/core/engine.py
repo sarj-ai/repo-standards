@@ -269,6 +269,7 @@ def baseline_from_report(report: AnalysisReport, *, include_warnings: bool = Fal
         ),
         include_warnings=include_warnings,
     )
-    if len(canonical_json(baseline_dict(baseline)).encode("utf-8")) > MAX_REPOSITORY_INPUT_BYTES:
+    wire_bytes = len(canonical_json(baseline_dict(baseline)).encode("utf-8")) + 1
+    if wire_bytes > MAX_REPOSITORY_INPUT_BYTES:
         ConfigurationError.fail("baseline exceeds the parser's 1 MiB size limit")
     return baseline
