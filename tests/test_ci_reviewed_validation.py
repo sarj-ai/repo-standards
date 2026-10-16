@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
@@ -19,6 +20,14 @@ REPOSITORY = "owner/repo"
 BASE = "a" * 40
 HEAD = "b" * 40
 TREE = "c" * 40
+
+
+@pytest.mark.parametrize(
+    "module", ["ci_artifacts.py", "ci_reviewed_validation.py", "test_selection.py"]
+)
+def test_certificate_bootstrap_supports_runner_python_grammar(module: str) -> None:
+    source = (Path(__file__).parents[1] / module).read_text(encoding="utf-8")
+    ast.parse(source, filename=module, feature_version=(3, 12))
 
 
 def _git(root: Path, *argv: str) -> str:

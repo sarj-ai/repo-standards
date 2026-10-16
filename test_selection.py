@@ -79,7 +79,7 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
         if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", ancestor) is None:
             return full("invalid comparison identity")
         changes = _changed_paths(root, ancestor)
-    except OSError, subprocess.SubprocessError:
+    except (OSError, subprocess.SubprocessError):
         return full("Git evidence unavailable")
     if changes is None:
         return full("deletion, rename or unsupported Git change")
@@ -107,8 +107,7 @@ def discover_test_files(root: Path) -> tuple[str, ...]:
         sorted(
             path.relative_to(root).as_posix()
             for path in (root / "tests").rglob("*.py")
-            if path.is_file()
-            and (path.name.startswith("test_") or path.name.endswith("_test.py"))
+            if path.is_file() and (path.name.startswith("test_") or path.name.endswith("_test.py"))
         )
     )
 
@@ -156,7 +155,7 @@ def _version_only(root: Path, ancestor: str, path: str) -> bool:
     try:
         previous = _without_version(_git(root, "show", f"{ancestor}:{path}"), path)
         current = _without_version((root / path).read_text(), path)
-    except OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError:
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         return False
     return previous == current
 
