@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import date
 from enum import StrEnum
+from heapq import nsmallest
 import json
 import os
 from pathlib import Path
@@ -65,6 +66,7 @@ from repo_standards.core.pull_request_documentation import (
     analyze_pull_request_documentation,
 )
 from repo_standards.core.pull_request_size import (
+    PullRequestFileSize,
     PullRequestSize,
     analyze_pull_request_size,
     analyze_size_since_review,
@@ -419,10 +421,7 @@ def pull_request_size_command(  # ruff: ignore[too-many-arguments,too-many-posit
 def _pull_request_size_payload(result: PullRequestSize, *, top_files: int) -> Mapping[str, object]:
     category_lines = result.category_lines()
     summary = result.summary
-    largest = sorted(
-        (item for item in result.files if item.category == "production"),
-        key=lambda item: (-item.lines, item.path),
-    )[:top_files]
+    largest = _largest_counted_files(result, top_files)
     return {
         **_envelope(
             "pull-request size",
@@ -434,9 +433,9 @@ def _pull_request_size_payload(result: PullRequestSize, *, top_files: int) -> Ma
             "attribute_source": result.base,
         },
         "summary": {
-            "counted_lines": result.counted_lines,
-            "excluded_lines": result.excluded_lines,
-            "total_lines": result.total_lines,
+            "counted_lines": summary.counted_lines,
+            "excluded_lines": summary.excluded_lines,
+            "total_lines": summary.total_lines,
             "changed_files": summary.changed_files,
             "categories": category_lines,
             "additions": summary.additions,
@@ -499,29 +498,34 @@ def _render_pull_request_size(result: PullRequestSize, *, top_files: int) -> str
     summary = result.summary
     lines = [
         (
-            f"Counted review size: {result.counted_lines} lines "
+            f"Counted review size: {summary.counted_lines} lines "
             f"(+{summary.counted_additions}/-{summary.counted_deletions}, "
             f"{summary.counted_files} files)"
         ),
         (
-            f"Excluded churn: {result.excluded_lines} lines "
+            f"Excluded churn: {summary.excluded_lines} lines "
             f"(+{summary.excluded_additions}/-{summary.excluded_deletions}, "
             f"{summary.excluded_files} files)"
         ),
         (
-            f"Total churn: {result.total_lines} lines "
+            f"Total churn: {summary.total_lines} lines "
             f"(+{summary.additions}/-{summary.deletions}, {summary.changed_files} files)"
         ),
         "Categories: " + ", ".join(f"{name}={value}" for name, value in categories.items()),
     ]
-    largest = sorted(
-        (item for item in result.files if item.category == "production"),
-        key=lambda item: (-item.lines, item.path),
-    )[:top_files]
+    largest = _largest_counted_files(result, top_files)
     if largest:
         lines.append("Largest counted files:")
         lines.extend(f"  {item.lines:>6}  {item.path}" for item in largest)
     return "\n".join(lines) + "\n"
+
+
+def _largest_counted_files(result: PullRequestSize, maximum: int) -> list[PullRequestFileSize]:
+    return nsmallest(
+        maximum,
+        (item for item in result.files if item.category == "production"),
+        key=lambda item: (-item.lines, item.path),
+    )
 
 
 @pull_request_app.command("documentation")

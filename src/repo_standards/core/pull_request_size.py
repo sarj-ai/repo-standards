@@ -153,11 +153,10 @@ class PullRequestSize:
         return self.summary.total_lines
 
     def category_lines(self) -> dict[str, int]:
-        categories = {item.category for item in self.files} | {"production"}
-        return {
-            category: sum(item.lines for item in self.files if item.category == category)
-            for category in sorted(categories)
-        }
+        totals = {"production": 0}
+        for item in self.files:
+            totals[item.category] = totals.get(item.category, 0) + item.lines
+        return dict(sorted(totals.items()))
 
     def category_sizes(self) -> tuple[PullRequestCategorySize, ...]:
         return tuple(_category_size(category, self.files) for category in _CATEGORIES)
@@ -405,7 +404,7 @@ def _git(
             timeout=30,
             env=_GIT_ENVIRONMENT,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         ConfigurationError.fail("Git could not complete pull-request size analysis")
     if completed.returncode not in accepted_exit_codes:
         ConfigurationError.fail("Git could not resolve the requested pull-request revisions")

@@ -299,7 +299,7 @@ def test_conventional_operation_map_is_detected_only_after_validation() -> None:
         pytest.param(
             b'{"schema_version":"api-operation-map.v2","schema_version":"other",'
             b'"openapi_sha256":"' + b"a" * 64 + b'","operations":[]}',
-            "duplicate object key",
+            "unique keys",
             id="duplicate-json-key",
         ),
     ],
@@ -312,3 +312,22 @@ def test_operation_map_rejects_labeled_invalid_cases(content: bytes, message: st
 def test_operation_map_bounds_are_enforced_before_parsing() -> None:
     with pytest.raises(InstrumentationInputError, match="byte limit"):
         parse_api_operation_map(b" " * (2 * 1024 * 1024 + 1))
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b'{"dependencies":{"express":"5"},"extra":NaN}',
+        b'{"dependencies":{"express":"5"},"extra":1e999}',
+        b'{"extra":' + b"[" * 2_000 + b"]" * 2_000 + b"}",
+    ],
+)
+def test_invalid_json_is_incomplete_instead_of_a_candidate_or_crash(content: bytes) -> None:
+    report = detect_instrumentation((TrackedFile("package.json", content),))
+
+    assert report.completion == "incomplete"
+    assert report.candidates == ()
+    assert len(report.issues) == 1
+    assert report.issues[0].code == "instrumentation.manifest-invalid"
+    with pytest.raises(InstrumentationInputError, match="finite UTF-8 object with unique keys"):
+        parse_api_operation_map(content)

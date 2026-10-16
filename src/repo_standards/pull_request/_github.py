@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Annotated, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from repo_standards.core._json import parse_json_object
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import GitObjectId
 
@@ -99,21 +99,11 @@ def _load_event_document(path: Path) -> object:
             ConfigurationError.fail("GitHub event path is not a regular file")
         with resolved.open("rb") as stream:
             content = stream.read(MAXIMUM_EVENT_BYTES + 1)
-    except (OSError, RuntimeError):
+    except OSError, RuntimeError:
         ConfigurationError.fail("GitHub event cannot be read")
     if len(content) > MAXIMUM_EVENT_BYTES:
         ConfigurationError.fail("GitHub event exceeds the 1 MiB safety limit")
     try:
-        return json.loads(content, object_pairs_hook=_unique_object)  # pyright: ignore[reportAny]
-    except (RecursionError, UnicodeError, ValueError):
+        return parse_json_object(content)
+    except RecursionError, UnicodeError, ValueError:
         ConfigurationError.fail("GitHub event is not valid unique-key UTF-8 JSON")
-
-
-def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    document: dict[str, object] = {}
-    for key, value in pairs:
-        if key in document:
-            message = "duplicate JSON object key"
-            raise ValueError(message)
-        document[key] = value
-    return document
