@@ -18,7 +18,13 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def repository(tmp_path: Path) -> Path:
-    for name in ["test_public_content", "test_test_selection", "test_alpha", "test_ci_artifacts"]:
+    for name in [
+        "test_public_content",
+        "test_test_selection",
+        "test_alpha",
+        "test_ci_artifacts",
+        "test_ci_reviewed_validation",
+    ]:
         path = tmp_path / "tests" / f"{name}.py"
         path.parent.mkdir(exist_ok=True)
         path.write_text("pass\n")
@@ -54,7 +60,7 @@ def test_changed_test_cohort_includes_uncommitted_work_and_public_contracts(
         "tests/test_public_content.py",
         "tests/test_test_selection.py",
     )
-    assert plan.total_files == 4
+    assert plan.total_files == 5
 
 
 @pytest.mark.parametrize(
@@ -64,6 +70,7 @@ def test_changed_test_cohort_includes_uncommitted_work_and_public_contracts(
         "tests/conftest.py",
         "pyproject.toml",
         "README.md",
+        "tests/test_public_content.py",
         "tests/test_test_selection.py",
     ],
 )
@@ -97,10 +104,39 @@ def test_release_tool_cohort_is_selected_and_new_test_is_not_lost(repository: Pa
     plan = select_tests(repository, base="HEAD")
     assert plan.tests == (
         "tests/test_ci_artifacts.py",
+        "tests/test_ci_reviewed_validation.py",
         "tests/test_new.py",
         "tests/test_public_content.py",
         "tests/test_test_selection.py",
     )
+
+
+@pytest.mark.parametrize("name", ["service_test.py", "test_service_test.py"])
+def test_native_pytest_filenames_are_included_once_in_full_and_changed_plans(
+    repository: Path, name: str
+) -> None:
+    path = repository / "tests/nested" / name
+    path.parent.mkdir()
+    path.write_text("pass\n")
+    relative = path.relative_to(repository).as_posix()
+
+    full = select_tests(repository)
+    changed = select_tests(repository, base="HEAD")
+
+    assert full.tests == (
+        relative,
+        "tests/test_alpha.py",
+        "tests/test_ci_artifacts.py",
+        "tests/test_ci_reviewed_validation.py",
+        "tests/test_public_content.py",
+        "tests/test_test_selection.py",
+    )
+    assert changed.tests == (
+        relative,
+        "tests/test_public_content.py",
+        "tests/test_test_selection.py",
+    )
+    assert full.total_files == changed.total_files == 6
 
 
 def test_missing_required_documentation_contract_falls_back_to_full(repository: Path) -> None:
@@ -188,6 +224,7 @@ def test_version_only_release_retains_cohort_but_dependency_changes_run_full(
     else:
         assert set(plan.tests) == required | {
             "tests/test_ci_artifacts.py",
+            "tests/test_ci_reviewed_validation.py",
             "tests/test_public_content.py",
             "tests/test_test_selection.py",
         }

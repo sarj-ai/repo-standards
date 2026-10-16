@@ -44,7 +44,7 @@ _TOOL_TESTS = {
         "tests/test_distribution_fast_paths.py",
         *_DOCS_TESTS,
     ),
-    "ci_artifacts.py": ("tests/test_ci_artifacts.py",),
+    "ci_artifacts.py": ("tests/test_ci_artifacts.py", "tests/test_ci_reviewed_validation.py"),
     "release_reconciliation.py": (
         "tests/test_release_reconciliation.py",
         "tests/test_release_network.py",
@@ -67,9 +67,7 @@ class TestPlan:
 
 
 def select_tests(root: Path, *, base: str = "") -> TestPlan:
-    all_tests = tuple(
-        sorted(path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py"))
-    )
+    all_tests = discover_test_files(root)
 
     def full(reason: str) -> TestPlan:
         return TestPlan(all_tests, reason, len(all_tests))
@@ -81,7 +79,7 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
         if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", ancestor) is None:
             return full("invalid comparison identity")
         changes = _changed_paths(root, ancestor)
-    except OSError, subprocess.SubprocessError:
+    except (OSError, subprocess.SubprocessError):
         return full("Git evidence unavailable")
     if changes is None:
         return full("deletion, rename or unsupported Git change")
@@ -89,7 +87,7 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
         return full("no changed files; full validation")
     selected = set(_CONTRACTS)
     for path in changes:
-        if path in all_tests and path != "tests/test_test_selection.py":
+        if path in all_tests and path not in _CONTRACTS:
             selected.add(path)
         elif path.startswith(("apps/docs/", ".github/deploy/")):
             selected.update(_DOCS_TESTS)
@@ -102,6 +100,16 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
     if not selected.issubset(all_tests):
         return full("reviewed cohort is missing a required contract")
     return TestPlan(tuple(sorted(selected)), "reviewed PR cohort", len(all_tests))
+
+
+def discover_test_files(root: Path) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            path.relative_to(root).as_posix()
+            for path in (root / "tests").rglob("*.py")
+            if path.is_file() and (path.name.startswith("test_") or path.name.endswith("_test.py"))
+        )
+    )
 
 
 def _drop_version(record: dict[str, object]) -> dict[str, object]:
@@ -147,7 +155,7 @@ def _version_only(root: Path, ancestor: str, path: str) -> bool:
     try:
         previous = _without_version(_git(root, "show", f"{ancestor}:{path}"), path)
         current = _without_version((root / path).read_text(), path)
-    except OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError:
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         return False
     return previous == current
 

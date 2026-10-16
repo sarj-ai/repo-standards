@@ -1,6 +1,6 @@
 [project]
 name = "repo-standards"
-version = "6.8.0"
+version = "6.8.1"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
@@ -67,6 +67,10 @@ line-length = 100
 
 [tool.ruff.lint]
 extend-select = ["B", "E", "F", "I", "PERF", "PL", "RUF", "S", "SIM", "UP"]
+
+[tool.ruff.per-file-target-version]
+# Imported by the system-Python CI certificate bootstrap before project activation.
+"test_selection.py" = "py312"
 
 [tool.ruff.lint.extend-per-file-ignores]
 "**/tests/**" = ["implicit-namespace-package", "magic-value-comparison", "assert"]

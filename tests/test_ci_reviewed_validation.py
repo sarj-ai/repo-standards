@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
@@ -19,6 +20,14 @@ REPOSITORY = "owner/repo"
 BASE = "a" * 40
 HEAD = "b" * 40
 TREE = "c" * 40
+
+
+@pytest.mark.parametrize(
+    "module", ["ci_artifacts.py", "ci_reviewed_validation.py", "test_selection.py"]
+)
+def test_certificate_bootstrap_supports_runner_python_grammar(module: str) -> None:
+    source = (Path(__file__).parents[1] / module).read_text(encoding="utf-8")
+    ast.parse(source, filename=module, feature_version=(3, 12))
 
 
 def _git(root: Path, *argv: str) -> str:
@@ -44,6 +53,7 @@ def repository(tmp_path: Path) -> RepositoryFixture:
     _git(root, "config", "user.email", "fixture@example.invalid")
     (root / "tests").mkdir()
     (root / "tests/test_one.py").write_text("assert True\n")
+    (root / "tests/behavior_test.py").write_text("assert True\n")
     _git(root, "add", ".")
     _git(root, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "base")
     base = _git(root, "rev-parse", "HEAD")
@@ -238,19 +248,24 @@ def test_local_checkout_and_push_parent_must_match(
     assert gateway.downloads == 0
 
 
-@pytest.mark.parametrize("full", [False, True])
+@pytest.mark.parametrize(
+    ("selected_tests", "full"),
+    [
+        pytest.param(
+            ["tests/behavior_test.py", "tests/test_one.py"], True, id="complete-native-discovery"
+        ),
+        pytest.param(["tests/test_one.py"], False, id="omitted-suffix-test"),
+        pytest.param(["tests/test_fake.py"], False, id="unknown-test"),
+    ],
+)
 def test_record_requires_every_actual_test_file(
-    repository: RepositoryFixture, tmp_path: Path, full: bool
+    repository: RepositoryFixture, tmp_path: Path, selected_tests: list[str], full: bool
 ) -> None:
     root, base, sha, tree = repository.root, repository.base, repository.sha, repository.tree
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"pull_request": {"base": {"sha": base}}}))
     plan = tmp_path / "plan.json"
-    plan.write_text(
-        json.dumps(
-            {"tests": ["tests/test_one.py"] if full else ["tests/test_fake.py"], "total_files": 1}
-        )
-    )
+    plan.write_text(json.dumps({"tests": selected_tests, "total_files": len(selected_tests)}))
     destination = tmp_path / "recorded"
     record(
         root,

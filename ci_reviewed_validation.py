@@ -20,6 +20,7 @@ import tempfile
 from zipfile import BadZipFile, ZipFile
 
 from ci_artifacts import GitHub, Result, Transport, _object, _positive, _rows  # ruff: ignore[import-private-name] # pyright: ignore[reportPrivateUsage] -- shared validated provider boundaries in sibling CI bootstraps.
+from test_selection import discover_test_files
 
 
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -47,9 +48,7 @@ def _git(root: Path, revision: str) -> str:
 def record(root: Path, plan_path: Path, destination: Path, environment: dict[str, str]) -> None:
     plan = _object(json.loads(plan_path.read_text(encoding="utf-8")))
     tests = plan.get("tests")
-    all_tests = sorted(
-        path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py")
-    )
+    all_tests = list(discover_test_files(root))
     if (
         not all_tests
         or tests != all_tests
