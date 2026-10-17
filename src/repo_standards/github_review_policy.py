@@ -32,6 +32,7 @@ _INCOMPLETE_EXIT: Final = 2
 _RUN_COMPLETION_TIMEOUT_SECONDS: Final = 300
 _RUN_COMPLETION_POLL_SECONDS: Final = 5
 _MAX_STACK_DEPTH: Final = 10
+_COMMAND_TIMEOUT_SECONDS: Final = 120
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}\Z")
 _MERGE_GROUP_REF = re.compile(
     r"refs/heads/gh-readonly-queue/(?P<base_ref>.+)/"
@@ -265,6 +266,7 @@ def _run_git(root: Path, *arguments: str, text: bool = True) -> str | bytes:
         check=False,
         capture_output=True,
         text=text,
+        timeout=_COMMAND_TIMEOUT_SECONDS,
     )
     if process.returncode != 0:
         stderr = (
@@ -283,6 +285,7 @@ def ensure_git_objects(root: Path, snapshot: PullRequestSnapshot) -> None:
             ("git", "-C", str(root), "cat-file", "-e", f"{revision}^{{commit}}"),
             check=False,
             capture_output=True,
+            timeout=_COMMAND_TIMEOUT_SECONDS,
         )
         if process.returncode != 0:
             missing.append(revision)
@@ -301,6 +304,7 @@ def ensure_git_objects(root: Path, snapshot: PullRequestSnapshot) -> None:
             check=False,
             capture_output=True,
             text=True,
+            timeout=_COMMAND_TIMEOUT_SECONDS,
         )
         if process.returncode != 0:
             raise ReconciliationError(
@@ -310,6 +314,24 @@ def ensure_git_objects(root: Path, snapshot: PullRequestSnapshot) -> None:
         _run_git(root, "cat-file", "-e", f"{revision}^{{commit}}")
 
 
+type GitCommandRunner = Callable[
+    [Sequence[str], Mapping[str, str]], subprocess.CompletedProcess[str]
+]
+
+
+def _run_reviewed_git(
+    arguments: Sequence[str], environment: Mapping[str, str]
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed executable and exact provider SHA
+        arguments,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+        timeout=_COMMAND_TIMEOUT_SECONDS,
+    )
+
+
 def fetch_reviewed_commits(
     root: Path,
     reviews: Sequence[Mapping[str, str | None]],
@@ -317,6 +339,7 @@ def fetch_reviewed_commits(
     head_sha: str,
     token: str,
     server_url: str,
+    run_git: GitCommandRunner = _run_reviewed_git,
 ) -> dict[str, str]:
     reviewed = sorted(
         {
@@ -330,24 +353,32 @@ def fetch_reviewed_commits(
     environment = _fetch_environment(token=token, server_url=server_url)
     unavailable: dict[str, str] = {}
     for revision in reviewed:
-        present = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed executable and exact provider SHA
-            ("git", "-C", str(root), "cat-file", "-e", f"{revision}^{{commit}}"),
-            check=False,
-            capture_output=True,
+        reason = _reviewed_commit_failure(root, revision, environment, run_git)
+        if reason is not None:
+            unavailable[revision] = reason
+    return unavailable
+
+
+def _reviewed_commit_failure(
+    root: Path, revision: str, environment: Mapping[str, str], run_git: GitCommandRunner
+) -> str | None:
+    try:
+        present = run_git(
+            ("git", "-C", str(root), "cat-file", "-e", f"{revision}^{{commit}}"), environment
         )
         if present.returncode == 0:
-            continue
-        fetched = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed executable and exact provider SHA
-            ("git", "-C", str(root), "fetch", "--no-tags", "origin", revision),
-            check=False,
-            capture_output=True,
-            text=True,
-            env=environment,
+            return None
+        fetched = run_git(
+            ("git", "-C", str(root), "fetch", "--no-tags", "origin", revision), environment
         )
-        if fetched.returncode != 0:
-            lines = [line for line in fetched.stderr.splitlines() if line.strip()]
-            unavailable[revision] = lines[-1].strip() if lines else "git fetch failed"
-    return unavailable
+    except subprocess.TimeoutExpired:
+        return "git command timed out"
+    except OSError:
+        return "git command could not start"
+    if fetched.returncode == 0:
+        return None
+    lines = [line for line in fetched.stderr.splitlines() if line.strip()]
+    return lines[-1].strip() if lines else "git fetch failed"
 
 
 def _fetch_environment(*, token: str, server_url: str) -> dict[str, str]:
@@ -708,6 +739,7 @@ def run_policy_cli(
         check=False,
         capture_output=True,
         text=True,
+        timeout=_COMMAND_TIMEOUT_SECONDS,
     )
     try:
         receipt = json.loads(process.stdout)
@@ -1335,7 +1367,7 @@ def _write_step_summary(comment: str) -> None:
 def main() -> None:
     try:
         raise SystemExit(reconcile(_parser().parse_args()))
-    except ReconciliationError as error:
+    except (ReconciliationError, OSError, subprocess.TimeoutExpired) as error:
         print(f"review policy reconciliation incomplete: {error}", file=sys.stderr)
         raise SystemExit(2) from error
 

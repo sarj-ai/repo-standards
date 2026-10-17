@@ -354,7 +354,7 @@ def verify_site(directory: Path) -> list[str]:
     documents: list[tuple[str, str]] = []
     headers: str | None = None
     for path in directory.rglob("*"):
-        if path.is_dir():
+        if path.is_dir(follow_symlinks=False):
             continue
         relative_path = path.relative_to(directory)
         artifact_path = _safe_path(relative_path.as_posix())
