@@ -41,7 +41,7 @@ from repo_standards.github_review_policy import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
 
 ROOT = Path(__file__).parents[1]
@@ -50,6 +50,18 @@ INPUT_KEY = re.compile(r"^  ([a-z][a-z-]+):$", re.MULTILINE)
 
 class _PostedStatus(BaseModel):
     state: str
+
+
+class _RequestFixture(GitHubClient):
+    def __init__(self, response: Callable[[str, str], object]) -> None:
+        super().__init__(token="token", repository="owner/repo", api_url="https://api.test")
+        self._response: Callable[[str, str], object] = response
+
+    def request(
+        self, method: str, path: str, *, payload: Mapping[str, object] | None = None
+    ) -> object:
+        assert payload is None
+        return self._response(method, path)
 
 
 def test_review_policy_action_contract() -> None:
@@ -268,14 +280,14 @@ def test_required_checks_come_from_trusted_manifest() -> None:
 
 
 def test_rest_pagination_collects_every_page() -> None:
-    client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     calls: list[str] = []
 
-    def request(_method: str, path: str, **_kwargs: object) -> object:
+    def request(method: str, path: str) -> object:
+        assert method == "GET"
         calls.append(path)
         return list(range(100)) if path.endswith("page=1") else [100]
 
-    client.request = request  # type: ignore[method-assign]
+    client = _RequestFixture(request)
 
     assert len(client.rest_pages("/items")) == 101
     assert calls == ["/items?per_page=100&page=1", "/items?per_page=100&page=2"]
@@ -397,7 +409,6 @@ def test_bot_transition_still_excludes_bot_approval() -> None:
 
 
 def test_reviewer_requires_resolved_write_permission() -> None:
-    client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     reviews = [
         {
             "id": 1,
@@ -406,14 +417,16 @@ def test_reviewer_requires_resolved_write_permission() -> None:
         }
     ]
 
-    def request(_method: str, _path: str, **_kwargs: object) -> object:
+    def request(method: str, path: str) -> object:
+        assert method == "GET"
+        assert path.startswith("/repos/owner/repo/")
         return {
             "permission": "write",
             "role_name": "write",
             "user": {"id": 20},
         }
 
-    client.request = request  # type: ignore[method-assign]
+    client = _RequestFixture(request)
 
     assert eligible_reviewer_ids(client, reviews, author_id=10) == frozenset({20})
 
@@ -485,7 +498,6 @@ def test_merge_group_rejects_spoofed_success_status() -> None:
 
 
 def test_merge_group_accepts_configured_successful_actions_run() -> None:
-    client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     statuses = [
         {
             "id": 1,
@@ -496,7 +508,9 @@ def test_merge_group_accepts_configured_successful_actions_run() -> None:
         }
     ]
 
-    def request(_method: str, _path: str, **_kwargs: object) -> object:
+    def request(method: str, path: str) -> object:
+        assert method == "GET"
+        assert path.startswith("/repos/owner/repo/")
         return {
             "path": ".github/workflows/review-policy.yml@refs/heads/dev",
             "status": "completed",
@@ -504,7 +518,7 @@ def test_merge_group_accepts_configured_successful_actions_run() -> None:
             "event": "pull_request_target",
         }
 
-    client.request = request  # type: ignore[method-assign]
+    client = _RequestFixture(request)
 
     assert review_policy_status_passed(
         client,
@@ -534,7 +548,6 @@ def _successful_status() -> list[dict[str, object]]:
     ],
 )
 def test_merge_group_waits_for_the_status_run_to_complete(conclusion: str, expected: bool) -> None:
-    client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     runs = iter(
         [
             {"status": "in_progress", "conclusion": None},
@@ -543,14 +556,16 @@ def test_merge_group_waits_for_the_status_run_to_complete(conclusion: str, expec
     )
     sleeps: list[float] = []
 
-    def request(_method: str, _path: str, **_kwargs: object) -> object:
+    def request(method: str, path: str) -> object:
+        assert method == "GET"
+        assert path.startswith("/repos/owner/repo/")
         return {
             "path": ".github/workflows/review-policy.yml@refs/heads/dev",
             "event": "workflow_run",
             **next(runs),
         }
 
-    client.request = request  # type: ignore[method-assign]
+    client = _RequestFixture(request)
 
     assert (
         review_policy_status_passed(
@@ -566,11 +581,12 @@ def test_merge_group_waits_for_the_status_run_to_complete(conclusion: str, expec
 
 
 def test_merge_group_rejects_a_status_run_that_never_completes() -> None:
-    client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     clock = iter([0.0, 100.0, 200.0, 300.0])
     sleeps: list[float] = []
 
-    def request(_method: str, _path: str, **_kwargs: object) -> object:
+    def request(method: str, path: str) -> object:
+        assert method == "GET"
+        assert path.startswith("/repos/owner/repo/")
         return {
             "path": ".github/workflows/review-policy.yml@refs/heads/dev",
             "status": "in_progress",
@@ -578,7 +594,7 @@ def test_merge_group_rejects_a_status_run_that_never_completes() -> None:
             "event": "workflow_run",
         }
 
-    client.request = request  # type: ignore[method-assign]
+    client = _RequestFixture(request)
 
     assert not review_policy_status_passed(
         client,
@@ -598,10 +614,11 @@ def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None
     calls: list[tuple[str, str]] = []
     posted_statuses: list[dict[str, object]] = []
 
-    def request(method: str, path: str, **kwargs: object) -> object:
+    def request(method: str, path: str, *, payload: Mapping[str, object] | None = None) -> object:
         calls.append((method, path))
         if method == "POST" and path == f"/repos/owner/repo/statuses/{merge_head}":
-            posted_statuses.append(dict(kwargs["payload"]))  # type: ignore[arg-type]
+            assert payload is not None
+            posted_statuses.append(dict(payload))
             return None
         if path == f"/repos/owner/repo/commits/{merge_head}":
             return {"sha": merge_head, "parents": [{"sha": queue_parent}]}

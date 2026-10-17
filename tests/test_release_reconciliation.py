@@ -91,9 +91,10 @@ def test_published_side_without_tag_is_refused() -> None:
 
 @pytest.mark.parametrize("label", ["github", "pypi"])
 def test_published_source_must_match_tag(label: str) -> None:
-    values = {label: _side(source_sha="c" * 40)}
+    side = _side(source_sha="c" * 40)
+    state = _state(github=side) if label == "github" else _state(pypi=side)
     with pytest.raises(ReleaseStateError, match="source does not match"):
-        reconciliation_plan(_state(**values))  # type: ignore[arg-type]
+        reconciliation_plan(state)
 
 
 def test_cross_registry_hash_mismatch_is_refused() -> None:

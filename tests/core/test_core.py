@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 import json
-from typing import ClassVar
+from typing import ClassVar, TypedDict
 
 import pytest
 
@@ -125,6 +125,14 @@ def test_finding_identity_preserves_the_published_length_prefixed_encoding() -> 
     )
 
 
+class _ReportArguments(TypedDict):
+    mode: Mode
+    repository_id: RepositoryId
+    policy_id: PolicyId
+    policy_version: int
+    scope_digest: str
+
+
 def test_analysis_report_variants_reject_empty_required_payloads() -> None:
     finding = analyze(
         _manifest(),
@@ -132,7 +140,7 @@ def test_analysis_report_variants_reject_empty_required_payloads() -> None:
         mode=Mode.STRICT,
         additional_diagnostics=(_finding(),),
     ).diagnostics[0]
-    common = {
+    common: _ReportArguments = {
         "mode": Mode.STRICT,
         "repository_id": RepositoryId("example-repository"),
         "policy_id": PolicyId("example"),
@@ -140,16 +148,16 @@ def test_analysis_report_variants_reject_empty_required_payloads() -> None:
         "scope_digest": "a" * 64,
     }
     with pytest.raises(ValueError, match="at least one diagnostic"):
-        FindingsReport(diagnostics=(), **common)  # type: ignore[arg-type]
+        FindingsReport(diagnostics=(), **common)
     with pytest.raises(ValueError, match="at least one execution issue"):
-        IncompleteReport(execution_issues=(), **common)  # type: ignore[arg-type]
+        IncompleteReport(execution_issues=(), **common)
 
-    findings = FindingsReport(diagnostics=(finding,), **common)  # type: ignore[arg-type]
+    findings = FindingsReport(diagnostics=(finding,), **common)
     incomplete = IncompleteReport(
         execution_issues=(_execution_issue(),),
-        **common,  # type: ignore[arg-type]
+        **common,
     )
-    passed = PassedReport(**common)  # type: ignore[arg-type]
+    passed = PassedReport(**common)
     assert findings.conclusion == "findings"
     assert incomplete.diagnostics == ()
     assert passed.conclusion == "passed"

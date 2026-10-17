@@ -56,10 +56,13 @@ class FakeQueue:
         client.graphql = self.graphql
         return client
 
-    def request(self, method: str, path: str, **kwargs: object) -> object:
+    def request(
+        self, method: str, path: str, *, payload: Mapping[str, object] | None = None
+    ) -> object:
         self.calls.append(path)
         if method == "POST":
-            self.posted.append(dict(kwargs["payload"]))  # type: ignore[arg-type]
+            assert payload is not None
+            self.posted.append(dict(payload))
             return None
         resource, _, rest = path.removeprefix(REPO_PATH).partition("/")
         handler = {
