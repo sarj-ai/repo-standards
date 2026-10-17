@@ -3,14 +3,17 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import threading
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
+from pydantic import BaseModel
 import pytest
 
 from repo_standards.github_review_policy import (
@@ -45,6 +48,10 @@ ROOT = Path(__file__).parents[1]
 INPUT_KEY = re.compile(r"^  ([a-z][a-z-]+):$", re.MULTILINE)
 
 
+class _PostedStatus(BaseModel):
+    state: str
+
+
 def test_review_policy_action_contract() -> None:
     source = (ROOT / "pull-request-review-policy" / "action.yml").read_text(encoding="utf-8")
     inputs = source.split("inputs:\n", 1)[1].split("outputs:\n", 1)[0]
@@ -64,6 +71,100 @@ def test_review_policy_action_contract() -> None:
     assert "repo_standards.github_review_policy" in source
     assert "APPROVAL_TOKEN" not in source
     assert "GITHUB_TOKEN" in source
+
+
+@pytest.mark.parametrize(
+    ("state", "merged", "previous_status"),
+    [
+        pytest.param("closed", True, "success", id="merged-preserves-success"),
+        pytest.param("closed", False, "failure", id="closed-preserves-failure"),
+        pytest.param("open", False, "failure", id="open-still-publishes-pending"),
+    ],
+)
+def test_closed_pull_request_refusal_does_not_overwrite_status(
+    tmp_path: Path, state: str, merged: bool, previous_status: str
+) -> None:
+    head = "b" * 40
+    posted: list[_PostedStatus] = []
+    current_status = {"state": previous_status}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            assert self.path == "/repos/owner/repo/pulls/42"
+            self._respond(
+                {
+                    "base": {"sha": "a" * 40, "ref": "dev", "repo": {"id": 1}},
+                    "head": {
+                        "sha": head,
+                        "ref": "feature",
+                        "repo": {"id": 1, "full_name": "owner/repo"},
+                    },
+                    "user": {"id": 10, "login": "author", "type": "User"},
+                    "body": "",
+                    "draft": False,
+                    "state": state,
+                    "merged": merged,
+                }
+            )
+
+        def do_POST(self) -> None:
+            assert self.path == f"/repos/owner/repo/statuses/{head}"
+            payload = _PostedStatus.model_validate_json(
+                self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            )
+            posted.append(payload)
+            current_status["state"] = payload.state
+            self._respond({"id": len(posted)})
+
+        def _respond(self, payload: object) -> None:
+            body = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "repo_standards.github_review_policy",
+                    "--root",
+                    str(tmp_path),
+                    "--pr-number",
+                    "42",
+                ],
+                env={
+                    "GITHUB_REPOSITORY": "owner/repo",
+                    "GITHUB_API_URL": f"http://127.0.0.1:{server.server_address[1]}",
+                    "GITHUB_TOKEN": "owned-api-token",
+                    "GIT_CEILING_DIRECTORIES": str(tmp_path.parent),
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+
+    assert completed.returncode == 2
+    if state == "closed":
+        assert "review policy only evaluates open pull requests" in completed.stderr
+        assert posted == []
+        assert current_status["state"] == previous_status
+    else:
+        # The open snapshot still starts reconciliation; this owned directory has
+        # no repository or origin, so the existing Git evidence check refuses it.
+        assert "cannot fetch exact pull request revisions" in completed.stderr
+        assert [payload.state for payload in posted] == ["pending"]
+        assert current_status["state"] == "pending"
 
 
 @pytest.mark.parametrize(
