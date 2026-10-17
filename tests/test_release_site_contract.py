@@ -49,6 +49,26 @@ def test_release_site_accepts_the_catalog_contract(tmp_path: Path) -> None:
     assert verify_site_catalog(tmp_path) == []
 
 
+@pytest.mark.parametrize("directory", [True, False], ids=("directory", "file"))
+def test_release_site_rejects_symlinks_without_inspecting_their_targets(
+    tmp_path: Path, *, directory: bool
+) -> None:
+    site = tmp_path / "site"
+    _site(site)
+    target = tmp_path / "external"
+    if directory:
+        target.mkdir()
+        (target / "private.txt").write_text("not a site artifact", encoding="utf-8")
+    else:
+        target.write_text("not a site artifact", encoding="utf-8")
+    (site / "external").symlink_to(target, target_is_directory=directory)
+
+    violations = verify_site(site)
+
+    assert "site:external: links are not publishable" in violations
+    assert not any("private.txt" in violation for violation in violations)
+
+
 def test_release_site_rejects_a_forged_schema_or_catalog_digest(tmp_path: Path) -> None:
     catalog, schema = _site(tmp_path)
     forged_schema = deepcopy(schema)

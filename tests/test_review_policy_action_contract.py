@@ -41,7 +41,7 @@ from repo_standards.github_review_policy import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping, Sequence
 
 
 ROOT = Path(__file__).parents[1]
@@ -809,6 +809,38 @@ def test_force_pushed_approved_commit_is_fetched_by_object_id(tmp_path: Path) ->
     assert _git(clone, "cat-file", "-t", reviewed) == "commit"
     assert set(unavailable) == {"f" * 40}
     assert unavailable["f" * 40].startswith(("fatal:", "error:"))
+
+
+@pytest.mark.parametrize("phase", ["cat-file", "fetch"], ids=("local-probe", "remote-fetch"))
+@pytest.mark.parametrize("failure", ["timeout", "spawn"], ids=("timeout", "cannot-start"))
+def test_unavailable_reviewed_commit_does_not_prevent_checking_other_approvals(
+    tmp_path: Path, phase: str, failure: str
+) -> None:
+    missing, available = "a" * 40, "b" * 40
+
+    def run(
+        command: Sequence[str], environment: Mapping[str, str]
+    ) -> subprocess.CompletedProcess[str]:
+        assert environment["GIT_TERMINAL_PROMPT"] == "0"
+        if available in command[-1]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if phase not in command:
+            return subprocess.CompletedProcess(command, 1, "", "")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(command, 120)
+        raise OSError
+
+    reviews = (
+        {"state": "approved", "commit_sha": missing},
+        {"state": "approved", "commit_sha": available},
+    )
+
+    unavailable = fetch_reviewed_commits(
+        tmp_path, reviews, head_sha="c" * 40, token="", server_url="https://github.com", run_git=run
+    )
+
+    reason = "git command timed out" if failure == "timeout" else "git command could not start"
+    assert unavailable == {missing: reason}
 
 
 _TOKEN = "test-token"
