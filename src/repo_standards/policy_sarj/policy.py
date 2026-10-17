@@ -6,7 +6,11 @@ import re
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
-from repo_standards.core.canonical import nearest_component, workspace_pattern_matches
+from repo_standards.core.canonical import (
+    ComponentIndex,
+    nearest_component,
+    workspace_pattern_matches,
+)
 from repo_standards.core.models import (
     Component,
     ComponentId,
@@ -600,12 +604,13 @@ def _repository_artifact_diagnostics(
         _owned_python_import_roots(snapshot, package_test_roots),
     )
     diagnostics: list[Diagnostic] = []
+    components = ComponentIndex(snapshot.manifest.components)
     for tracked in snapshot.inspection.tracked_files:
         diagnostics.extend(
             _tracked_artifact_diagnostics(
                 snapshot,
                 tracked.path,
-                package_test_roots,
+                components.nearest(tracked.path),
                 document_package_roots,
                 standalone_package_roots,
             )
@@ -618,12 +623,12 @@ def _repository_artifact_diagnostics(
 def _tracked_artifact_diagnostics(
     snapshot: RepositorySnapshot,
     path: str,
-    package_test_roots: frozenset[str],
+    component: Component | None,
     document_package_roots: _DocumentPackageRoots,
     standalone_package_roots: frozenset[str],
 ) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
-    component = nearest_component(path, snapshot.manifest.components)
+    package_test_roots = document_package_roots.packages
     if path.casefold().endswith(_TFVARS_EXAMPLE_SUFFIXES):
         diagnostics.append(
             _repository_diagnostic(

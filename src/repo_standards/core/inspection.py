@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, replace
 import hashlib
 from io import BytesIO
@@ -636,14 +637,15 @@ def _indexed_files(root: Path) -> _IndexedFiles:
         noun="Git index",
     )
     try:
-        records = tuple(item for item in payload.decode("utf-8").split("\0") if item)
+        records = deque(filter(None, payload.decode("utf-8").split("\0")))
     except UnicodeDecodeError:
         ConfigurationError.fail("tracked paths must be UTF-8")
     if len(records) > _MAX_FILES:
         ConfigurationError.fail("repository exceeds the 100000 tracked-file safety limit")
     parsed: list[tuple[str, TrackedBlob]] = []
     path_bytes = 0
-    for record in records:
+    while records:
+        record = records.popleft()
         parsed_record = _parse_index_record(record)
         path_bytes += parsed_record.encoded_path_size
         if path_bytes > _MAX_TOTAL_PATH_BYTES:
@@ -698,14 +700,15 @@ def _tracked_files(root: Path, tree_digest: str) -> tuple[TrackedBlob, ...]:
         ConfigurationError.fail("Git executable is unavailable")
     payload = _git_tree_payload(root, git_executable, tree_digest)
     try:
-        records = tuple(item for item in payload.decode("utf-8").split("\0") if item)
+        records = deque(filter(None, payload.decode("utf-8").split("\0")))
     except UnicodeDecodeError:
         ConfigurationError.fail("tracked paths must be UTF-8")
     if len(records) > _MAX_FILES:
         ConfigurationError.fail("repository exceeds the 100000 tracked-file safety limit")
     blobs: list[TrackedBlob] = []
     path_bytes = 0
-    for record in records:
+    while records:
+        record = records.popleft()
         blob, encoded_path_size = _parse_tree_record(record)
         path_bytes += encoded_path_size
         if path_bytes > _MAX_TOTAL_PATH_BYTES:

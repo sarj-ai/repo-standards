@@ -8,6 +8,7 @@ from typing import ClassVar
 import pytest
 
 from repo_standards.core.canonical import (
+    ComponentIndex,
     canonical_json,
     canonical_path,
     semantic_finding_key,
@@ -36,6 +37,29 @@ from repo_standards.core.models import (
 )
 from repo_standards.core.parser import parse_baseline_bytes
 from repo_standards.core.rule_reviews import RuleVersion
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("apps", "apps"),
+        ("apps/service", "service"),
+        ("apps/service/src/main.py", "service"),
+        ("apps/service-extra/src/main.py", "apps"),
+        ("apps/other/main.py", "apps"),
+        ("libraries/main.py", None),
+    ],
+)
+def test_component_index_preserves_nearest_owner_and_segment_boundaries(
+    path: str, expected: str | None
+) -> None:
+    components = (
+        Component(ComponentId("apps"), "application", "apps", "@example/team"),
+        Component(ComponentId("service"), "application", "apps/service", "@example/team"),
+        Component(ComponentId("duplicate"), "application", "apps/service", "@example/team"),
+    )
+    owner = ComponentIndex(components).nearest(path)
+    assert (owner.component_id if owner is not None else None) == expected
 
 
 class EmptyPolicy:
