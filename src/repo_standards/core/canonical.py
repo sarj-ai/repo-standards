@@ -14,7 +14,7 @@ from .errors import ConfigurationError
 
 
 if TYPE_CHECKING:
-    from .models import Diagnostic, Manifest
+    from .models import Component, Diagnostic, Manifest
 
 
 _ASCII_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
@@ -36,6 +36,18 @@ def _contains_control_character(value: str) -> bool:
     if value.isascii():
         return _ASCII_CONTROL.search(value) is not None
     return any(unicodedata.category(char).startswith("C") for char in value)
+
+
+def nearest_component(path: str, components: tuple[Component, ...]) -> Component | None:
+    return max(
+        (
+            component
+            for component in components
+            if path == component.path or path.startswith(f"{component.path}/")
+        ),
+        key=lambda item: len(item.path),
+        default=None,
+    )
 
 
 def workspace_pattern_matches(relative: PurePosixPath, pattern: str) -> bool:

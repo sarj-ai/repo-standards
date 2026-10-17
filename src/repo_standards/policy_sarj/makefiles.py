@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import date
 from typing import TYPE_CHECKING
 
+from repo_standards.core.canonical import nearest_component
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import (
     ComponentId,
@@ -73,15 +74,7 @@ def _growth_diagnostic(
     snapshot: RepositorySnapshot,
     rule: RuleDefinition,
 ) -> Diagnostic:
-    component = max(
-        (
-            component
-            for component in snapshot.manifest.components
-            if item.path == component.path or item.path.startswith(f"{component.path}/")
-        ),
-        key=lambda component: len(component.path),
-        default=None,
-    )
+    component = nearest_component(item.path, snapshot.manifest.components)
     return Diagnostic(
         rule_id=rule.rule_id,
         rule_version=rule.version,
