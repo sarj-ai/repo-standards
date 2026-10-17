@@ -25,6 +25,7 @@ from repo_standards.core.models import (
 from repo_standards.core.parser import parse_manifest_bytes
 
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID
+from .local_residue import LOCAL_RESIDUE_RULE_ID
 from .makefiles import MAKEFILE_GROWTH_RULE_ID
 from .policy import RULES, SarjPolicy
 from .pull_request_templates import PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID
@@ -44,7 +45,7 @@ class _PullRequestTemplateExampleSource(BaseModel):
     template: str | None
 
 
-class _JavaScriptExampleSource(BaseModel):
+class _TrackedFilesExampleSource(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", strict=True)
 
     tracked: tuple[str, ...]
@@ -83,8 +84,11 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
         return _run_makefile_comparison(source)
     if case.rule_id == PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID:
         return _run_pull_request_template(source)
-    if case.rule_id == UNTYPED_JAVASCRIPT_RULE_ID and source.lstrip().startswith("{"):
-        context = _JavaScriptExampleSource.model_validate_json(source)
+    if case.rule_id in {
+        UNTYPED_JAVASCRIPT_RULE_ID,
+        LOCAL_RESIDUE_RULE_ID,
+    } and source.lstrip().startswith("{"):
+        context = _TrackedFilesExampleSource.model_validate_json(source)
         return _run_snapshot(
             context.tracked, manifest=parse_manifest_bytes(context.manifest.encode())
         )
