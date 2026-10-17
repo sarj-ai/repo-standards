@@ -636,8 +636,9 @@ def _javascript_artifact(value: object, index: int) -> JavaScriptArtifact:
 
 def _exact_artifact_path(raw_path: str, context: str) -> str:
     path = canonical_path(raw_path)
-    if path != raw_path or any(character in path for character in "*?[]"):
-        ConfigurationError.fail(f"{context} must be an exact canonical path without globs")
+    if path != raw_path:
+        ConfigurationError.fail(f"{context} must be an exact canonical Git path")
+    # Inspection requires exact tracked membership; metacharacters never expand patterns.
     return path
 
 

@@ -560,7 +560,8 @@ def test_pull_request_review_policy_verified_transition_skips_size_body_and_revi
     assert summary["tier"] == 0
     assert summary["transition_exemption"] == "promote"
     assert summary["missing_body_sections"] == []
-    assert "transition_exemption" in summary["reasons"]  # type: ignore[operator]
+    assert isinstance(summary["reasons"], list)
+    assert "transition_exemption" in summary["reasons"]
     assert _object(payload["size"])["classification"] == "transition-exempt"
     assert payload["files"] == []
 
@@ -656,7 +657,8 @@ def test_pull_request_review_policy_transition_requires_exact_trusted_identity(
     summary = _object(payload["summary"])
     assert summary["transition_exemption"] is None
     assert summary["tier"] == 2
-    assert "bot_authored_pull_request" in summary["reasons"]  # type: ignore[operator]
+    assert isinstance(summary["reasons"], list)
+    assert "bot_authored_pull_request" in summary["reasons"]
     assert _object(payload["size"])["classification"] == "measured"
 
 
@@ -751,7 +753,8 @@ def test_pull_request_review_policy_blocks_check_from_a_stale_head(tmp_path: Pat
 
     assert result.exit_code == 1
     summary = _object(_json_object(result.stdout)["summary"])
-    assert "check_head_mismatch" in summary["reasons"]  # type: ignore[operator]
+    assert isinstance(summary["reasons"], list)
+    assert "check_head_mismatch" in summary["reasons"]
 
 
 def test_pull_request_commits_command_enforces_default_limit(tmp_path: Path) -> None:
@@ -1083,8 +1086,10 @@ def test_versioned_rule_selector_cannot_be_enabled(tmp_path: Path) -> None:
     assert "versionless rule IDs" in result.stdout
 
 
-def test_enable_rule_help_uses_current_rule_ids() -> None:
-    result = runner.invoke(app, ["check", "--help"], terminal_width=160)
+@pytest.mark.parametrize("terminal_width", [80, 160])
+@pytest.mark.parametrize("color", [False, True])
+def test_enable_rule_help_uses_current_rule_ids(terminal_width: int, *, color: bool) -> None:
+    result = runner.invoke(app, ["check", "--help"], terminal_width=terminal_width, color=color)
     uncolored = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
     help_text = " ".join(re.sub(r"[│─╭╮╰╯]", " ", uncolored).split())
 
@@ -1093,6 +1098,7 @@ def test_enable_rule_help_uses_current_rule_ids() -> None:
     assert "Activate a current" in help_text
     assert "rule ID for this run." in help_text
     assert "rule-id@version" not in help_text
+    assert "[[javascript.artifacts]]" in help_text
 
 
 def test_text_diagnostics_do_not_invent_source_coordinates(tmp_path: Path) -> None:
