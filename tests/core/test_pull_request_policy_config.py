@@ -240,7 +240,20 @@ def test_manifest_parses_review_policy() -> None:
     assert policy.required_body_sections == ("QA impact / blast radius", "Manual tests")
     assert policy.transition_exemptions == ("dev-preview",)
     assert policy.transition_actors == ("release-automation[bot]",)
+    assert policy.trusted_bot_authors == ()
     assert policy.accepted_check_conclusions == ("success",)
+
+
+def test_review_policy_parses_trusted_bot_authors() -> None:
+    manifest = parse_manifest_bytes(
+        _manifest_with_review_policy(
+            review_policy=_REVIEW_POLICY + b'trusted_bot_authors = ["sarj-bulbul[bot]"]\n'
+        )
+    )
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.review_policy is not None
+    assert manifest.pull_request.review_policy.trusted_bot_authors == ("sarj-bulbul[bot]",)
 
 
 def test_review_policy_defaults_to_successful_checks() -> None:
@@ -355,6 +368,31 @@ advisory_base_ref = "dev"
             b'accepted_check_conclusions = ["success"]',
             b'accepted_check_conclusions = ["success", "neutral"]',
             "supports success and optional skipped",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            b'accepted_check_conclusions = ["success"]\ntrusted_bot_authors = "sarj-bulbul[bot]"',
+            "trusted_bot_authors must be an array",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            b'accepted_check_conclusions = ["success"]\ntrusted_bot_authors = ["developer"]',
+            "trusted_bot_authors must contain GitHub App bot logins",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            b'accepted_check_conclusions = ["success"]\ntrusted_bot_authors = ["[bot]"]',
+            "trusted_bot_authors must contain GitHub App bot logins",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            b'accepted_check_conclusions = ["success"]\ntrusted_bot_authors = [" bulbul[bot]"]',
+            "trusted_bot_authors must contain exact GitHub logins",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            b'accepted_check_conclusions = ["success"]\ntrusted_bot_authors = ["a[bot]", "A[bot]"]',
+            "trusted_bot_authors must contain unique GitHub logins",
         ),
         (
             b'accepted_check_conclusions = ["success"]',

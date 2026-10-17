@@ -48,6 +48,7 @@ class ReviewPolicyReason(StrEnum):
     ONE_REVIEW_THRESHOLD = "one_review_threshold"
     TWO_REVIEW_THRESHOLD = "two_review_threshold"
     MIGRATION_REVIEW_FLOOR = "migration_review_floor"
+    AUTHOR_REVIEW_FLOOR = "author_review_floor"
     HEAD_EVIDENCE_MISSING = "head_evidence_missing"
     HEAD_MISMATCH = "head_mismatch"
     CHECK_EVIDENCE_MISSING = "check_evidence_missing"
@@ -71,6 +72,7 @@ class ReviewPolicyConfig:
     one_review_maximum_lines: int = ONE_REVIEW_MAXIMUM_LINES
     migration_review_floor: RequiredReviewCount = MIGRATION_REVIEW_FLOOR
     migration_roots: tuple[str, ...] = ()
+    author_review_floor: RequiredReviewCount = 0
     accepted_check_conclusions: frozenset[CheckConclusion] = frozenset({CheckConclusion.SUCCESS})
     require_resolved_threads: bool = True
 
@@ -84,13 +86,13 @@ class ReviewPolicyConfig:
         ):
             message = "one-review maximum must be at least the zero-review threshold"
             raise ValueError(message)
-        if type(self.migration_review_floor) is not int or self.migration_review_floor not in {
-            0,
-            1,
-            2,
-        }:
-            message = "migration review floor must be 0, 1, or 2"
-            raise ValueError(message)
+        for name, floor in (
+            ("migration", self.migration_review_floor),
+            ("author", self.author_review_floor),
+        ):
+            if type(floor) is not int or floor not in {0, 1, 2}:
+                message = f"{name} review floor must be 0, 1, or 2"
+                raise ValueError(message)
         _validate_paths(self.migration_roots, "migration root")
         allowed = {
             CheckConclusion.SUCCESS,
@@ -194,6 +196,9 @@ def evaluate_review_policy(
     if touches_migration and required_reviews < config.migration_review_floor:
         required_reviews = config.migration_review_floor
         reasons.append(ReviewPolicyReason.MIGRATION_REVIEW_FLOOR)
+    if required_reviews < config.author_review_floor:
+        required_reviews = config.author_review_floor
+        reasons.append(ReviewPolicyReason.AUTHOR_REVIEW_FLOOR)
 
     head_matches = evidence.current_head_sha is not None and (
         evidence.current_head_sha == evidence.evaluated_head_sha
@@ -229,6 +234,7 @@ def evaluate_review_policy(
         ReviewPolicyReason.ONE_REVIEW_THRESHOLD,
         ReviewPolicyReason.TWO_REVIEW_THRESHOLD,
         ReviewPolicyReason.MIGRATION_REVIEW_FLOOR,
+        ReviewPolicyReason.AUTHOR_REVIEW_FLOOR,
         ReviewPolicyReason.STALE_APPROVAL,
         ReviewPolicyReason.APPROVAL_CARRIED_FORWARD,
     }
