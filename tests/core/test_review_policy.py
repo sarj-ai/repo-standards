@@ -69,6 +69,12 @@ def test_migration_review_floor_requires_an_actual_integer(floor: bool | float) 
         ReviewPolicyConfig(migration_review_floor=floor)  # pyright: ignore[reportArgumentType] -- exercise runtime refusal of invalid review counts.
 
 
+@pytest.mark.parametrize("floor", [True, 3])
+def test_author_review_floor_requires_a_review_count(floor: bool | int) -> None:
+    with pytest.raises(ValueError, match="author review floor"):
+        ReviewPolicyConfig(author_review_floor=floor)  # pyright: ignore[reportArgumentType] -- exercise runtime refusal of invalid review counts.
+
+
 @pytest.mark.parametrize(
     "path", ["db/../other", "./db", "db/./001.sql", "db\\001.sql", "db/\x00.sql"]
 )

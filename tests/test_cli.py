@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 
 from repo_standards.cli import app
 from repo_standards.core.models import RuleId
+from repo_standards.github_review_policy import trusted_manifest
 
 
 runner = CliRunner()
@@ -189,7 +190,12 @@ def test_pull_request_size_errors_have_command_specific_remediation(tmp_path: Pa
     assert "Fetch and verify" in str(invalid_issue["remediation"])
 
 
-def _review_policy_fixture(repository: Path, *, require_resolved_threads: bool = True) -> str:
+def _review_policy_fixture(
+    repository: Path,
+    *,
+    require_resolved_threads: bool = True,
+    trusted_bot_authors: tuple[str, ...] = (),
+) -> str:
     _git(repository, "init", "--quiet")
     policy = repository / ".repo-standards"
     policy.mkdir()
@@ -217,7 +223,8 @@ accepted_check_conclusions = ["success"]
 transition_exemptions = ["promote"]
 transition_actors = ["release-automation[bot]"]
 """.lstrip()
-        + f"require_resolved_threads = {str(require_resolved_threads).lower()}\n",
+        + f"require_resolved_threads = {str(require_resolved_threads).lower()}\n"
+        + f"trusted_bot_authors = {json.dumps(list(trusted_bot_authors))}\n",
         encoding="utf-8",
     )
     (repository / "README.md").write_text("base\n", encoding="utf-8")
@@ -660,6 +667,177 @@ def test_pull_request_review_policy_transition_requires_exact_trusted_identity(
     assert isinstance(summary["reasons"], list)
     assert "bot_authored_pull_request" in summary["reasons"]
     assert _object(payload["size"])["classification"] == "measured"
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewPolicyRun:
+    exit_code: int
+    summary: dict[str, object]
+
+
+def _invoke_review_policy(
+    repository: Path,
+    *,
+    base: str,
+    head: str,
+    evidence: Path,
+    manifest: Path | None = None,
+) -> ReviewPolicyRun:
+    arguments = [
+        "pull-request",
+        "review-policy",
+        str(repository),
+        "--base",
+        base,
+        "--head",
+        head,
+        "--evidence",
+        str(evidence),
+    ]
+    if manifest is not None:
+        arguments.extend(["--manifest", str(manifest)])
+    result = runner.invoke(app, arguments)
+    return ReviewPolicyRun(result.exit_code, _object(_json_object(result.stdout)["summary"]))
+
+
+def _approvals(head: str, count: int) -> list[dict[str, object]]:
+    return [
+        {"reviewer": f"{index}:human-{index}", "state": "approved", "commit_sha": head}
+        for index in range(count)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("changed_lines", "approvals", "exit_code", "tier", "reasons"),
+    [
+        pytest.param(
+            1,
+            0,
+            1,
+            1,
+            ["zero_review_threshold", "author_review_floor", "approvals_missing"],
+            id="small-change-without-approval-blocks",
+        ),
+        pytest.param(
+            1,
+            1,
+            0,
+            1,
+            ["zero_review_threshold", "author_review_floor"],
+            id="small-change-with-one-approval-passes",
+        ),
+        pytest.param(300, 1, 0, 1, ["one_review_threshold"], id="one-review-tier-passes"),
+        pytest.param(
+            900,
+            1,
+            1,
+            2,
+            ["two_review_threshold", "approvals_missing"],
+            id="two-review-tier-needs-two",
+        ),
+        pytest.param(900, 2, 0, 2, ["two_review_threshold"], id="two-review-tier-passes"),
+    ],
+)
+def test_review_policy_trusted_bot_author_always_needs_human_approval(  # ruff: ignore[too-many-arguments] - one decision-table row per tier
+    tmp_path: Path,
+    *,
+    changed_lines: int,
+    approvals: int,
+    exit_code: int,
+    tier: int,
+    reasons: list[str],
+) -> None:
+    base = _review_policy_fixture(tmp_path, trusted_bot_authors=("sarj-bulbul[bot]",))
+    (tmp_path / "fix.py").write_text("value = 1\n" * changed_lines, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        reviews=_approvals(head, approvals),
+        author_is_bot=True,
+        author_login="Sarj-Bulbul[bot]",
+    )
+
+    run = _invoke_review_policy(tmp_path, base=base, head=head, evidence=evidence)
+
+    assert run.exit_code == exit_code
+    assert run.summary["merge_ready"] is (exit_code == 0)
+    assert run.summary["tier"] == tier
+    assert run.summary["current_human_approvals"] == approvals
+    assert run.summary["reasons"] == reasons
+
+
+@pytest.mark.parametrize("author_login", ["other-bot[bot]", "evil-sarj-bulbul[bot]"])
+def test_review_policy_unlisted_bot_author_stays_blocked(
+    tmp_path: Path,
+    author_login: str,
+) -> None:
+    base = _review_policy_fixture(tmp_path, trusted_bot_authors=("sarj-bulbul[bot]",))
+    (tmp_path / "fix.py").write_text("value = 1\n" * 300, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        reviews=_approvals(head, 1),
+        author_is_bot=True,
+        author_login=author_login,
+    )
+
+    run = _invoke_review_policy(tmp_path, base=base, head=head, evidence=evidence)
+
+    assert run.exit_code == 1
+    assert run.summary["merge_ready"] is False
+    assert run.summary["reasons"] == ["one_review_threshold", "bot_authored_pull_request"]
+
+
+def test_review_policy_ignores_trusted_bot_authors_added_by_the_pull_request(
+    tmp_path: Path,
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    manifest = tmp_path / ".repo-standards" / "repository.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "trusted_bot_authors = []", 'trusted_bot_authors = ["sarj-bulbul[bot]"]'
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "fix.py").write_text("value = 1\n" * 300, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        reviews=_approvals(head, 1),
+        author_is_bot=True,
+        author_login="sarj-bulbul[bot]",
+    )
+    base_manifest = tmp_path.parent / f"{tmp_path.name}-base-manifest.toml"
+    trusted_manifest(tmp_path, base, base_manifest)
+
+    run = _invoke_review_policy(
+        tmp_path, base=base, head=head, evidence=evidence, manifest=base_manifest
+    )
+
+    assert run.exit_code == 1
+    assert run.summary["reasons"] == ["one_review_threshold", "bot_authored_pull_request"]
+
+
+def test_review_policy_trusted_bot_promotion_keeps_its_transition_exemption(
+    tmp_path: Path,
+) -> None:
+    base = _review_policy_fixture(tmp_path, trusted_bot_authors=("release-automation[bot]",))
+    (tmp_path / "large.py").write_text("value = 1\n" * 900, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _promotion_evidence(tmp_path, head=head)
+
+    run = _invoke_review_policy(tmp_path, base=base, head=head, evidence=evidence)
+
+    assert run.exit_code == 0
+    assert run.summary["transition_exemption"] == "promote"
+    assert run.summary["tier"] == 0
 
 
 def test_pull_request_review_policy_reports_missing_body_sections(tmp_path: Path) -> None:

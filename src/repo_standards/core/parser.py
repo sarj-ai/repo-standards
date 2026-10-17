@@ -49,6 +49,7 @@ _MAXIMUM_TRANSITIONS = 64
 _MAXIMUM_REVIEW_POLICY_ITEMS = 256
 _MAXIMUM_COUNTED_LINES = 100_000_000
 _MAXIMUM_GITHUB_LOGIN_LENGTH = 256
+_GITHUB_APP_LOGIN_SUFFIX = "[bot]"
 _MINIMUM_SHA_PREFIX_LENGTH = 12
 _MAXIMUM_SHA_PREFIX_LENGTH = 40
 _MAXIMUM_LOGICAL_REF_BYTES = 1_024
@@ -366,6 +367,7 @@ def parse_pull_request_review_policy(
         "required_body_sections",
         "transition_exemptions",
         "transition_actors",
+        "trusted_bot_authors",
         "accepted_check_conclusions",
         "require_resolved_threads",
     }
@@ -460,6 +462,7 @@ def parse_pull_request_review_policy(
             context=context,
             transition_exemptions=transition_exemptions,
         ),
+        trusted_bot_authors=_review_policy_trusted_bot_authors(data, context=context),
         accepted_check_conclusions=accepted_check_conclusions,
         require_resolved_threads=_boolean(data, "require_resolved_threads", context, default=True),
     )
@@ -472,27 +475,43 @@ def _boolean(data: dict[str, object], key: str, context: str, *, default: bool) 
     return value
 
 
+def _github_logins(data: dict[str, object], key: str, *, context: str) -> tuple[str, ...]:
+    logins = tuple(_string_list(data.get(key, []), f"{context}.{key}"))
+    if len(logins) > _MAXIMUM_REVIEW_POLICY_ITEMS:
+        ConfigurationError.fail(
+            f"{context}.{key} may contain at most {_MAXIMUM_REVIEW_POLICY_ITEMS} items"
+        )
+    folded_logins = tuple(login.casefold() for login in logins)
+    if len(folded_logins) != len(set(folded_logins)):
+        ConfigurationError.fail(f"{context}.{key} must contain unique GitHub logins")
+    if any(
+        len(login) > _MAXIMUM_GITHUB_LOGIN_LENGTH
+        or login != login.strip()
+        or any(character.isspace() or ord(character) < _ASCII_CONTROL_LIMIT for character in login)
+        for login in logins
+    ):
+        ConfigurationError.fail(f"{context}.{key} must contain exact GitHub logins")
+    return logins
+
+
+def _review_policy_trusted_bot_authors(data: dict[str, object], *, context: str) -> tuple[str, ...]:
+    authors = _github_logins(data, "trusted_bot_authors", context=context)
+    if any(
+        not author.casefold().endswith(_GITHUB_APP_LOGIN_SUFFIX)
+        or len(author) == len(_GITHUB_APP_LOGIN_SUFFIX)
+        for author in authors
+    ):
+        ConfigurationError.fail(f"{context}.trusted_bot_authors must contain GitHub App bot logins")
+    return authors
+
+
 def _review_policy_transition_actors(
     data: dict[str, object],
     *,
     context: str,
     transition_exemptions: tuple[str, ...],
 ) -> tuple[str, ...]:
-    actors = tuple(_string_list(data.get("transition_actors", []), f"{context}.transition_actors"))
-    if len(actors) > _MAXIMUM_REVIEW_POLICY_ITEMS:
-        ConfigurationError.fail(
-            f"{context}.transition_actors may contain at most {_MAXIMUM_REVIEW_POLICY_ITEMS} items"
-        )
-    folded_actors = tuple(actor.casefold() for actor in actors)
-    if len(folded_actors) != len(set(folded_actors)):
-        ConfigurationError.fail(f"{context}.transition_actors must contain unique GitHub logins")
-    if any(
-        len(actor) > _MAXIMUM_GITHUB_LOGIN_LENGTH
-        or actor != actor.strip()
-        or any(character.isspace() or ord(character) < _ASCII_CONTROL_LIMIT for character in actor)
-        for actor in actors
-    ):
-        ConfigurationError.fail(f"{context}.transition_actors must contain exact GitHub logins")
+    actors = _github_logins(data, "transition_actors", context=context)
     if transition_exemptions and not actors:
         ConfigurationError.fail(
             f"{context}.transition_actors must not be empty when "

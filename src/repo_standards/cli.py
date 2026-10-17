@@ -733,6 +733,9 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                 zero_review_below_lines=configured.zero_review_below_counted_lines,
                 one_review_maximum_lines=configured.two_reviews_above_counted_lines,
                 migration_roots=configured.migration_roots,
+                author_review_floor=1
+                if transition_exemption is None and _is_trusted_bot_author(provider, configured)
+                else 0,
                 accepted_check_conclusions=frozenset(
                     CheckConclusion(item) for item in configured.accepted_check_conclusions
                 ),
@@ -765,6 +768,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         provider=provider,
         missing_sections=missing_sections,
         transition_exemption=transition_exemption,
+        configured=configured,
     ):
         raise typer.Exit(1)
 
@@ -858,18 +862,33 @@ def _matching_review_policy_transition(
     )
 
 
+def _is_trusted_bot_author(
+    provider: _ReviewPolicyEvidenceInput,
+    configured: PullRequestReviewPolicyConfig,
+) -> bool:
+    login = provider.author_login.casefold()
+    return provider.author_is_bot and any(
+        login == author.casefold() for author in configured.trusted_bot_authors
+    )
+
+
 def _review_policy_merge_ready(
     *,
     result: ReviewPolicyResult,
     provider: _ReviewPolicyEvidenceInput,
     missing_sections: tuple[str, ...],
     transition_exemption: str | None,
+    configured: PullRequestReviewPolicyConfig,
 ) -> bool:
     return (
         result.merge_ready
         and not missing_sections
         and not provider.is_draft
-        and (not provider.author_is_bot or transition_exemption is not None)
+        and (
+            not provider.author_is_bot
+            or transition_exemption is not None
+            or _is_trusted_bot_author(provider, configured)
+        )
         and provider.head_repository_id == provider.base_repository_id
         and all(check.head_sha == provider.evaluated_head_sha for check in provider.required_checks)
     )
@@ -891,6 +910,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
         provider=provider,
         missing_sections=missing_sections,
         transition_exemption=transition_exemption,
+        configured=configured,
     )
     summary = size.summary if size is not None else None
     reasons = _review_policy_receipt_reasons(
@@ -898,6 +918,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
         provider=provider,
         missing_sections=missing_sections,
         transition_exemption=transition_exemption,
+        configured=configured,
     )
     return {
         **_envelope(
@@ -920,6 +941,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             "required_body_sections": list(configured.required_body_sections),
             "transition_exemptions": list(configured.transition_exemptions),
             "transition_actors": list(configured.transition_actors),
+            "trusted_bot_authors": list(configured.trusted_bot_authors),
         },
         "summary": {
             "merge_ready": merge_ready,
@@ -1000,6 +1022,7 @@ def _review_policy_receipt_reasons(
     provider: _ReviewPolicyEvidenceInput,
     missing_sections: tuple[str, ...],
     transition_exemption: str | None,
+    configured: PullRequestReviewPolicyConfig,
 ) -> list[str]:
     reasons = [reason.value for reason in result.reasons]
     if transition_exemption is not None:
@@ -1008,7 +1031,11 @@ def _review_policy_receipt_reasons(
         reasons.append("body_sections_incomplete")
     if provider.is_draft:
         reasons.append("draft_pull_request")
-    if provider.author_is_bot and transition_exemption is None:
+    if (
+        provider.author_is_bot
+        and transition_exemption is None
+        and not _is_trusted_bot_author(provider, configured)
+    ):
         reasons.append("bot_authored_pull_request")
     if provider.head_repository_id != provider.base_repository_id:
         reasons.append("cross_repository_pull_request")
