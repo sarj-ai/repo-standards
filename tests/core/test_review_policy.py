@@ -54,19 +54,19 @@ def _evidence(  # ruff: ignore[too-many-arguments] - evidence dimensions are ind
 @pytest.mark.parametrize("lines", [0.5, float("nan"), float("inf")])
 def test_fractional_or_nonfinite_line_counts_are_rejected(lines: float) -> None:
     with pytest.raises(ValueError, match="integer"):
-        _evidence(counted_lines=lines)  # type: ignore[arg-type]
+        _evidence(counted_lines=lines)  # pyright: ignore[reportArgumentType] -- exercise runtime refusal of non-integer input.
     with pytest.raises(ValueError, match="integer"):
-        SinceReviewEvidence(counted_lines=lines, changed_paths=())  # type: ignore[arg-type]
+        SinceReviewEvidence(counted_lines=lines, changed_paths=())  # pyright: ignore[reportArgumentType] -- exercise runtime refusal of non-integer input.
     with pytest.raises(ValueError, match="integer"):
-        ReviewPolicyConfig(zero_review_below_lines=lines)  # type: ignore[arg-type]
+        ReviewPolicyConfig(zero_review_below_lines=lines)  # pyright: ignore[reportArgumentType] -- exercise runtime refusal of non-integer input.
     with pytest.raises(ValueError, match="one-review maximum"):
-        ReviewPolicyConfig(one_review_maximum_lines=lines)  # type: ignore[arg-type]
+        ReviewPolicyConfig(one_review_maximum_lines=lines)  # pyright: ignore[reportArgumentType] -- exercise runtime refusal of non-integer input.
 
 
 @pytest.mark.parametrize("floor", [True, 1.0])
 def test_migration_review_floor_requires_an_actual_integer(floor: bool | float) -> None:
     with pytest.raises(ValueError, match="migration review floor"):
-        ReviewPolicyConfig(migration_review_floor=floor)  # type: ignore[arg-type]
+        ReviewPolicyConfig(migration_review_floor=floor)  # pyright: ignore[reportArgumentType] -- exercise runtime refusal of invalid review counts.
 
 
 @pytest.mark.parametrize(

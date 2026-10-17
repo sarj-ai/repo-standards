@@ -1,4 +1,5 @@
 repository_id = "repo-standards"
+enabled_rules = ["repository/artifacts/untyped-javascript"]
 components = []
 
 [documentation]
