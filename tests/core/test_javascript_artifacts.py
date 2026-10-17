@@ -188,10 +188,6 @@ def test_generated_artifacts_accept_non_javascript_generation_inputs(source: str
 @pytest.mark.parametrize(
     "path",
     [
-        "*.js",
-        "src/**/app.mjs",
-        "src/app?.js",
-        "src/[ab].js",
         "../app.js",
         "/app.js",
         "./app.js",
@@ -206,7 +202,7 @@ def test_generated_artifacts_accept_non_javascript_generation_inputs(source: str
         "cafe\u0301/app.js",
     ],
 )
-def test_artifact_declarations_reject_non_exact_paths(path: str) -> None:
+def test_artifact_declarations_reject_noncanonical_paths(path: str) -> None:
     with pytest.raises(ConfigurationError):
         parse_manifest_bytes(_manifest(_artifact(path)))
 
@@ -241,7 +237,6 @@ def test_artifact_reason_requires_text(reason: str) -> None:
         "input.CJS",
         "input.MJS",
         "../generator.py",
-        "*.py",
         "./generator.py",
     ],
 )
@@ -353,6 +348,144 @@ def _commit(root: Path) -> None:
         "-m",
         "fixture",
     )
+
+
+@pytest.mark.parametrize("selection", ["tree", "index", "calibration"])
+@pytest.mark.parametrize(
+    ("artifact_path", "source_path", "siblings"),
+    [
+        ("routes/[ab].js", "src/routes/[id]/page.ts", ("routes/a.js", "routes/b.js")),
+        ("routes/[[...slug]].mjs", "schema/[tenant].json", ("routes/slug.mjs",)),
+        ("fixtures/literal*.cjs", "scripts/generate.py", ("fixtures/literal-one.cjs",)),
+        ("fixtures/literal?.jsx", "src/input.mts", ("fixtures/literal1.jsx",)),
+    ],
+)
+def test_git_literal_artifacts_and_sources_never_expand_patterns(
+    tmp_path: Path,
+    selection: str,
+    artifact_path: str,
+    source_path: str,
+    siblings: tuple[str, ...],
+) -> None:
+    root = _repository(tmp_path)
+    for path in (artifact_path, source_path, *siblings):
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("this fixture must not execute\n", encoding="utf-8")
+    artifacts = _artifact("app.js", kind="fixture") + _artifact(
+        artifact_path, kind="generated", source=source_path
+    )
+    manifest = _manifest(artifacts, enabled=True)
+    (root / ".repo-standards/repository.toml").write_bytes(manifest)
+    _commit(root)
+
+    match selection:
+        case "calibration":
+            snapshot = load_calibration_snapshot(root, manifest)
+        case "index":
+            snapshot = load_repository_snapshot(root, identity=git_index_identity(root))
+        case _:
+            snapshot = load_repository_snapshot(root)
+
+    findings = [
+        item for item in SarjPolicy.evaluate_repository(snapshot) if item.rule_id == _RULE_ID
+    ]
+    assert {item.path for item in findings} == set(siblings)
+    assert all(item.severity == "warning" and item.rule_version == 1 for item in findings)
+    assert snapshot.manifest.javascript_artifacts[1].path == artifact_path
+    assert snapshot.manifest.javascript_artifacts[1].source == source_path
+
+
+@pytest.mark.parametrize("selection", ["tree", "index"])
+@pytest.mark.parametrize(
+    ("field", "missing_path"),
+    [
+        ("artifact", "[ab].js"),
+        ("artifact", "*.js"),
+        ("artifact", "src/**/app.mjs"),
+        ("artifact", "src/app?.js"),
+        ("source", "src/routes/*/page.ts"),
+        ("source", "*.py"),
+    ],
+)
+def test_untracked_patterns_cannot_match_tracked_artifacts_or_sources(
+    tmp_path: Path, selection: str, field: str, missing_path: str
+) -> None:
+    root = _repository(tmp_path)
+    for name in ("a", "b"):
+        directory = root / "src/routes" / name
+        directory.mkdir(parents=True)
+        (directory / "page.ts").write_text("export {};\n", encoding="utf-8")
+        (root / f"{name}.js").write_text("export {};\n", encoding="utf-8")
+    artifacts = (
+        _artifact(missing_path)
+        if field == "artifact"
+        else _artifact("app.js", kind="generated", source=missing_path)
+    )
+    (root / ".repo-standards/repository.toml").write_bytes(_manifest(artifacts))
+    _commit(root)
+    with pytest.raises(ConfigurationError, match="tracked regular file"):
+        load_repository_snapshot(
+            root, identity=git_index_identity(root) if selection == "index" else None
+        )
+
+
+@pytest.mark.parametrize("field", ["artifact", "source"])
+def test_literal_route_paths_use_selected_git_membership_across_staging_and_rename(
+    tmp_path: Path, field: str
+) -> None:
+    path = "routes/[id].mjs" if field == "artifact" else "src/routes/[id]/page.ts"
+    artifact = (
+        _artifact(path)
+        if field == "artifact"
+        else _artifact("app.js", kind="generated", source=path)
+    )
+    root = _repository(tmp_path, artifact=artifact)
+    target = root / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("this fixture must not execute\n", encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="tracked regular file"):
+        load_repository_snapshot(root, identity=git_index_identity(root))
+    _git(root, "--literal-pathspecs", "add", "--", path)
+    assert load_repository_snapshot(
+        root, identity=git_index_identity(root)
+    ).manifest.javascript_artifacts
+    with pytest.raises(ConfigurationError, match="tracked regular file"):
+        load_repository_snapshot(root)
+    _commit(root)
+    assert load_repository_snapshot(root).manifest.javascript_artifacts
+
+    target.rename(target.with_name("renamed" + target.suffix))
+    _git(root, "add", "--all")
+    assert load_repository_snapshot(root).manifest.javascript_artifacts
+    with pytest.raises(ConfigurationError, match="tracked regular file"):
+        load_repository_snapshot(root, identity=git_index_identity(root))
+    _commit(root)
+    with pytest.raises(ConfigurationError, match="tracked regular file"):
+        load_repository_snapshot(root)
+
+
+@pytest.mark.parametrize("selection", ["tree", "index"])
+@pytest.mark.parametrize("field", ["artifact", "source"])
+def test_literal_route_artifacts_and_sources_cannot_be_symlinks(
+    tmp_path: Path, selection: str, field: str
+) -> None:
+    path = "routes/[id].mjs" if field == "artifact" else "src/routes/[id]/page.ts"
+    artifact = (
+        _artifact(path)
+        if field == "artifact"
+        else _artifact("app.js", kind="generated", source=path)
+    )
+    root = _repository(tmp_path, artifact=artifact)
+    target = root / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.with_name("target.txt").write_text("target\n", encoding="utf-8")
+    target.symlink_to("target.txt")
+    _commit(root)
+    with pytest.raises(ConfigurationError, match="symlink"):
+        load_repository_snapshot(
+            root, identity=git_index_identity(root) if selection == "index" else None
+        )
 
 
 @pytest.mark.parametrize("calibration", [False, True])

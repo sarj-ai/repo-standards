@@ -1813,17 +1813,18 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
         ),
     ] = False,
 ) -> None:
-    """Analyze one repository manifest.
+    r"""Analyze one repository manifest.
 
     Explicitly enable repository/artifacts/untyped-javascript in enabled_rules
     or with --enable-rule to review tracked .js, .jsx, .mjs and .cjs paths
     case-insensitively. Typed variants and source maps remain outside this rule.
     Migrations must update loaders, callers, type checks and runtime tests.
 
-    Required JavaScript uses exact [[javascript.artifacts]] records in the
+    Required JavaScript uses exact \[\[javascript.artifacts]] records in the
     manifest: path, kind and a nonblank reason. Allowed kinds are tool-config,
     generated, vendor, fixture and runtime. Only generated requires and accepts
     source: a distinct tracked non-JavaScript file, including Python or schemas.
+    Paths are literal Git paths; wildcard characters never expand patterns.
     Paths must be canonical repository-relative regular files in the selected
     Git tree or index. Globs, duplicates, stale paths and over 1,000 records fail.
     Names and folders grant no exemptions. Declarations record intent; they
