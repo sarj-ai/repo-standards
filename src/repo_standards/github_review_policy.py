@@ -1148,6 +1148,8 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
     if args.pr_number is None:
         raise ReconciliationError("pr-number is required outside merge-group mode")
     snapshot = pull_request_snapshot(client, args.pr_number)
+    if snapshot.state != "open":
+        raise ReconciliationError("review policy only evaluates open pull requests")
     post_status(
         client,
         head_sha=snapshot.head_sha,
@@ -1155,8 +1157,6 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
         description="Review policy reconciliation in progress",
         target_url=_workflow_url(),
     )
-    if snapshot.state != "open":
-        raise ReconciliationError("review policy only evaluates open pull requests")
     author_is_bot = snapshot.author_type.casefold() == "bot" or snapshot.author.casefold().endswith(
         "[bot]"
     )
