@@ -6,7 +6,7 @@ import re
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
-from repo_standards.core.canonical import workspace_pattern_matches
+from repo_standards.core.canonical import nearest_component, workspace_pattern_matches
 from repo_standards.core.models import (
     Component,
     ComponentId,
@@ -623,7 +623,7 @@ def _tracked_artifact_diagnostics(
     standalone_package_roots: frozenset[str],
 ) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
-    component = _nearest_component(path, snapshot.manifest.components)
+    component = nearest_component(path, snapshot.manifest.components)
     if path.casefold().endswith(_TFVARS_EXAMPLE_SUFFIXES):
         diagnostics.append(
             _repository_diagnostic(
@@ -831,15 +831,6 @@ def _parent_path(path: str) -> str:
     return "" if parent == "." else parent
 
 
-def _nearest_component(path: str, components: tuple[Component, ...]) -> Component | None:
-    owners = tuple(
-        component
-        for component in components
-        if path == component.path or path.startswith(f"{component.path}/")
-    )
-    return max(owners, key=lambda item: len(item.path), default=None)
-
-
 def _markdown_path_is_owned(
     path: str,
     *,
@@ -903,7 +894,7 @@ def _owned_package_root(
     root = _parent_path(project.path)
     if not project.name:
         return None
-    component = _nearest_component(root, snapshot.manifest.components)
+    component = nearest_component(root, snapshot.manifest.components)
     explicitly_owned = (
         component is not None
         and component.path == root
@@ -1113,12 +1104,10 @@ def _is_owned_package_test(path: str, package_roots: frozenset[str]) -> bool:
 
 def _owned_package_relative_parts(path: str, package_roots: frozenset[str]) -> tuple[str, ...]:
     pure = PurePosixPath(path)
-    for root in sorted(package_roots, key=len, reverse=True):
-        root_path = PurePosixPath(root) if root else PurePosixPath()
-        try:
-            return pure.relative_to(root_path).parts
-        except ValueError:
-            continue
+    for ancestor in (pure, *pure.parents):
+        root = "" if ancestor == PurePosixPath() else ancestor.as_posix()
+        if root in package_roots:
+            return pure.relative_to(ancestor).parts
     return ()
 
 
