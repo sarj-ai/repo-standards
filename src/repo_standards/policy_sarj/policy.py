@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
 from repo_standards.core.canonical import (
     ComponentIndex,
+    canonical_json,
     nearest_component,
     workspace_pattern_matches,
 )
@@ -34,6 +35,7 @@ from repo_standards.core.taxonomy import (
 )
 
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics
+from .local_residue import LOCAL_RESIDUE_RULE_ID, local_residue_diagnostics
 from .makefiles import MAKEFILE_GROWTH_RULE_ID, makefile_diagnostics
 from .pull_request_templates import (
     PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
@@ -185,7 +187,86 @@ def _example(  # ruff: ignore[too-many-arguments] - keyword-only declarative fix
     )
 
 
+def _tracked_files_example(*paths: str) -> str:
+    return canonical_json(
+        {
+            "tracked": paths,
+            "manifest": 'repository_id = "example-repository"\ncomponents = []\n',
+        }
+    )
+
+
 RULES = (
+    Rule(
+        rule_id=LOCAL_RESIDUE_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Review tracked caches, bytecode, coverage data and OS metadata",
+        description=(
+            "Tracked .pyc, .pyo and .tsbuildinfo filenames, and exact .DS_Store and "
+            "Thumbs.db, .eslintcache and .coverage basenames, case-insensitively, need review "
+            "as local residue. "
+            "Only the final filename is matched; directories grant no exemptions."
+        ),
+        why=(
+            "Interpreter bytecode, incremental build or lint state, coverage data and desktop "
+            "metadata can drift from checked source or local tools. Some distributions and "
+            "fixtures are intentional, so a matching filename is review evidence rather than proof "
+            "that deletion is safe."
+        ),
+        fix=(
+            "Review the file's behavior and distribution contract. Untrack disposable output "
+            "and ignore future copies; gitignore does not affect existing tracked files. "
+            "Retain required fixtures or runtime artifacts with an existing exact, dated "
+            "fingerprint exception. Do not rename the file or delete a distinct test contract "
+            "merely to silence the warning."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-artifact-local-residue-bytecode",
+                title="Retain Python source and untrack its local cache",
+                language="json",
+                before=_tracked_files_example(
+                    "src/package/client.py", "src/package/__pycache__/client.cpython-315.pyc"
+                ),
+                after=_tracked_files_example("src/package/client.py"),
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-artifact-local-residue-build-cache",
+                title="Retain build settings and untrack incremental state",
+                language="json",
+                before=_tracked_files_example("tsconfig.json", "tsconfig.tsbuildinfo"),
+                after=_tracked_files_example("tsconfig.json"),
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-artifact-local-residue-desktop-metadata",
+                title="Retain the asset and untrack desktop thumbnail metadata",
+                language="json",
+                before=_tracked_files_example("assets/thumbnail.png", "assets/Thumbs.db"),
+                after=_tracked_files_example("assets/thumbnail.png"),
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-artifact-local-residue-eslint-cache",
+                title="Retain lint settings and untrack local lint state",
+                language="json",
+                before=_tracked_files_example("eslint.config.ts", ".eslintcache"),
+                after=_tracked_files_example("eslint.config.ts"),
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-artifact-local-residue-coverage-data",
+                title="Retain coverage settings and untrack measured state",
+                language="json",
+                before=_tracked_files_example(".coveragerc", ".coverage"),
+                after=_tracked_files_example(".coveragerc"),
+                expected_severity="warning",
+            ),
+        ),
+    ),
     Rule(
         rule_id=UNTYPED_JAVASCRIPT_RULE_ID,
         version=1,
@@ -510,6 +591,7 @@ RULES = (
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
     {
+        LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
         UNTYPED_JAVASCRIPT_RULE_ID: RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/schema-derived-config-examples"): RuleClassification.JUDGMENT,
@@ -523,6 +605,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
     {
+        LOCAL_RESIDUE_RULE_ID: 51,
         UNTYPED_JAVASCRIPT_RULE_ID: 49,
         RuleId("repository/artifacts/terraform-examples"): 40,
         RuleId("repository/artifacts/schema-derived-config-examples"): 44,
@@ -579,7 +662,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=26,
+    policy_version=27,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1231,6 +1314,7 @@ class SarjPolicy:
                 )
             )
             + javascript_diagnostics(snapshot, rule=_rule(UNTYPED_JAVASCRIPT_RULE_ID))
+            + local_residue_diagnostics(snapshot, rule=_rule(LOCAL_RESIDUE_RULE_ID))
         )
         if snapshot.makefile_comparison is None:
             return diagnostics
