@@ -50,6 +50,24 @@ def nearest_component(path: str, components: tuple[Component, ...]) -> Component
     )
 
 
+class ComponentIndex:
+    __slots__ = ("_by_path",)
+
+    def __init__(self, components: tuple[Component, ...]) -> None:
+        self._by_path: dict[str, Component] = {}
+        for component in components:
+            self._by_path.setdefault(component.path, component)
+
+    def nearest(self, path: str) -> Component | None:
+        while True:
+            component = self._by_path.get(path)
+            if component is not None:
+                return component
+            path, separator, _name = path.rpartition("/")
+            if not separator:
+                return None
+
+
 def workspace_pattern_matches(relative: PurePosixPath, pattern: str) -> bool:
     if pattern == ".":
         return not relative.parts

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from repo_standards.core.canonical import nearest_component
+from repo_standards.core.canonical import ComponentIndex
 from repo_standards.core.javascript import is_javascript_path, validate_javascript_artifacts
 from repo_standards.core.models import (
     ComponentId,
@@ -28,10 +28,11 @@ def javascript_diagnostics(
     validate_javascript_artifacts(artifacts, tracked_paths)
     declared_paths = frozenset(item.path for item in artifacts)
     diagnostics: list[Diagnostic] = []
+    components = ComponentIndex(snapshot.manifest.components)
     for path in sorted(
         path for path in tracked_paths if is_javascript_path(path) and path not in declared_paths
     ):
-        component = nearest_component(path, snapshot.manifest.components)
+        component = components.nearest(path)
         diagnostics.append(
             Diagnostic(
                 rule_id=rule.rule_id,
