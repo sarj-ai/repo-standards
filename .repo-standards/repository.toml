@@ -1,5 +1,8 @@
 repository_id = "repo-standards"
-enabled_rules = ["repository/artifacts/untyped-javascript"]
+enabled_rules = [
+  "repository/artifacts/untyped-javascript",
+  "repository/artifacts/local-residue",
+]
 components = []
 
 [documentation]
