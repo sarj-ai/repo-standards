@@ -156,6 +156,10 @@ def test_every_tracked_javascript_extension_needs_a_declaration(path: str) -> No
         "main.sh",
         "MAIN.TS",
         "café/schema.proto",
+        "tool.j\u017f",
+        "tool.j\u017fx",
+        "tool.mj\u017f",
+        "tool.cj\u017f",
     ],
 )
 def test_typed_sources_maps_and_other_languages_are_out_of_scope(path: str) -> None:
@@ -208,7 +212,17 @@ def test_artifact_declarations_reject_noncanonical_paths(path: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "path", ["source.ts", "source.tsx", "source.mts", "source.cts", "app.js.map", "schema.json"]
+    "path",
+    [
+        "source.ts",
+        "source.tsx",
+        "source.mts",
+        "source.cts",
+        "app.js.map",
+        "schema.json",
+        "tool.j\u017f",
+        "tool.mj\u017f",
+    ],
 )
 def test_non_javascript_artifact_declarations_are_invalid(path: str) -> None:
     with pytest.raises(ConfigurationError, match="JavaScript"):
