@@ -6,4 +6,9 @@ enabled_rules = [
 components = []
 
 [documentation]
+# Allow only the canonical harness entry points used by the discovery PR.
+# Every other new Markdown page keeps the zero-page default.
+addition_exemptions = [
+  ".claude/skills/repo-rule-authoring/SKILL.md",
+]
 entrypoints = ["README.md"]
