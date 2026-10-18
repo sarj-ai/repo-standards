@@ -1,1 +1,9 @@
-{"fingerprints":[],"include_warnings":true,"policy":"sarj","policy_version":27,"repository_id":"repo-standards","schema_version":2,"scope_digest":"b3bab163b56b8289f6e2e4105e44c8ff88c0d4e451b3bf114a957204fb45093f"}
+{
+  "fingerprints": [],
+  "include_warnings": true,
+  "policy": "sarj",
+  "policy_version": 27,
+  "repository_id": "repo-standards",
+  "schema_version": 2,
+  "scope_digest": "a1d670df5fccbe778ad78fd62a1901411e6d437fa80bb0d1de144b513157efe3"
+}
