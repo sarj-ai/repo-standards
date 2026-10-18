@@ -22,7 +22,7 @@ from repo_standards.repository.comparison import with_makefile_comparison
 _PRIVATE_MODE = 0o600
 _SOURCE_TIMEOUT_SECONDS = 120
 _FULL_SHA_LENGTH = 40
-_GIT = shutil.which("git", path=os.defpath)
+_GIT = shutil.which("git")
 app = typer.Typer(add_completion=False, help="Evaluate pending rules against pinned local corpora.")
 
 
@@ -166,6 +166,8 @@ def _worker(root: Path, manifest_path: Path, rule_id: str) -> int:
 
 
 def _run_source(source: dict[str, str], rule_id: str) -> dict[str, object]:
+    if _GIT is None:
+        _fail("Git executable is unavailable")
     started = time.perf_counter()
     result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed self-worker command, no shell
         [
@@ -183,7 +185,12 @@ def _run_source(source: dict[str, str], rule_id: str) -> dict[str, object]:
         capture_output=True,
         text=True,
         timeout=_SOURCE_TIMEOUT_SECONDS,
-        env={"PATH": os.defpath, "LC_ALL": "C", "PYTHONHASHSEED": "0"},
+        env={
+            # Keep the selected Git; the system fallback may lack required flags.
+            "PATH": os.pathsep.join((str(Path(_GIT).parent), os.defpath)),
+            "LC_ALL": "C",
+            "PYTHONHASHSEED": "0",
+        },
     )
     if result.returncode != 0:
         _fail(f"corpus evaluation failed: {source['report_name']}")
