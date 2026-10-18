@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shlex
 import shutil
 import stat
 import subprocess
 import sys
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
+
+
+if TYPE_CHECKING:
+    import pytest
 
 
 _SCRIPT = (
@@ -161,6 +166,40 @@ def test_calibration_isolated_worker_redacts_private_report(  # ruff: ignore[too
     assert classified["decision"] == "ship-warning"
     assert classified_private_payload["tp"] == 1
     assert classified_private_payload["fp"] == 0
+
+
+def test_calibration_worker_uses_selected_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _repository, corpus = _fixture(tmp_path)
+    git = shutil.which("git")
+    assert git is not None
+    tools = tmp_path / "trusted-tools"
+    tools.mkdir()
+    calls = tmp_path / "git-calls"
+    launcher = tools / "git"
+    launcher.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$*\" >> {shlex.quote(str(calls))}\n"
+        f'exec {shlex.quote(git)} "$@"\n'
+    )
+    launcher.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tools), prepend=":")
+
+    _run(
+        "evaluate",
+        "--corpus",
+        str(corpus),
+        "--rule",
+        "repository/documentation/placement",
+        "--fixtures-passed",
+        "--private-output",
+        str(tmp_path / "private.json"),
+        "--public-output",
+        str(tmp_path / "public.json"),
+    )
+
+    assert "--no-lazy-fetch" in calls.read_text()
 
 
 def test_calibration_refuses_broad_private_overlay_permissions(tmp_path: Path) -> None:
