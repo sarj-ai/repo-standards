@@ -13,7 +13,7 @@ JAVASCRIPT_SUFFIXES = (".js", ".jsx", ".mjs", ".cjs")
 
 
 def is_javascript_path(path: str) -> bool:
-    return path.casefold().endswith(JAVASCRIPT_SUFFIXES)
+    return path.lower().endswith(JAVASCRIPT_SUFFIXES)
 
 
 def validate_javascript_artifacts(
