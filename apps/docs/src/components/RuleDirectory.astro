@@ -7,22 +7,241 @@ interface Props {
 }
 
 const { rows } = Astro.props;
+const distinct = (values: readonly string[]) => [...new Set(values)].sort((left, right) => left.localeCompare(right, 'en'));
+const categories = distinct(rows.map((row) => row.category));
+const topics = distinct(rows.map((row) => row.topic));
+const severities = distinct(rows.map((row) => row.rule["default_severity"]));
+const searchText = ({ rule, category, topic }: RuleView) => [
+  rule.title,
+  rule.slug,
+  rule["rule_id"],
+  rule.description,
+  category,
+  topic,
+].join(' ').toLocaleLowerCase('en-US');
 ---
 
-<div class="rule-directory">
-  <ul class="rule-table">
-    {rows.map(({ rule, href, category }) => (
-      <li>
-        <a class="rule-row" href={href} data-rule-id={rule["rule_id"]}>
-          <RuleTypeMark categoryId={rule["category_id"]} label={category} />
+<section class="rule-directory" data-rule-directory data-search-index-href="/api/catalog.json">
+  <div class="directory-toolbar" data-rule-toolbar hidden>
+    <div class="rule-search">
+      <label for="rule-search-input">Search rules</label>
+      <div class="rule-search__field">
+        <input
+          id="rule-search-input"
+          type="search"
+          placeholder="Name, slug, or guidance"
+          autocomplete="off"
+          spellcheck="false"
+          aria-controls="rule-list"
+          aria-keyshortcuts="/"
+          data-rule-query
+        />
+        <kbd aria-hidden="true">/</kbd>
+      </div>
+    </div>
+    <div class="directory-filters" role="group" aria-label="Filter rules">
+      {categories.length > 1 && <label>Category<select data-rule-filter="category"><option value="">All</option>{categories.map((category) => <option value={category}>{category}</option>)}</select></label>}
+      {topics.length > 1 && <label>Topic<select data-rule-filter="topic"><option value="">All</option>{topics.map((topic) => <option value={topic}>{topic}</option>)}</select></label>}
+      {severities.length > 1 && <label>Severity<select data-rule-filter="severity"><option value="">All</option>{severities.map((severity) => <option value={severity}>{severity}</option>)}</select></label>}
+      <button type="button" data-rule-clear hidden>Clear</button>
+    </div>
+  </div>
+
+  <div class="directory-meta">
+    <p class="directory-status" aria-live="polite">
+      <strong data-rule-count>{rows.length}</strong> <span data-rule-noun>{rows.length === 1 ? 'rule' : 'rules'}</span>
+    </p>
+    <p class="directory-loading" data-rule-loading hidden aria-hidden="true">Searching guidance…</p>
+  </div>
+  <p class="directory-notice" role="status" data-rule-error hidden>Guidance search is unavailable, so results match names and descriptions only.</p>
+
+  <ul class="rule-table" id="rule-list" data-rule-list>
+    {rows.map((row) => (
+      <li
+        data-rule-row
+        data-rule-id={row.rule["rule_id"]}
+        data-category={row.category}
+        data-topic={row.topic}
+        data-severity={row.rule["default_severity"]}
+        data-search={searchText(row)}
+      >
+        <a class="rule-row" href={row.href} data-rule-id={row.rule["rule_id"]}>
+          <RuleTypeMark categoryId={row.rule["category_id"]} label={row.category} />
           <span class="rule-row__main">
-            <strong>{rule.title}</strong>
-            <span>{rule.description}</span>
+            <strong>{row.rule.title}</strong>
+            <span>{row.rule.description}</span>
           </span>
-          <code>{rule.slug}</code>
-          <span class:list={['severity', `severity--${rule["default_severity"]}`]}>{rule["default_severity"]}</span>
+          <code>{row.rule.slug}</code>
+          <span class:list={['severity', `severity--${row.rule["default_severity"]}`]}>{row.rule["default_severity"]}</span>
         </a>
       </li>
     ))}
   </ul>
-</div>
+
+  <div class="rule-directory__empty" data-rule-empty hidden>
+    <strong>No rules match</strong>
+    <p>Try another search term or filter, or clear them to see every rule.</p>
+    <button type="button" data-rule-reset>Clear search and filters</button>
+  </div>
+</section>
+
+<script>
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+  }
+
+  function guidanceIndex(payload: unknown): Map<string, string> {
+    if (!isRecord(payload) || !Array.isArray(payload.rules)) {
+      throw new TypeError('Rule catalog has an invalid shape.');
+    }
+    const index = new Map<string, string>();
+    for (const rule of payload.rules) {
+      if (!isRecord(rule) || typeof rule['rule_id'] !== 'string') continue;
+      const examples = Array.isArray(rule.examples) ? rule.examples.filter(isRecord) : [];
+      const guidance = [rule.why, rule.fix, ...examples.map((example) => example.title)]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ');
+      index.set(rule['rule_id'], guidance.toLocaleLowerCase('en-US'));
+    }
+    return index;
+  }
+
+  for (const directory of document.querySelectorAll('[data-rule-directory]')) {
+    if (!(directory instanceof HTMLElement) || directory.dataset.ready === 'true') continue;
+    directory.dataset.ready = 'true';
+    const toolbar = directory.querySelector('[data-rule-toolbar]');
+    const query = directory.querySelector('[data-rule-query]');
+    const list = directory.querySelector('[data-rule-list]');
+    const clear = directory.querySelector('[data-rule-clear]');
+    const reset = directory.querySelector('[data-rule-reset]');
+    const empty = directory.querySelector('[data-rule-empty]');
+    const loading = directory.querySelector('[data-rule-loading]');
+    const failure = directory.querySelector('[data-rule-error]');
+    const count = directory.querySelector('[data-rule-count]');
+    const noun = directory.querySelector('[data-rule-noun]');
+    const indexHref = directory.dataset.searchIndexHref;
+    if (
+      !(toolbar instanceof HTMLElement)
+      || !(query instanceof HTMLInputElement)
+      || !(list instanceof HTMLUListElement)
+      || indexHref === undefined
+    ) continue;
+    const rows = [...list.querySelectorAll<HTMLLIElement>('[data-rule-row]')];
+    const filters = [...directory.querySelectorAll<HTMLSelectElement>('select[data-rule-filter]')]
+      .map((select) => [select.dataset.ruleFilter ?? '', select] as const);
+    toolbar.hidden = false;
+
+    let guidance: Map<string, string> | undefined;
+    let guidanceRequest: Promise<void> | undefined;
+    let guidanceFailed = false;
+    const loadGuidance = () => {
+      guidanceRequest ??= fetch(indexHref)
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Rule catalog returned ${String(response.status)}.`);
+          guidance = guidanceIndex(await response.json());
+        })
+        .catch(() => {
+          guidanceFailed = true;
+        });
+      return guidanceRequest;
+    };
+
+    const readLocation = () => {
+      const params = new URLSearchParams(location.search);
+      query.value = params.get('q') ?? '';
+      for (const [name, select] of filters) {
+        const value = params.get(name) ?? '';
+        select.value = [...select.options].some((option) => option.value === value) ? value : '';
+      }
+    };
+
+    const writeLocation = (terms: string) => {
+      const next = new URL(location.href);
+      if (terms) next.searchParams.set('q', terms);
+      else next.searchParams.delete('q');
+      for (const [name, select] of filters) {
+        if (select.value) next.searchParams.set(name, select.value);
+        else next.searchParams.delete(name);
+      }
+      if (next.href !== location.href) history.replaceState(null, '', next);
+    };
+
+    const apply = () => {
+      const terms = query.value.trim();
+      const tokens = terms.toLocaleLowerCase('en-US').split(/\s+/u).filter(Boolean);
+      const searching = tokens.length > 0;
+      const pending = searching && guidance === undefined && !guidanceFailed;
+      if (pending) void loadGuidance().then(apply);
+      let visible = 0;
+      for (const row of rows) {
+        const matchesFilters = filters.every(([name, select]) => !select.value || row.dataset[name] === select.value);
+        const haystack = `${row.dataset.search ?? ''} ${guidance?.get(row.dataset.ruleId ?? '') ?? ''}`;
+        row.hidden = !matchesFilters || !tokens.every((token) => haystack.includes(token));
+        if (!row.hidden) visible += 1;
+      }
+      const filtered = searching || filters.some(([, select]) => select.value !== '');
+      if (count) count.textContent = String(visible);
+      if (noun) noun.textContent = `${visible === 1 ? 'rule' : 'rules'}${filtered ? ` of ${String(rows.length)}` : ''}`;
+      if (loading instanceof HTMLElement) loading.hidden = !pending;
+      if (failure instanceof HTMLElement) failure.hidden = !(searching && guidanceFailed);
+      list.setAttribute('aria-busy', String(pending));
+      list.hidden = visible === 0;
+      if (empty instanceof HTMLElement) empty.hidden = visible !== 0;
+      if (clear instanceof HTMLButtonElement) clear.hidden = !filtered;
+      writeLocation(terms);
+    };
+
+    const clearAll = () => {
+      query.value = '';
+      for (const [, select] of filters) select.value = '';
+      apply();
+      query.focus();
+    };
+
+    const visibleLinks = () => rows.filter((row) => !row.hidden).flatMap((row) => [...row.querySelectorAll('a')]);
+
+    query.addEventListener('input', apply);
+    query.addEventListener('focus', () => void loadGuidance(), { once: true });
+    query.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && query.value) {
+        event.preventDefault();
+        query.value = '';
+        apply();
+      } else if (event.key === 'ArrowDown') {
+        const [first] = visibleLinks();
+        if (first) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    });
+    list.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      const links = visibleLinks();
+      const index = links.findIndex((link) => link === document.activeElement);
+      if (index < 0) return;
+      event.preventDefault();
+      const target = event.key === 'ArrowDown' ? links[index + 1] : links[index - 1];
+      if (target) target.focus();
+      else if (event.key === 'ArrowUp') query.focus();
+    });
+    document.addEventListener('keydown', (event) => {
+      const target = event.target;
+      const editing = target instanceof HTMLElement && (target.isContentEditable || target.closest('input, select, textarea') !== null);
+      if (event.key !== '/' || editing || event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+      query.focus();
+      query.select();
+    });
+    for (const [, select] of filters) select.addEventListener('change', apply);
+    clear?.addEventListener('click', clearAll);
+    reset?.addEventListener('click', clearAll);
+    addEventListener('popstate', () => {
+      readLocation();
+      apply();
+    });
+
+    readLocation();
+    apply();
+  }
+</script>

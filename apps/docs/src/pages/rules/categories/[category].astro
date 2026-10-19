@@ -15,12 +15,15 @@ export function getStaticPaths() {
 interface Props { category: CategoryView }
 const { category } = Astro.props;
 const topics = category.topics;
-const ruleCount = category.ruleCount;
+const description = `${String(category.ruleCount)} repository rules.`;
 ---
 
-<ReferencePage title={category.category.label} description={`${ruleCount} repository rules.`}>
-  <Breadcrumbs ancestors={[{ label: 'Rules', href: '/rules/' }]} current={category.category.label} />
-  <h1 class="sarj-visually-hidden">{category.category.label}</h1>
+<ReferencePage title={category.category.label} description={description}>
+  <header class="directory-header">
+    <Breadcrumbs ancestors={[{ label: 'Rules', href: '/rules/' }]} current={category.category.label} />
+    <h1>{category.category.label}</h1>
+    <p class="lede">{description}</p>
+  </header>
   <div class="rule-catalog" data-category-id={category.category["category_id"]}>
     {topics.map(({ topic, rules }) => {
       return (

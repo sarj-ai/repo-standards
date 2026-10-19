@@ -12,10 +12,15 @@ function parameterDetails(parameter: Parameter): string {
   if (parameter.choices.length > 0) pieces.push(parameter.choices.join(' | '));
   return pieces.join(' · ');
 }
+
+const description = `${String(catalog.commands.length)} cataloged commands.`;
 ---
 
-<ReferencePage title="CLI" description={`${catalog.commands.length} cataloged commands.`}>
-  <h1 class="sarj-visually-hidden">CLI</h1>
+<ReferencePage title="CLI" description={description}>
+  <header class="directory-header">
+    <h1>CLI</h1>
+    <p class="lede">{description}</p>
+  </header>
   <nav class="command-index" aria-label="Commands">
     {catalog.commands.map((command) => <a href={`#${command["command_id"]}`}>{command.path.join(' ')}</a>)}
   </nav>

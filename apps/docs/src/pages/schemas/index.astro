@@ -1,10 +1,15 @@
 ---
 import ReferencePage from '../../components/ReferencePage.astro';
 import { catalog } from '../../lib/catalog';
+
+const description = `${String(catalog.schemas.length)} machine contracts.`;
 ---
 
-<ReferencePage title="Schemas" description={`${catalog.schemas.length} machine contracts.`}>
-  <h1 class="sarj-visually-hidden">Schemas</h1>
+<ReferencePage title="Schemas" description={description}>
+  <header class="directory-header">
+    <h1>Schemas</h1>
+    <p class="lede">{description}</p>
+  </header>
   <div class="schema-list">
     {catalog.schemas.map((schema) => (
       <article>
