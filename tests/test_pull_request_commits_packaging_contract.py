@@ -59,7 +59,7 @@ def test_pull_request_commits_hook_is_quiet_advisory_and_history_scoped() -> Non
     ]
 
 
-def test_pull_request_commits_action_has_one_safe_consumer_input() -> None:
+def test_pull_request_commits_action_inputs_default_to_owning_the_check() -> None:
     document = OBJECT_MAP.validate_python(yaml.safe_load(ACTION_PATH.read_text(encoding="utf-8")))
     inputs = OBJECT_MAP.validate_python(document["inputs"])
     runs = OBJECT_MAP.validate_python(document["runs"])
@@ -69,15 +69,47 @@ def test_pull_request_commits_action_has_one_safe_consumer_input() -> None:
             "description": "Repository root to inspect",
             "required": False,
             "default": ".",
-        }
+        },
+        "status-context": {
+            "description": (
+                "Commit status context that receives the verdict, for a job that embeds the policy "
+                "instead of owning the required check"
+            ),
+            "required": False,
+            "default": "",
+        },
+        "github-token": {
+            "description": "Token with statuses write, required with status-context",
+            "required": False,
+            "default": "",
+        },
     }
     assert runs["using"] == "composite"
 
 
+def test_pull_request_commits_action_reports_the_verdict_it_exits_with() -> None:
+    document = OBJECT_MAP.validate_python(yaml.safe_load(ACTION_PATH.read_text(encoding="utf-8")))
+    runs = OBJECT_MAP.validate_python(document["runs"])
+    steps = {str(step.get("name")): step for step in OBJECT_MAPS.validate_python(runs["steps"])}
+
+    assert steps["Enforce pull-request commit history"]["continue-on-error"] is True
+    assert steps["Report the verdict as a commit status"]["if"] == (
+        "${{ !cancelled() && inputs.status-context != '' }}"
+    )
+    assert steps["Fail on a failing verdict"] == {
+        "name": "Fail on a failing verdict",
+        "if": "${{ steps.enforce.outcome != 'success' }}",
+        "shell": "bash",
+        "run": "exit 1",
+    }
+
+
 def test_pull_request_commits_action_uses_runner_event_file_and_locked_package() -> None:
     source = ACTION_PATH.read_text(encoding="utf-8")
+    document = OBJECT_MAP.validate_python(yaml.safe_load(source))
+    steps = OBJECT_MAPS.validate_python(OBJECT_MAP.validate_python(document["runs"])["steps"])
 
-    assert "${{ github.event" not in source
+    assert all("${{" not in str(step.get("run", "")) for step in steps)
     assert "${{ inputs.root }}" in source
     assert '--github-event "$GITHUB_EVENT_PATH"' in source
     assert 'pull-request commits "$INPUT_ROOT"' in source
