@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse  # ruff: ignore[banned-api] -- dependency-free developer and CI entry point.
 from dataclasses import asdict, dataclass
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -187,6 +188,7 @@ def _git(root: Path, *arguments: str) -> str:
         capture_output=True,
         text=True,
         timeout=30,
+        env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},  # ruff: ignore[banned-api] -- preserve the session environment while keeping Git reads local.
     ).stdout
 
 

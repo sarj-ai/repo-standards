@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -89,6 +90,26 @@ def test_shared_and_unclassified_changes_fall_back_to_all_tests(
 def test_missing_or_invalid_git_evidence_runs_every_test(repository: Path, base: str) -> None:
     plan = select_tests(repository, base=base)
     assert len(plan.tests) == plan.total_files
+
+
+def test_git_reads_disable_lazy_fetch_without_replacing_session_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GIT_NO_LAZY_FETCH", "0")
+    original_environment = dict(os.environ)  # ruff: ignore[banned-api] -- verify the child inherits the exact session environment.
+
+    def run(
+        command: tuple[str, ...], *, env: dict[str, str], **_kwargs: bool | int | Path
+    ) -> subprocess.CompletedProcess[str]:
+        assert env == {**original_environment, "GIT_NO_LAZY_FETCH": "1"}
+        return subprocess.CompletedProcess(command, 0, stdout="fixture\n")
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- observe the child-only Git environment boundary.
+        subprocess, "run", run
+    )
+
+    assert test_selection._git(tmp_path, "rev-parse", "HEAD") == "fixture\n"  # ruff: ignore[private-member-access]  # pyright: ignore[reportPrivateUsage]
+    assert dict(os.environ) == original_environment  # ruff: ignore[banned-api] -- the parent environment must remain unchanged.
 
 
 def test_deletions_run_every_test(repository: Path) -> None:
