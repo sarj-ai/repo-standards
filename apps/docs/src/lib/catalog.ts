@@ -15,6 +15,7 @@ export interface RuleView {
   readonly rule: Rule;
   readonly href: string;
   readonly category: string;
+  readonly topic: string;
 }
 
 interface TopicView {
@@ -49,6 +50,7 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
             rule,
             href: ruleHref(rule),
             category: categoryValue.label,
+            topic: topicValue.label,
           }));
         if (rules.length === 0) throw new TypeError(`Rule topic has no rules: ${topicValue["topic_id"]}`);
         return { topic: topicValue, rules };
