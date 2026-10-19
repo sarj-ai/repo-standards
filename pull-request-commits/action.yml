@@ -6,6 +6,16 @@ inputs:
     description: Repository root to inspect
     required: false
     default: .
+  status-context:
+    description: >-
+      Commit status context that receives the verdict, for a job that embeds the policy
+      instead of owning the required check
+    required: false
+    default: ''
+  github-token:
+    description: Token with statuses write, required with status-context
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -21,9 +31,27 @@ runs:
       shell: bash
       run: uv sync --project "$GITHUB_ACTION_PATH/.." --locked --no-dev --python 3.15
     - name: Enforce pull-request commit history
+      id: enforce
+      continue-on-error: true
       shell: bash
       env:
         INPUT_ROOT: ${{ inputs.root }}
       run: |
         uv run --project "$GITHUB_ACTION_PATH/.." --no-sync repo-standards \
           pull-request commits "$INPUT_ROOT" --github-event "$GITHUB_EVENT_PATH"
+    - name: Report the verdict as a commit status
+      if: ${{ !cancelled() && inputs.status-context != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        INPUT_STATUS_CONTEXT: ${{ inputs.status-context }}
+        STATE: ${{ steps.enforce.outcome == 'success' && 'success' || 'failure' }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+      run: >-
+        gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA"
+        -f state="$STATE" -f context="$INPUT_STATUS_CONTEXT" -f description="Pull-request commit history"
+        -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+    - name: Fail on a failing verdict
+      if: ${{ steps.enforce.outcome != 'success' }}
+      shell: bash
+      run: exit 1
