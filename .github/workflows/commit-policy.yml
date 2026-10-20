@@ -10,17 +10,25 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: commit-policy-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
+  # The verdict depends only on the base, the head and the base manifest, so a title or body edit cannot change
+  # it and skips the runner. A skipped check of the required name would replace a failure on the same commit, so
+  # the skipped job must never be named commit-policy-v1. GitHub reports a skipped job under its unevaluated name
+  # expression, and the expression itself evaluates to another name, so both readings stay distinct. Merge groups
+  # keep running: their skipped check would carry that unevaluated name and never satisfy the required context.
   commit-policy-v1:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    name: >-
+      ${{ github.event.action == 'edited' && !github.event.changes.base
+      && 'commit-policy-v1 (unchanged by edit)' || 'commit-policy-v1' }}
+    if: github.event.action != 'edited' || github.event.changes.base
+    concurrency:
+      group: commit-policy-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: sarj-ai/repo-standards/pull-request-commits@ce0d08cfe013e37f217a03b06e6e1a14aae1bc4d # v6.10.0
+      - uses: sarj-ai/repo-standards/pull-request-commits@aed2501dc09aa5701c984544d4fa20bea91661f9 # v6.11.0
