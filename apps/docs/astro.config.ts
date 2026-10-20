@@ -41,31 +41,6 @@ export default defineConfig({
         replacesTitle: true,
       },
       disable404Route: true,
-      expressiveCode: {
-        styleOverrides: {
-          borderRadius: '4px',
-          borderColor: 'var(--rs-line)',
-          codeFontFamily: 'var(--rs-font-mono)',
-          codeFontSize: '0.8125rem',
-          codeLineHeight: '1.7',
-          uiFontFamily: 'var(--rs-font-sans)',
-          uiFontSize: '0.8125rem',
-          frames: {
-            editorActiveTabIndicatorTopColor: 'transparent',
-            editorActiveTabIndicatorBottomColor: 'transparent',
-            editorTabBarBorderBottomColor: 'var(--rs-line)',
-            terminalTitlebarBorderBottomColor: 'var(--rs-line)',
-          },
-          textMarkers: {
-            delBackground: 'var(--rs-diff-del-bg)',
-            delBorderColor: 'var(--rs-diff-del-line)',
-            delDiffIndicatorColor: 'var(--rs-report)',
-            insBackground: 'var(--rs-diff-ins-bg)',
-            insBorderColor: 'var(--rs-diff-ins-line)',
-            insDiffIndicatorColor: 'var(--rs-pass)',
-          },
-        },
-      },
       customCss: ['./src/styles/global.css'],
       sidebar: [
         { label: 'About', link: '/' },
