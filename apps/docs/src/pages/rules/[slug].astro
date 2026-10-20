@@ -27,7 +27,6 @@ const { category, topic, previous, next } = rulePage(rule);
 const description = ruleDescription(rule);
 const examples = ruleExamples(rule);
 const [primaryExample, ...additionalExamples] = examples;
-const slugSegments = rule.slug.split(/(?<=-)/u);
 const categoryUrl = `/rules/categories/${encodeURIComponent(rule["category_id"])}/`;
 const referenceLinks = [...new Set(rule.references)].map((href) => ({
   href,
@@ -62,7 +61,7 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
         />
       </div>
 
-      <h1>{slugSegments.map((segment) => <>{segment}<wbr /></>)}</h1>
+      <h1>{rule.slug}</h1>
       <p class="lede" data-rule-description>{description}</p>
       <div class="rule-header-links" aria-label="Rule links">
         <code>{rule["rule_id"]}</code>

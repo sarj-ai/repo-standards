@@ -9,23 +9,16 @@ const quickStart = `uvx --from ${catalog.product.distribution} repo-standards pu
 
 <ReferencePage title="About" description={catalog.product.summary}>
   <article class="about-page sarj-about-page">
-    <header class="about-hero">
-      <h1 class="rs-label">About</h1>
-      <p class="about-hero__statement">Repository standards should be easy to understand before they are enforced.</p>
-      <p class="about-hero__lede">Repo Standards checks repository structure, pull-request size, commit messages, and reviewable Git history.</p>
-    </header>
+    <h1>About</h1>
+    <p>Repository standards should be easy to understand before they are enforced.</p>
+    <p>Repo Standards checks repository structure, pull-request size, commit messages, and reviewable Git history.</p>
+    <p><a href="/rules/">Browse rules</a> or <a href="/git-policies/">understand Git policies</a>.</p>
 
-    <div class="about-body">
-      <div class="about-prose">
-        <p><a href="/rules/">Browse rules</a> or <a href="/git-policies/">understand Git policies</a>.</p>
-      </div>
-
-      <section class="about-setup" aria-labelledby="quick-start">
-        <h2 id="quick-start">Quick start</h2>
-        <Code code={quickStart} lang="bash" frame="terminal" wrap />
-        <p><a href="/cli/">CLI reference</a></p>
-      </section>
-    </div>
+    <section aria-labelledby="quick-start">
+      <h2 id="quick-start">Quick start</h2>
+      <Code code={quickStart} lang="bash" frame="terminal" wrap />
+      <p><a href="/cli/">CLI reference</a></p>
+    </section>
 
     <section class="sarj-related-standards" aria-labelledby="related-standards">
       <h2 id="related-standards">Related standards</h2>
