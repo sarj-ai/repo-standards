@@ -31,6 +31,7 @@ from repo_standards.github_review_policy import (
     latest_human_reviews,
     merge_group_pull_request,
     merge_queue_head_sha,
+    pull_request_snapshot,
     reconcile_merge_group,
     render_comment,
     require_unchanged_evidence,
@@ -372,8 +373,45 @@ def test_latest_reviews_exclude_author_and_bots_and_keep_latest_decisive() -> No
             "reviewer": "20:reviewer",
             "state": "changes_requested",
             "commit_sha": head,
+            "re_requested": False,
         },
     )
+    assert latest_human_reviews(
+        reviews,
+        author_id=10,
+        eligible_ids=frozenset({20}),
+        requested_ids=frozenset({20}),
+    )[0]["re_requested"]
+
+
+def _snapshot_with_requested(requested: object) -> PullRequestSnapshot:
+    client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
+
+    def request(method: str, path: str, *, payload: object = None) -> object:
+        del method, path, payload
+        return {
+            "base": {"sha": "a" * 40, "ref": "dev", "repo": {"id": 1}},
+            "head": {"sha": "b" * 40, "ref": "feature", "repo": {"id": 1, "full_name": "o/r"}},
+            "user": {"id": 10, "login": "author", "type": "User"},
+            "body": "",
+            "draft": False,
+            "state": "open",
+            "requested_reviewers": requested,
+        }
+
+    client.request = request
+    return pull_request_snapshot(client, 42)
+
+
+def test_snapshot_reads_re_requested_reviewer_ids() -> None:
+    snapshot = _snapshot_with_requested([{"id": 20, "login": "reviewer"}])
+
+    assert snapshot.requested_reviewer_ids == frozenset({GitHubUserId(20)})
+
+
+def test_malformed_requested_reviewers_fail_closed() -> None:
+    with pytest.raises(ReconciliationError, match="requested_reviewers"):
+        _snapshot_with_requested({"id": 20})
 
 
 def test_invalid_review_shape_fails_closed() -> None:
