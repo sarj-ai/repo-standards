@@ -783,20 +783,15 @@ def _tracked_artifact_diagnostics(
     is_owned_tool_source = path.startswith("tools/") and is_owned_verifier
     is_operational_script_test = (
         _is_script_test(basename)
+        and is_operational_path
         and (
-            path.casefold().startswith(".github/scripts/")
-            or (
-                is_operational_path
-                and (
-                    is_terraform_path
-                    or is_github_automation_path
-                    or not _is_owned_nonoperational_test(
-                        path, component, package_test_roots, standalone_package_roots
-                    )
-                )
+            is_terraform_path
+            or is_github_automation_path
+            or not _is_owned_nonoperational_test(
+                path, component, package_test_roots, standalone_package_roots
             )
         )
-    )
+    ) or _is_github_script_test(path)
     is_bespoke_verifier = basename in _RETIRED_IAC_VERIFIER_NAMES or (
         _is_verifier_script(basename)
         and (
@@ -1223,6 +1218,12 @@ def _is_script_test(basename: str) -> bool:
         or stem.startswith(("test-", "test_", "spec-", "spec_"))
         or stem.endswith((".test", ".spec"))
         or (extension == "py" and stem.endswith("_test"))
+    )
+
+
+def _is_github_script_test(path: str) -> bool:
+    return path.casefold().startswith(".github/scripts/") and _is_script_test(
+        PurePosixPath(path).name.casefold()
     )
 
 
