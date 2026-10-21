@@ -12,7 +12,9 @@ belong in code-standards; filename, topology, ownership, and Git facts belong he
   cases, severity, limitations, and required authorization.
 - **Implement:** read [rule-anatomy.md](references/rule-anatomy.md). Add source,
   metadata, versions, and governance atomically; write meaningful cases first. Reuse adequate
-  coverage instead of requiring a new test for every review comment.
+  coverage instead of requiring a new test for every changed file, script, or review comment.
+  Existing lint, type, build, and smoke checks can suffice for mechanical or configuration
+  edits; add a case for a distinct behavior or compatibility contract they do not establish.
 - **Calibrate:** read [calibration.md](references/calibration.md). Verify immutable
   local corpora, classify findings, and compare correctness and performance.
 - **Review/promote:** require a separate immutable review commit. Authoring does

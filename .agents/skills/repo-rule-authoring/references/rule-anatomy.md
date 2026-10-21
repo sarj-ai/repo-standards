@@ -4,8 +4,10 @@ Define the observable defect, harm, exact evidence, non-goals, exclusions, bad a
 and strongest safe remediation before coding. Search the owning upstream linter and current catalog;
 record why configuration or an existing rule is insufficient.
 
-Write executable cases for exact positives, negatives, near misses, nesting, generated content,
-malformed input, duplicate diagnostics, suppression, and nearby-rule precedence. A public rule needs
+Write executable cases for exact positives, negatives, and near misses. Add nesting, generated
+content, malformed input, duplicate diagnostics, suppression, and nearby-rule precedence when
+applicable to the rule's contract; reuse existing integration coverage for unchanged behavior.
+A public rule needs
 one immutable ID and version, warning-first governance, catalog slug, classification, evidence level,
 precedence, executable examples, and a separate approval review.
 
