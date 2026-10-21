@@ -407,11 +407,13 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/operational-script-tests"),
-        version=4,
+        version=5,
         default_severity="warning",
         title="Review operational script tests for duplicate contracts",
         description=(
             "Tracked script test/spec artifacts in operational trees are review candidates. "
+            "Top-level .github/scripts test/spec artifacts also require review, including "
+            "nested paths and declared packages; this does not change verifier ownership. "
             "An exact declared nonoperational native package may own conventional tests "
             "when substantive tracked lockfile or source-entrypoint evidence supports it. "
             "This package exception excludes top-level operational roots, package-local "
@@ -437,6 +439,14 @@ RULES = (
                 title="Operational test requiring contract review",
                 language="text",
                 before="iac/bell/preview-contract.test.ts",
+                after="Retained distinct coverage or an equivalent existing check",
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-artifact-github-script-tests",
+                title="GitHub script test requiring contract review",
+                language="text",
+                before=".github/scripts/deployment-steps.test.mts",
                 after="Retained distinct coverage or an equivalent existing check",
                 expected_severity="warning",
             ),
@@ -662,7 +672,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=27,
+    policy_version=28,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -773,12 +783,17 @@ def _tracked_artifact_diagnostics(
     is_owned_tool_source = path.startswith("tools/") and is_owned_verifier
     is_operational_script_test = (
         _is_script_test(basename)
-        and is_operational_path
         and (
-            is_terraform_path
-            or is_github_automation_path
-            or not _is_owned_nonoperational_test(
-                path, component, package_test_roots, standalone_package_roots
+            path.casefold().startswith(".github/scripts/")
+            or (
+                is_operational_path
+                and (
+                    is_terraform_path
+                    or is_github_automation_path
+                    or not _is_owned_nonoperational_test(
+                        path, component, package_test_roots, standalone_package_roots
+                    )
+                )
             )
         )
     )

@@ -314,6 +314,8 @@ def test_root_terraform_module_verifier_is_rejected() -> None:
         pytest.param("deploy/policy.spec.jq", id="jq"),
         pytest.param(".github/actions/release/contract.test.cjs", id="github-action"),
         pytest.param(".github/workflows/release.spec.ts", id="github-workflow"),
+        pytest.param(".github/scripts/ci-efficiency.test.mts", id="github-script"),
+        pytest.param(".GITHUB/SCRIPTS/nested/test_contract.py", id="github-script-nested-case"),
         pytest.param("services/api/deploy/contract.test.cjs", id="nested-deploy"),
         pytest.param("services/bell/deploy/preview.test.cjs", id="derived-terraform-root"),
     ],
@@ -347,6 +349,14 @@ def test_operational_script_tests_require_contract_review(path: str) -> None:
         pytest.param("checks/policy_test.py", id="python-pytest-suffix"),
         pytest.param("packages/api/scripts/release.test.cjs", id="package-script"),
         pytest.param("packages/api/tests/release.test.cjs", id="package-test"),
+        pytest.param(".github/script/release.test.mts", id="github-script-near-miss"),
+        pytest.param(
+            ".github/scripts-backup/release.test.mts", id="github-script-directory-suffix"
+        ),
+        pytest.param(".github/scripts/deploy.mts", id="github-script-without-test-name"),
+        pytest.param(".github/scripts/release.test.mts.bak", id="github-script-file-suffix"),
+        pytest.param("packages/api/src/.github/scripts/release.test.mts", id="package-source"),
+        pytest.param("tests/fixtures/.github/scripts/release.test.mts", id="test-fixture"),
     ],
 )
 def test_non_operational_script_tests_are_clean(path: str) -> None:
@@ -362,6 +372,22 @@ def test_root_project_owns_only_conventional_test_locations() -> None:
     assert _rule_ids(_snapshot("iac/tests/plan.test.cjs", packages=(package,))) == [
         RuleId("repository/artifacts/operational-script-tests")
     ]
+
+
+def test_declared_native_package_cannot_erase_github_script_review() -> None:
+    root = ".github/scripts"
+    component = Component(ComponentId("ci"), "tool", root, "@example/ci")
+    package = _root_package("npm", f"{root}/package.json", "ci-tools", workspace_root=False)
+    assert _rule_ids(
+        _snapshot(
+            f"{root}/package.json",
+            f"{root}/src/index.ts",
+            f"{root}/verify-deploy.mts",
+            f"{root}/tests/deploy.test.mts",
+            components=(component,),
+            packages=(package,),
+        )
+    ) == [RuleId("repository/artifacts/operational-script-tests")]
 
 
 @pytest.mark.parametrize(
