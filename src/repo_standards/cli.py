@@ -187,6 +187,7 @@ class _ReviewPolicyReviewInput(BaseModel):
     reviewer: str = Field(min_length=1, max_length=256)
     state: ReviewState
     commit_sha: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    re_requested: bool = False
 
 
 BaseRepositoryId = NewType("BaseRepositoryId", int)
@@ -713,6 +714,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                     head=head,
                     generated_attribute=generated_attribute,
                 ),
+                re_requested=item.re_requested,
             )
             for item in provider.latest_human_reviews
         )

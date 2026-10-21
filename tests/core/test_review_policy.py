@@ -387,6 +387,68 @@ def test_carried_approval_does_not_clear_a_change_request() -> None:
     assert ReviewPolicyReason.CHANGES_REQUESTED in result.reasons
 
 
+def test_re_requested_outdated_change_request_yields_to_a_head_approval() -> None:
+    reviews = (
+        _approval("approver"),
+        HumanReviewEvidence(
+            "blocker", ReviewState.CHANGES_REQUESTED, OTHER_HEAD, re_requested=True
+        ),
+    )
+
+    result = evaluate_review_policy(_evidence(counted_lines=500, latest_human_reviews=reviews))
+
+    assert result.merge_ready
+    assert ReviewPolicyReason.CHANGES_REQUESTED not in result.reasons
+    assert ReviewPolicyReason.CHANGES_REQUESTED_SUPERSEDED in result.reasons
+
+
+@pytest.mark.parametrize(
+    ("blocker", "approval"),
+    [
+        pytest.param(
+            HumanReviewEvidence("blocker", ReviewState.CHANGES_REQUESTED, OTHER_HEAD),
+            _approval("approver"),
+            id="not-re-requested",
+        ),
+        pytest.param(
+            HumanReviewEvidence("blocker", ReviewState.CHANGES_REQUESTED, HEAD, re_requested=True),
+            _approval("approver"),
+            id="requested-on-head",
+        ),
+        pytest.param(
+            HumanReviewEvidence(
+                "blocker", ReviewState.CHANGES_REQUESTED, OTHER_HEAD, re_requested=True
+            ),
+            _earlier_approval(0, reviewer="approver"),
+            id="no-head-approval",
+        ),
+    ],
+)
+def test_change_request_keeps_blocking_until_superseded(
+    blocker: HumanReviewEvidence,
+    approval: HumanReviewEvidence,
+) -> None:
+    result = evaluate_review_policy(
+        _evidence(counted_lines=500, latest_human_reviews=(approval, blocker))
+    )
+
+    assert not result.merge_ready
+    assert ReviewPolicyReason.CHANGES_REQUESTED in result.reasons
+    assert ReviewPolicyReason.CHANGES_REQUESTED_SUPERSEDED not in result.reasons
+
+
+def test_re_request_alone_does_not_clear_a_zero_review_change_request() -> None:
+    review = HumanReviewEvidence(
+        "blocker", ReviewState.CHANGES_REQUESTED, OTHER_HEAD, re_requested=True
+    )
+
+    result = evaluate_review_policy(_evidence(latest_human_reviews=(review,)))
+
+    assert result.required_human_reviews == 0
+    assert not result.merge_ready
+    assert ReviewPolicyReason.CHANGES_REQUESTED in result.reasons
+
+
 def test_insufficient_exact_head_approvals_fail_closed() -> None:
     result = evaluate_review_policy(
         _evidence(counted_lines=801, latest_human_reviews=(_approval(),))
