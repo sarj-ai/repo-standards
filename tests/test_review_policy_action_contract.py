@@ -4,6 +4,7 @@ import base64
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -80,9 +81,54 @@ def test_review_policy_action_contract() -> None:
         "policy-workflow-path",
     }
     assert "default: '15368'" in inputs
-    assert "repo_standards.github_review_policy" in source
+    assert 'run: bash "$GITHUB_ACTION_PATH/reconcile.sh"' in source
+    script = (ROOT / "pull-request-review-policy/reconcile.sh").read_text(encoding="utf-8")
+    assert "repo_standards.github_review_policy" in script
     assert "APPROVAL_TOKEN" not in source
     assert "GITHUB_TOKEN" in source
+
+
+@pytest.mark.parametrize("injection", ["package", "pythonpath"])
+def test_review_policy_action_ignores_candidate_python_code(tmp_path: Path, injection: str) -> None:
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    marker = tmp_path / "executed"
+    payload = f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+    if injection == "package":
+        package = candidate / "repo_standards"
+        package.mkdir()
+        (package / "__init__.py").write_text(payload, encoding="utf-8")
+        (package / "github_review_policy.py").write_text("", encoding="utf-8")
+    else:
+        (candidate / "sitecustomize.py").write_text(payload, encoding="utf-8")
+    script = ROOT / "pull-request-review-policy/reconcile.sh"
+    uv = shutil.which("uv")
+    assert uv is not None
+    completed = subprocess.run(
+        ["bash", str(script)],
+        cwd=candidate,
+        env={
+            "PATH": str(Path(uv).parent) + os.pathsep + os.defpath,
+            "GITHUB_ACTION_PATH": str(ROOT / "pull-request-review-policy"),
+            "GITHUB_REPOSITORY": "owner/repo",
+            "GITHUB_TOKEN": "",
+            "INPUT_ROOT": ".",
+            "INPUT_MANIFEST_PATH": ".repo-standards/repository.toml",
+            "INPUT_PR_NUMBER": "42",
+            "INPUT_MERGE_GROUP_HEAD_SHA": "",
+            "INPUT_REVIEW_OPTIONAL_ENABLED": "false",
+            "INPUT_REQUIRED_CHECK_APP_ID": "15368",
+            "INPUT_POLICY_WORKFLOW_PATH": ".github/workflows/review-policy.yml",
+            "PYTHONPATH": str(candidate),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert not marker.exists(), completed.stderr
+    assert completed.returncode == 2
+    assert "github-token is required" in completed.stderr
 
 
 @pytest.mark.parametrize(

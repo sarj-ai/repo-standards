@@ -315,4 +315,9 @@ def test_action_keeps_the_stable_executable() -> None:
     )
     steps = document["runs"]["steps"]
     commands = [step["run"] for step in steps if "run" in step]
-    assert sum("repo-standards pull-request size" in command for command in commands) == 1
+    assert (
+        commands.count('bash "$GITHUB_ACTION_PATH/.github/scripts/action-pull-request-size.sh"')
+        == 1
+    )
+    script = action.parent / ".github/scripts/action-pull-request-size.sh"
+    assert script.read_text(encoding="utf-8").count("repo-standards pull-request size") == 1
