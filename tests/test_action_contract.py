@@ -7,9 +7,7 @@ import re
 import shutil
 import subprocess
 
-from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 import pytest
-import yaml
 
 
 ROOT = Path(__file__).parents[1]
@@ -18,6 +16,10 @@ INPUT_KEY = re.compile(r"^  ([a-z][a-z-]+):$", re.MULTILINE)
 
 def _action_source() -> str:
     return (ROOT / "action.yml").read_text(encoding="utf-8")
+
+
+def _action_script() -> str:
+    return (ROOT / ".github/scripts/action-pull-request-size.sh").read_text(encoding="utf-8")
 
 
 def test_public_action_is_pull_request_size_only() -> None:
@@ -29,7 +31,8 @@ def test_public_action_is_pull_request_size_only() -> None:
         "head",
         "generated-attribute",
     }
-    assert source.count("repo-standards pull-request size") == 1
+    assert 'run: bash "$GITHUB_ACTION_PATH/.github/scripts/action-pull-request-size.sh"' in source
+    assert _action_script().count("repo-standards pull-request size") == 1
     assert "repo-lint check" not in source
     assert "Validate compatibility inputs" not in source
     assert "github.event.pull_request.base.sha" in source
@@ -38,10 +41,10 @@ def test_public_action_is_pull_request_size_only() -> None:
 
 
 def test_action_keeps_complete_report_out_of_github_output() -> None:
-    source = _action_source()
+    source = _action_script()
     assert '--report-path "$report_path"' in source
     assert 'key not in {"categories", "directories", "files"}' in source
-    assert 'echo "report-path=$report_path" >> "$GITHUB_OUTPUT"' in source
+    assert re.search(r'echo "report-path=\$report_path"\s*>>\s*"\$GITHUB_OUTPUT"', source)
 
 
 def test_action_uses_locked_non_mutating_environment() -> None:
@@ -52,12 +55,7 @@ def test_action_uses_locked_non_mutating_environment() -> None:
 
 @pytest.mark.parametrize("valid", [True, False])
 def test_action_decodes_once_and_keeps_full_report_separate(tmp_path: Path, valid: bool) -> None:
-    mapping = TypeAdapter(dict[str, object])
-    rows = TypeAdapter(list[dict[str, object]])
-    document = mapping.validate_python(yaml.safe_load(_action_source()))
-    runs = mapping.validate_python(document["runs"])
-    script = rows.validate_python(runs["steps"])[-1]["run"]
-    assert isinstance(script, str)
+    script = _action_script()
     payload = {
         "summary": {"counted_lines": 3, "excluded_lines": 7, "total_lines": 10},
         "files": ["complete report"],
@@ -68,6 +66,10 @@ def test_action_decodes_once_and_keeps_full_report_separate(tmp_path: Path, vali
         payload.pop("summary")
     source = tmp_path / "source.json"
     source.write_text(json.dumps(payload))
+    marker = tmp_path / "executed"
+    (tmp_path / "json.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n", encoding="utf-8"
+    )
     executable = shutil.which("python3")
     shell = shutil.which("bash")
     assert executable is not None
@@ -88,6 +90,7 @@ shutil.copyfile(os.environ["SOURCE"], args[args.index("--report-path") + 1])
     output = tmp_path / "outputs"
     result = subprocess.run(
         (shell, "-eu", "-o", "pipefail", "-c", script),
+        cwd=tmp_path,
         check=False,
         capture_output=True,
         text=True,
@@ -104,8 +107,10 @@ shutil.copyfile(os.environ["SOURCE"], args[args.index("--report-path") + 1])
             "RUNNER_TEMP": str(tmp_path),
             "GITHUB_OUTPUT": str(output),
             "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
+            "PYTHONPATH": str(tmp_path),
         },
     )
+    assert not marker.exists(), result.stderr
     assert (result.returncode == 0) == valid, result.stderr
     assert (tmp_path / "calls").read_text().splitlines() == ["analyze", "decode"]
     if valid:
