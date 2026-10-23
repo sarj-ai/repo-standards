@@ -62,7 +62,7 @@ def with_makefile_comparison(
         base_revision=base.source_revision if base else "0" * len(head.source_revision),
         base_tree_digest=base.tree_digest if base else "0" * len(head.source_revision),
         basis=basis,
-        base_files=_metrics(root, base, frozenset(item.path for item in head_files))
+        base_files=_metrics(root, base, frozenset(item.path for item in head_files), head_files)
         if base
         else (),
         head_files=head_files,
@@ -85,14 +85,24 @@ def _empty_revision(revision: str) -> bool:
 
 
 def _metrics(
-    root: Path, identity: GitIdentity, surviving: frozenset[str] | None = None
+    root: Path,
+    identity: GitIdentity,
+    surviving: frozenset[str] | None = None,
+    known: tuple[MakefileMetric, ...] = (),
 ) -> tuple[MakefileMetric, ...]:
-    paths = tuple(
-        blob.path
+    blobs = tuple(
+        blob
         for blob in tracked_files_for_identity(root, identity)
         if is_makefile_path(blob.path) and (surviving is None or blob.path in surviving)
     )
+    line_counts = {item.object_id: item.lines for item in known}
+    if all(blob.object_id in line_counts for blob in blobs):
+        return tuple(
+            MakefileMetric(blob.path, blob.object_id, line_counts[blob.object_id]) for blob in blobs
+        )
     return tuple(
         MakefileMetric(blob.path, blob.object_id, physical_lines(blob.content))
-        for blob in read_tracked_blob_contents(root, paths, identity=identity)
+        for blob in read_tracked_blob_contents(
+            root, tuple(blob.path for blob in blobs), identity=identity
+        )
     )

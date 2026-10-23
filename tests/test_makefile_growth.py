@@ -15,11 +15,18 @@ from repo_standards.core.engine import check_baseline, classify_baseline
 from repo_standards.core.models import Baseline, FindingsReport, RatchetClassification
 from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.policy_sarj.makefiles import is_makefile_path, physical_lines
-from repo_standards.repository import RepositoryAnalysisRequest, analyze_repository
+from repo_standards.repository import (
+    RepositoryAnalysisRequest,
+    analyze_repository,
+    comparison,
+    read_tracked_blob_contents,
+)
 
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from repo_standards.core.inspection import GitIdentity, TrackedBlobContent
 
 
 _RULE = "repository/artifacts/makefile-growth"
@@ -63,6 +70,35 @@ def repository(tmp_path: Path) -> Path:
     (tmp_path / "Makefile").write_bytes(b"check:\n\ttool check\n")
     _commit(tmp_path)
     return tmp_path
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_comparison_reads_a_shared_makefile_blob_once(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, *, changed: bool
+) -> None:
+    base = _git(repository, "rev-parse", "HEAD")
+    if changed:
+        (repository / "Makefile").write_bytes(b"check:\n\ttool check\n# added\n")
+    else:
+        (repository / "unrelated.txt").write_text("unrelated\n")
+    _commit(repository)
+    reads: list[tuple[str, ...]] = []
+
+    def read(
+        root: Path, paths: tuple[str, ...], *, identity: GitIdentity | None = None
+    ) -> tuple[TrackedBlobContent, ...]:
+        reads.append(paths)
+        return read_tracked_blob_contents(root, paths, identity=identity)
+
+    # Injecting a fake would bypass the actual Git reuse boundary being measured.
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Git I/O interception is the oracle.
+        comparison, "read_tracked_blob_contents", read
+    )
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+
+    assert report.completion == "complete"
+    assert len(report.diagnostics) == int(changed)
+    assert reads == [("Makefile",)] * (2 if changed else 1)
 
 
 @pytest.mark.parametrize(
