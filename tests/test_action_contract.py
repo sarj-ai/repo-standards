@@ -40,7 +40,7 @@ def test_public_action_is_pull_request_size_only() -> None:
 def test_action_uses_locked_non_mutating_environment() -> None:
     serialized = _action_source()
     assert "--locked --no-dev --python 3.15" in serialized
-    assert "setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7" in serialized
+    assert "setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e" in serialized
 
 
 @pytest.mark.parametrize("valid", [True, False])
