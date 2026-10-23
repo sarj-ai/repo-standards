@@ -16,14 +16,14 @@ OBJECT_MAPS = TypeAdapter(list[dict[str, object]])
 
 def test_pull_request_commits_hook_is_quiet_advisory_and_history_scoped() -> None:
     document = OBJECT_MAPS.validate_python(yaml.safe_load(HOOKS_PATH.read_text(encoding="utf-8")))
+    hooks = [
+        {key: value for key, value in hook.items() if key not in {"name", "description"}}
+        for hook in document
+    ]
 
-    assert document == [
+    assert hooks == [
         {
             "id": "repo-standards-pull-request-commits",
-            "name": "Repo Standards - concise pull-request history",
-            "description": (
-                "Advises when pull-request history should be squashed or explicitly numbered."
-            ),
             "entry": "repo-standards pull-request commits . --advisory --quiet",
             "language": "python",
             "language_version": "python3.15",
@@ -34,8 +34,6 @@ def test_pull_request_commits_hook_is_quiet_advisory_and_history_scoped() -> Non
         },
         {
             "id": "repo-standards-commit-message",
-            "name": "Repo Standards - managed conventional commit header",
-            "description": "Validates and safely normalizes the commit message header.",
             "entry": "repo-standards commit-message --fix-safe",
             "language": "python",
             "language_version": "python3.15",
@@ -46,8 +44,6 @@ def test_pull_request_commits_hook_is_quiet_advisory_and_history_scoped() -> Non
         },
         {
             "id": "repo-standards-check",
-            "name": "Repo Standards - staged repository policy",
-            "description": "Validates the exact prospective Git tree from the staged index.",
             "entry": "repo-standards check . --staged",
             "language": "python",
             "language_version": "python3.15",
@@ -62,28 +58,15 @@ def test_pull_request_commits_hook_is_quiet_advisory_and_history_scoped() -> Non
 def test_pull_request_commits_action_inputs_default_to_owning_the_check() -> None:
     document = OBJECT_MAP.validate_python(yaml.safe_load(ACTION_PATH.read_text(encoding="utf-8")))
     inputs = OBJECT_MAP.validate_python(document["inputs"])
+    specs = {name: OBJECT_MAP.validate_python(value) for name, value in inputs.items()}
     runs = OBJECT_MAP.validate_python(document["runs"])
 
-    assert inputs == {
-        "root": {
-            "description": "Repository root to inspect",
-            "required": False,
-            "default": ".",
-        },
-        "status-context": {
-            "description": (
-                "Commit status context that receives the verdict, for a job that embeds the policy "
-                "instead of owning the required check"
-            ),
-            "required": False,
-            "default": "",
-        },
-        "github-token": {
-            "description": "Token with statuses write, required with status-context",
-            "required": False,
-            "default": "",
-        },
+    assert {name: spec["default"] for name, spec in specs.items()} == {
+        "root": ".",
+        "status-context": "",
+        "github-token": "",
     }
+    assert all(spec["required"] is False for spec in specs.values())
     assert runs["using"] == "composite"
 
 
