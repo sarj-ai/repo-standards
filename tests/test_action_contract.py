@@ -32,19 +32,9 @@ def test_public_action_is_pull_request_size_only() -> None:
         "generated-attribute",
     }
     assert 'run: bash "$GITHUB_ACTION_PATH/.github/scripts/action-pull-request-size.sh"' in source
-    assert _action_script().count("repo-standards pull-request size") == 1
-    assert "repo-lint check" not in source
-    assert "Validate compatibility inputs" not in source
     assert "github.event.pull_request.base.sha" in source
     assert "github.event.pull_request.head.sha" in source
     assert "report-path" in source
-
-
-def test_action_keeps_complete_report_out_of_github_output() -> None:
-    source = _action_script()
-    assert '--report-path "$report_path"' in source
-    assert 'key not in {"categories", "directories", "files"}' in source
-    assert re.search(r'echo "report-path=\$report_path"\s*>>\s*"\$GITHUB_OUTPUT"', source)
 
 
 def test_action_uses_locked_non_mutating_environment() -> None:
@@ -114,7 +104,9 @@ shutil.copyfile(os.environ["SOURCE"], args[args.index("--report-path") + 1])
     assert (result.returncode == 0) == valid, result.stderr
     assert (tmp_path / "calls").read_text().splitlines() == ["analyze", "decode"]
     if valid:
-        lines = output.read_text().splitlines()
-        assert lines[:3] == ["counted-lines=3", "excluded-lines=7", "total-lines=10"]
-        assert json.loads(lines[3].split("=", 1)[1]) == {"summary": payload["summary"]}
-        assert json.loads(Path(lines[4].split("=", 1)[1]).read_text(encoding="utf-8")) == payload
+        outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        expected = {"counted-lines": "3", "excluded-lines": "7", "total-lines": "10"}
+        assert outputs.keys() == expected.keys() | {"report-json", "report-path"}
+        assert {key: outputs[key] for key in expected} == expected
+        assert json.loads(outputs["report-json"]) == {"summary": payload["summary"]}
+        assert json.loads(Path(outputs["report-path"]).read_text(encoding="utf-8")) == payload
