@@ -29,6 +29,43 @@ _PYTHON_PACKAGE = ("python", "input-library")
 _NPM_PACKAGE = ("npm", "@example/input-library")
 
 
+@pytest.mark.parametrize(
+    ("path", "roots", "expected"),
+    [
+        ("packages/one/src/main.py", ("packages/one",), ("src", "main.py")),
+        (
+            "packages/one/nested/tests/test_main.py",
+            ("packages/one", "packages/one/nested"),
+            ("tests", "test_main.py"),
+        ),
+        ("packages/other/src/main.py", ("packages/one",), ()),
+        ("packages/one-more/src/main.py", ("packages/one",), ()),
+        ("README.md", ("",), ("README.md",)),
+        ("packages/one", ("packages/one",), ()),
+        ("packages//one/./src/main.py", ("packages/one",), ("src", "main.py")),
+        ("packages/One/src/main.py", ("packages/one",), ()),
+        ("libraries/café/src/main.py", ("libraries/café",), ("src", "main.py")),
+        (".github/scripts/check.py", ("", ".github"), ("scripts", "check.py")),
+    ],
+    ids=[
+        "source",
+        "nearest-nested",
+        "unowned",
+        "segment-boundary",
+        "root",
+        "exact-owner",
+        "normalized",
+        "case",
+        "unicode",
+        "dot-directory",
+    ],
+)
+def test_package_ownership_preserves_nearest_normalized_path(
+    path: str, roots: tuple[str, ...], expected: tuple[str, ...]
+) -> None:
+    assert sarj_policy._owned_package_relative_parts(path, frozenset(roots)) == expected  # ruff: ignore[private-member-access] # pyright: ignore[reportPrivateUsage] -- direct nearest-owner boundary regression.
+
+
 def _snapshot(
     *paths: str,
     components: tuple[Component, ...] = (),

@@ -1201,11 +1201,10 @@ def _is_owned_package_test(path: str, package_roots: frozenset[str]) -> bool:
 
 
 def _owned_package_relative_parts(path: str, package_roots: frozenset[str]) -> tuple[str, ...]:
-    pure = PurePosixPath(path)
-    for ancestor in (pure, *pure.parents):
-        root = "" if ancestor == PurePosixPath() else ancestor.as_posix()
-        if root in package_roots:
-            return pure.relative_to(ancestor).parts
+    parts = PurePosixPath(path).parts
+    for boundary in range(len(parts), -1, -1):
+        if "/".join(parts[:boundary]) in package_roots:
+            return parts[boundary:]
     return ()
 
 
