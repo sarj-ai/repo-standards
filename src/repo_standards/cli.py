@@ -1846,6 +1846,9 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
     or with --enable-rule to review tracked .js, .jsx, .mjs and .cjs paths
     case-insensitively. Typed variants and source maps remain outside this rule.
     Migrations must update loaders, callers, type checks and runtime tests.
+    Typed tool presets such as eslint.strict.ts need no JavaScript artifact
+    declaration. Prefer a tool's supported TypeScript preset over declaring
+    its generated JavaScript output solely to satisfy this policy.
 
     Required JavaScript uses exact \[\[javascript.artifacts]] records in the
     manifest: path, kind and a nonblank reason. Allowed kinds are tool-config,
