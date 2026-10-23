@@ -380,6 +380,40 @@ def test_required_check_uses_provider_head_sha() -> None:
         )
 
 
+@pytest.mark.parametrize("conclusion", ["success", "failure", None])
+def test_required_checks_read_only_the_configured_app_evidence(conclusion: str | None) -> None:
+    head = "a" * 40
+    calls: list[str] = []
+
+    def request(method: str, path: str) -> object:
+        assert method == "GET"
+        calls.append(path)
+        assert path == f"/repos/owner/repo/commits/{head}/check-runs?filter=all&per_page=100&page=1"
+        check = {
+            "name": "lint",
+            "status": "completed" if conclusion is not None else "queued",
+            "conclusion": conclusion,
+            "head_sha": head,
+            "details_url": "https://github.com/owner/repo/actions/runs/123/job/456",
+        }
+        return {
+            "check_runs": [
+                {**check, "id": 1, "app": {"id": 15368}},
+                {**check, "id": 2, "conclusion": "success", "app": {"id": 999}},
+            ]
+        }
+
+    result = collect_required_checks(
+        _RequestFixture(request), head_sha=head, names=("lint", "test"), required_app_id=15368
+    )
+
+    assert result == (
+        {"name": "lint", "conclusion": conclusion or "pending", "head_sha": head},
+        {"name": "test", "conclusion": "missing", "head_sha": head},
+    )
+    assert len(calls) == 1
+
+
 def test_latest_reviews_exclude_author_and_bots_and_keep_latest_decisive() -> None:
     head = "a" * 40
     reviews = [
