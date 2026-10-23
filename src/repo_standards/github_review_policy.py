@@ -476,9 +476,6 @@ def collect_required_checks(
         f"/repos/{client.repository}/commits/{encoded_sha}/check-runs?filter=all",
         collection_key="check_runs",
     )
-    # Statuses are collected and fully paginated as independent provider evidence. The
-    # configured producer is a GitHub App, so classic statuses cannot satisfy a check.
-    client.rest_pages(f"/repos/{client.repository}/commits/{encoded_sha}/statuses")
     result: list[dict[str, str]] = []
     for name in names:
         candidates = []
