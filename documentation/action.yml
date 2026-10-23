@@ -19,9 +19,9 @@ runs:
   using: composite
   steps:
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       with:
-        version: '0.12.24'
+        version: '0.13.5'
         enable-cache: true
         save-cache: false
         cache-dependency-glob: ${{ github.action_path }}/../uv.lock
@@ -36,10 +36,4 @@ runs:
         INPUT_ROOT: ${{ inputs.root }}
         PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      run: |
-        base=${INPUT_BASE:-$PR_BASE_SHA}
-        head=${INPUT_HEAD:-$PR_HEAD_SHA}
-        test -n "$base" || { echo "A trusted base revision is required." >&2; exit 2; }
-        test -n "$head" || { echo "A head revision is required." >&2; exit 2; }
-        uv run --project "$GITHUB_ACTION_PATH/.." --no-sync repo-standards \
-          pull-request documentation "$INPUT_ROOT" --base "$base" --head "$head"
+      run: bash "$GITHUB_ACTION_PATH/../.github/scripts/action-documentation.sh"

@@ -50,8 +50,41 @@ case "${1:-}" in
     test "$head_sha" = "$GITHUB_SHA"
     printf '%s\n' "$GITHUB_SHA" >"$1/SOURCE_COMMIT"
     ;;
+  credentials)
+    test -n "$CLOUDFLARE_ACCOUNT_ID" || {
+      echo "CLOUDFLARE_ACCOUNT_ID is not configured"
+      exit 1
+    }
+    test -n "$CLOUDFLARE_API_TOKEN" || {
+      echo "CLOUDFLARE_API_TOKEN is not configured"
+      exit 1
+    }
+    ;;
+  wait-main)
+    deadline=$((SECONDS + 840))
+    for workflow in ci.yml standards.yml; do
+      while ((SECONDS < deadline)); do
+        response="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs" -f head_sha="$TARGET_SHA" -f event=push -f per_page=100)"
+        run="$(jq -c --arg sha "$TARGET_SHA" --arg repo "$GITHUB_REPOSITORY" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .head_branch == "main" and .head_repository.full_name == $repo)] | max_by(.id) // empty' <<<"$response")"
+        conclusion="$(jq -r '.conclusion // empty' <<<"${run:-null}")"
+        if [[ "$conclusion" == success ]]; then
+          echo "$workflow succeeded at $TARGET_SHA"
+          break
+        fi
+        if [[ -n "$conclusion" ]]; then
+          echo "::error::$workflow concluded $conclusion at $TARGET_SHA"
+          exit 1
+        fi
+        sleep 3
+      done
+      ((SECONDS < deadline)) || {
+        echo "::error::exact main checks timed out"
+        exit 1
+      }
+    done
+    ;;
   *)
-    printf 'usage: ci-workflow.sh python|smoke|dependencies|bind DIRECTORY\n' >&2
+    printf 'usage: ci-workflow.sh python|smoke|dependencies|credentials|wait-main|bind DIRECTORY\n' >&2
     exit 2
     ;;
 esac

@@ -1,6 +1,6 @@
 [project]
 name = "repo-standards"
-version = "6.12.4"
+version = "6.12.5"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
@@ -17,9 +17,9 @@ classifiers = [
 requires-python = ">=3.14,<3.16"
 dependencies = [
   "conventional-pre-commit==4.4.0",
-  "PyYAML>=6.0.2,<7",
-  "pydantic>=2.14.0,<3",
-  "typer>=0.27.2,<1",
+  "PyYAML>=6.0.3,<7",
+  "pydantic>=2.14.1,<3",
+  "typer>=0.27.3,<1",
 ]
 readme = "README.md"
 
@@ -34,26 +34,26 @@ repo-standards = "repo_standards._entrypoint:main"
 
 [dependency-groups]
 artifacts = ["jsonschema>=4.26.0"]
-hooks = ["pre-commit>=4.6.0,<5"]
+hooks = ["pre-commit>=4.7.0,<5"]
 dev = [
-    "basedpyright>=1.40.1",
+    "basedpyright>=1.40.2",
     "jsonschema>=4.26.0",
-    "pre-commit>=4.6.0,<5",
+    "pre-commit>=4.7.0,<5",
     "pytest>=9.1.1",
     "pytest-xdist==3.8.0",
-  "ruff>=0.16.9",
+  "ruff>=0.17.2",
 ]
 
 [build-system]
-requires = ["uv_build>=0.12.7,<0.13"]
+requires = ["uv_build>=0.13.5,<0.14"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "repo_standards"
 
 [tool.uv]
-# Upstream's checksummed final-3.15 catalog, pending inclusion in a uv release.
-python-downloads-json-url = "https://raw.githubusercontent.com/astral-sh/uv/f69fb50c8b28997af9c6b0e5c700a34470d86005/crates/uv-python-managed/download-metadata.json"
+# Checksummed managed-Python catalog from the pinned uv release.
+python-downloads-json-url = "https://raw.githubusercontent.com/astral-sh/uv/46776a95d6686ac0160c10611327ce491e6b202f/crates/uv-python-managed/download-metadata.json"
 
 [tool.pytest.ini_options]
 addopts = "-q --import-mode=importlib"
