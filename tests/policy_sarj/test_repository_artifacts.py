@@ -15,11 +15,12 @@ from repo_standards.core.models import (
     RepositoryId,
     RepositoryInspection,
     RepositorySnapshot,
+    RuleDefinition,
     RuleId,
     TrackedFileEvidence,
     WorkspaceEvidence,
 )
-from repo_standards.policy_sarj import SarjPolicy
+from repo_standards.policy_sarj import SarjPolicy, policy as sarj_policy
 
 
 _PACKAGE_ROOT = "libraries/infra"
@@ -93,6 +94,65 @@ def _rule_ids(snapshot: RepositorySnapshot) -> list[RuleId]:
         for item in SarjPolicy.evaluate_repository(snapshot)
         if item.rule_id != "repository/artifacts/untyped-javascript"
     ]
+
+
+@pytest.mark.parametrize("rule_id", [rule.rule_id for rule in SarjPolicy.rules()])
+def test_selected_evaluation_preserves_filtered_full_findings(rule_id: RuleId) -> None:
+    snapshot = _snapshot(
+        "infra/inputs.tfvars.example",
+        "infra/.env.example",
+        "infra/verify-inputs.py",
+        "infra/tests/test_inputs.py",
+        "infra/inputs.tftest.hcl",
+        "notes/handoff.md",
+        "tools/index.js",
+        ".coverage",
+        terraform_modules=("infra",),
+    )
+    expected = tuple(
+        item for item in SarjPolicy.evaluate_repository(snapshot) if item.rule_id == rule_id
+    )
+
+    selected = SarjPolicy.evaluate_repository(snapshot, enabled_rule_ids=frozenset({rule_id}))
+
+    assert selected == expected
+
+
+def test_no_activated_rules_skip_all_evaluators(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected_evaluation(
+        _snapshot: RepositorySnapshot, *, rule: RuleDefinition | None = None
+    ) -> None:
+        pytest.fail(f"disabled evaluator must not run: {rule}")
+
+    for evaluator in (
+        "_repository_artifact_diagnostics",
+        "pull_request_template_diagnostics",
+        "javascript_diagnostics",
+        "local_residue_diagnostics",
+        "makefile_diagnostics",
+    ):
+        monkeypatch.setattr(  # sarj-noqa: SARJ445 -- injection would bypass actual dispatch.
+            sarj_policy, evaluator, unexpected_evaluation
+        )
+
+    selected = SarjPolicy.evaluate_repository(_snapshot(".coverage"), enabled_rule_ids=frozenset())
+
+    assert selected == ()
+
+
+def test_residue_check_skips_unrelated_artifact_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected_evaluation(_snapshot: RepositorySnapshot) -> None:
+        pytest.fail("a residue check must not prepare unrelated artifact ownership")
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- injection would bypass actual dispatch.
+        sarj_policy, "_repository_artifact_diagnostics", unexpected_evaluation
+    )
+    selected = SarjPolicy.evaluate_repository(
+        _snapshot(".coverage", "infra/verify-inputs.py"),
+        enabled_rule_ids=frozenset({RuleId("repository/artifacts/local-residue")}),
+    )
+
+    assert [item.path for item in selected] == [".coverage"]
 
 
 def _root_package(
