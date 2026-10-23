@@ -1321,17 +1321,28 @@ class SarjPolicy:
         return RULES
 
     @staticmethod
-    def evaluate_repository(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
-        diagnostics = (
-            _repository_artifact_diagnostics(snapshot)
-            + (
-                pull_request_template_diagnostics(
-                    snapshot, rule=_rule(PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID)
-                )
-            )
-            + javascript_diagnostics(snapshot, rule=_rule(UNTYPED_JAVASCRIPT_RULE_ID))
-            + local_residue_diagnostics(snapshot, rule=_rule(LOCAL_RESIDUE_RULE_ID))
+    def evaluate_repository(
+        snapshot: RepositorySnapshot, *, enabled_rule_ids: frozenset[RuleId] | None = None
+    ) -> tuple[Diagnostic, ...]:
+        enabled = (
+            frozenset(rule.rule_id for rule in RULES)
+            if enabled_rule_ids is None
+            else enabled_rule_ids
         )
-        if snapshot.makefile_comparison is None:
-            return diagnostics
-        return diagnostics + makefile_diagnostics(snapshot, rule=_rule(MAKEFILE_GROWTH_RULE_ID))
+        separate_rules = {
+            PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
+            UNTYPED_JAVASCRIPT_RULE_ID,
+            LOCAL_RESIDUE_RULE_ID,
+            MAKEFILE_GROWTH_RULE_ID,
+        }
+        diagnostics = _repository_artifact_diagnostics(snapshot) if enabled - separate_rules else ()
+        for rule_id, evaluate in (
+            (PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID, pull_request_template_diagnostics),
+            (UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics),
+            (LOCAL_RESIDUE_RULE_ID, local_residue_diagnostics),
+        ):
+            if rule_id in enabled:
+                diagnostics += evaluate(snapshot, rule=_rule(rule_id))
+        if MAKEFILE_GROWTH_RULE_ID in enabled and snapshot.makefile_comparison is not None:
+            diagnostics += makefile_diagnostics(snapshot, rule=_rule(MAKEFILE_GROWTH_RULE_ID))
+        return tuple(item for item in diagnostics if item.rule_id in enabled)

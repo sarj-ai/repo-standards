@@ -74,7 +74,9 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         base_revision=request.base_revision,
         as_of=request.as_of,
     )
-    repository_diagnostics = policy.evaluate_repository(snapshot)
+    repository_diagnostics = policy.evaluate_repository(
+        snapshot, enabled_rule_ids=frozenset(item.rule_id for item in enabled_rules)
+    )
     report = analyze(
         snapshot.manifest,
         policy,
