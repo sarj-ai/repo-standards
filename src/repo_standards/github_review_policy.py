@@ -472,8 +472,11 @@ def collect_required_checks(
     required_app_id: int,
 ) -> tuple[dict[str, str], ...]:
     encoded_sha = urlencode({"ref": head_sha})[4:]
+    query = {"filter": "all"}
+    if len(names) == 1:
+        query["check_name"] = names[0]
     runs = client.rest_pages(
-        f"/repos/{client.repository}/commits/{encoded_sha}/check-runs?filter=all",
+        f"/repos/{client.repository}/commits/{encoded_sha}/check-runs?{urlencode(query)}",
         collection_key="check_runs",
     )
     result: list[dict[str, str]] = []
