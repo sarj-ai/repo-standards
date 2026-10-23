@@ -414,6 +414,55 @@ def test_required_checks_read_only_the_configured_app_evidence(conclusion: str |
     assert len(calls) == 1
 
 
+def test_single_required_check_filters_by_name_and_preserves_pagination() -> None:
+    head = "a" * 40
+    name = "lint/python + types"
+    calls: list[str] = []
+    check = {
+        "name": name,
+        "status": "completed",
+        "head_sha": head,
+        "details_url": "https://github.com/owner/repo/actions/runs/123/job/456",
+    }
+
+    def request(method: str, path: str) -> object:
+        assert method == "GET"
+        calls.append(path)
+        assert path == (
+            f"/repos/owner/repo/commits/{head}/check-runs?filter=all"
+            f"&check_name=lint%2Fpython+%2B+types&per_page=100&page={len(calls)}"
+        )
+        if len(calls) == 1:
+            return {
+                "check_runs": [
+                    *[
+                        {**check, "id": 1000 + index, "conclusion": "success", "app": {"id": 999}}
+                        for index in range(99)
+                    ],
+                    {**check, "id": 2, "conclusion": "failure", "app": {"id": 15368}},
+                ]
+            }
+        return {"check_runs": [{**check, "id": 1, "conclusion": "success", "app": {"id": 15368}}]}
+
+    result = collect_required_checks(
+        _RequestFixture(request), head_sha=head, names=(name,), required_app_id=15368
+    )
+
+    assert result == ({"name": name, "conclusion": "failure", "head_sha": head},)
+    assert len(calls) == 2
+
+
+def test_single_required_check_missing_still_blocks() -> None:
+    def request(method: str, path: str) -> object:
+        assert method == "GET"
+        assert "&check_name=lint&" in path
+        return {"check_runs": []}
+
+    assert collect_required_checks(
+        _RequestFixture(request), head_sha="a" * 40, names=("lint",), required_app_id=15368
+    ) == ({"name": "lint", "conclusion": "missing", "head_sha": "a" * 40},)
+
+
 def test_latest_reviews_exclude_author_and_bots_and_keep_latest_decisive() -> None:
     head = "a" * 40
     reviews = [
