@@ -186,10 +186,10 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Check out exact release scripts
+      - name: Check out trusted workflow scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.detect.outputs.source_sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Require successful latest own-repository push checks
         env:
