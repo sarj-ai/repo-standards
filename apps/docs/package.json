@@ -38,6 +38,7 @@
     "node": ">=24.12.0"
   },
   "overrides": {
+    "undici@>=7.18.0 <7.30.1": "7.30.1",
     "@astrojs/markdown-satteri": "0.4.5",
     "sharp": "0.35.5",
     "postcss-nested": {
