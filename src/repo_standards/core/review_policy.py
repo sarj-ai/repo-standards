@@ -61,6 +61,7 @@ class ReviewPolicyReason(StrEnum):
     STALE_APPROVAL = "stale_approval"
     APPROVAL_CARRIED_FORWARD = "approval_carried_forward"
     CHANGES_REQUESTED = "changes_requested"
+    CHANGES_REQUESTED_SUPERSEDED = "changes_requested_superseded"
     APPROVALS_MISSING = "approvals_missing"
     THREAD_EVIDENCE_MISSING = "thread_evidence_missing"
     THREADS_UNRESOLVED = "threads_unresolved"
@@ -133,6 +134,7 @@ class HumanReviewEvidence:
     state: ReviewState
     commit_sha: GitObjectId | None
     since_review: SinceReviewEvidence | None = None
+    re_requested: bool = False
 
     def __post_init__(self) -> None:
         if not self.reviewer or self.reviewer != self.reviewer.strip():
@@ -237,6 +239,7 @@ def evaluate_review_policy(
         ReviewPolicyReason.AUTHOR_REVIEW_FLOOR,
         ReviewPolicyReason.STALE_APPROVAL,
         ReviewPolicyReason.APPROVAL_CARRIED_FORWARD,
+        ReviewPolicyReason.CHANGES_REQUESTED_SUPERSEDED,
     }
     return ReviewPolicyResult(
         required_human_reviews=required_reviews,
@@ -347,8 +350,20 @@ def _review_reasons(
         reasons.append(ReviewPolicyReason.STALE_APPROVAL)
     if carried:
         reasons.append(ReviewPolicyReason.APPROVAL_CARRIED_FORWARD)
-    if any(review.state is ReviewState.CHANGES_REQUESTED for review in reviews):
+    change_requests = tuple(
+        review for review in reviews if review.state is ReviewState.CHANGES_REQUESTED
+    )
+    # The author answered an outdated change request by pushing and asking that
+    # reviewer again; it stops blocking once someone else approves the exact head.
+    superseded = tuple(
+        review
+        for review in change_requests
+        if exact and review.re_requested and review.commit_sha != expected_head
+    )
+    if len(superseded) < len(change_requests):
         reasons.append(ReviewPolicyReason.CHANGES_REQUESTED)
+    if superseded:
+        reasons.append(ReviewPolicyReason.CHANGES_REQUESTED_SUPERSEDED)
     if approvals < required_reviews:
         reasons.append(ReviewPolicyReason.APPROVALS_MISSING)
     return _ReviewAssessment(tuple(reasons), approvals, carried)

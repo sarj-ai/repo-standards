@@ -74,6 +74,7 @@ class PullRequestSnapshot:
     head_repository_id: GitHubRepositoryId
     draft: bool
     state: str
+    requested_reviewer_ids: frozenset[GitHubUserId] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +89,7 @@ class CollectedEvidence:
     snapshot: PullRequestSnapshot
     checks: tuple[dict[str, str], ...]
     raw_reviews: tuple[Any, ...]
-    reviews: tuple[dict[str, str | None], ...]
+    reviews: tuple[dict[str, str | bool | None], ...]
     threads_resolved: bool
 
     def fingerprint(self) -> str:
@@ -109,6 +110,7 @@ class CollectedEvidence:
                 "head_repository_id": snapshot.head_repository_id,
                 "draft": snapshot.draft,
                 "state": snapshot.state,
+                "requested_reviewer_ids": sorted(snapshot.requested_reviewer_ids),
             },
             "checks": self.checks,
             "reviews": self.reviews,
@@ -236,6 +238,10 @@ def pull_request_snapshot(client: GitHubClient, number: int) -> PullRequestSnaps
     if _OBJECT_ID.fullmatch(base_sha) is None or _OBJECT_ID.fullmatch(head_sha) is None:
         raise ReconciliationError("pull request revisions must be lowercase 40-character SHAs")
     body = value.get("body")
+    # Absent re-request evidence only keeps a change request blocking.
+    requested = value.get("requested_reviewers", [])
+    if not isinstance(requested, list):
+        raise ReconciliationError("pull request requested_reviewers must be an array")
     return PullRequestSnapshot(
         number=number,
         base_sha=base_sha,
@@ -251,6 +257,12 @@ def pull_request_snapshot(client: GitHubClient, number: int) -> PullRequestSnaps
         head_repository_id=GitHubRepositoryId(_integer(head_repo.get("id"), "head repository id")),
         draft=_boolean(value.get("draft"), "pull request draft"),
         state=_string(value.get("state"), "pull request state"),
+        requested_reviewer_ids=frozenset(
+            GitHubUserId(
+                _integer(_mapping(item, "requested reviewer").get("id"), "requested reviewer id")
+            )
+            for item in requested
+        ),
     )
 
 
@@ -334,7 +346,7 @@ def _run_reviewed_git(
 
 def fetch_reviewed_commits(
     root: Path,
-    reviews: Sequence[Mapping[str, str | None]],
+    reviews: Sequence[Mapping[str, str | bool | None]],
     *,
     head_sha: str,
     token: str,
@@ -346,7 +358,7 @@ def fetch_reviewed_commits(
             commit_sha
             for review in reviews
             if review.get("state") == "approved"
-            and (commit_sha := review.get("commit_sha")) is not None
+            and isinstance(commit_sha := review.get("commit_sha"), str)
             and commit_sha != head_sha
         }
     )
@@ -583,8 +595,9 @@ def latest_human_reviews(
     *,
     author_id: int,
     eligible_ids: frozenset[int],
-) -> tuple[dict[str, str | None], ...]:
-    latest: dict[int, tuple[tuple[str, int], dict[str, str | None]]] = {}
+    requested_ids: frozenset[int] = frozenset(),
+) -> tuple[dict[str, str | bool | None], ...]:
+    latest: dict[int, tuple[tuple[str, int], dict[str, str | bool | None]]] = {}
     for raw in reviews:
         review = _mapping(raw, "review")
         user = _mapping(review.get("user"), "review user")
@@ -606,7 +619,12 @@ def latest_human_reviews(
         if not isinstance(review_id, int):
             raise ReconciliationError("review id must be an integer")
         commit_sha = _review_commit_sha(review.get("commit_id"))
-        value = {"reviewer": f"{user_id}:{login}", "state": state, "commit_sha": commit_sha}
+        value: dict[str, str | bool | None] = {
+            "reviewer": f"{user_id}:{login}",
+            "state": state,
+            "commit_sha": commit_sha,
+            "re_requested": user_id in requested_ids,
+        }
         key = user_id
         ordering = (submitted_key, review_id)
         if key not in latest or ordering > latest[key][0]:
@@ -687,6 +705,7 @@ def collect_evidence(
         raw_reviews,
         author_id=snapshot.author_id,
         eligible_ids=eligible_ids,
+        requested_ids=snapshot.requested_reviewer_ids,
     )
     return CollectedEvidence(
         snapshot=snapshot,
