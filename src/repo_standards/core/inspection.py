@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from functools import lru_cache
 import hashlib
 from io import BytesIO
+import json
 from operator import attrgetter
 import os
 from pathlib import Path
@@ -960,20 +961,22 @@ def _blob_inventory_unit(kind: InventoryKind, blob: TrackedBlob) -> InventoryUni
 
 
 def _terraform_module_units(blobs: tuple[TrackedBlob, ...]) -> tuple[InventoryUnit, ...]:
-    by_directory: dict[str, list[str]] = {}
+    by_directory: dict[str, list[tuple[str, str]]] = {}
     for blob in blobs:
         if not blob.path.endswith((".tf", ".tf.json")):
             continue
-        directory = blob.path.rpartition("/")[0] or "."
-        by_directory.setdefault(directory, []).append(blob.object_id)
+        directory, _, filename = blob.path.rpartition("/")
+        by_directory.setdefault(directory or ".", []).append((filename, blob.object_id))
     return tuple(
         InventoryUnit(
             kind=InventoryKind.TERRAFORM_MODULE,
             path=directory,
             object_id=None,
-            content_digest=_content_digest("\n".join(sorted(object_ids)).encode("ascii")),
+            content_digest=_content_digest(
+                json.dumps(sorted(entries), separators=(",", ":")).encode("ascii")
+            ),
         )
-        for directory, object_ids in sorted(by_directory.items())
+        for directory, entries in sorted(by_directory.items())
     )
 
 

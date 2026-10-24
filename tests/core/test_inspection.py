@@ -269,6 +269,47 @@ def test_snapshot_joins_manifest_and_inventory_from_one_git_tree(tmp_path: Path)
     assert repeated.inspection == snapshot.inspection
 
 
+@pytest.mark.parametrize(
+    "filename", ["override.tf", "z_override.tf", "main.tf.json", "r\u00e9seau.tf"]
+)
+def test_terraform_digest_tracks_filenames_without_binding_the_module_directory(
+    tmp_path: Path, filename: str
+) -> None:
+    repository = _committed_repository(tmp_path)
+
+    def module_digest() -> str | None:
+        [unit] = (
+            unit
+            for unit in inspect_repository(repository).inventory_units
+            if unit.kind is InventoryKind.TERRAFORM_MODULE
+        )
+        return unit.content_digest
+
+    def commit() -> None:
+        _git(
+            repository,
+            "-c",
+            "user.name=Inventory Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "rename",
+        )
+
+    original = module_digest()
+    _git(repository, "mv", "iac/main.tf", f"iac/{filename}")
+    commit()
+    renamed = module_digest()
+    assert renamed is not None
+    assert renamed != original
+
+    _git(repository, "mv", "iac", "infrastructure")
+    commit()
+    assert module_digest() == renamed
+
+
 def test_inventory_retains_overlapping_kinds_case_and_posix_parents(tmp_path: Path) -> None:
     repository = _committed_repository(tmp_path)
     paths = (
