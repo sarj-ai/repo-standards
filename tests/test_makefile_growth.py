@@ -73,15 +73,22 @@ def repository(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.parametrize("staged", [False, True])
 def test_comparison_reads_a_shared_makefile_blob_once(
-    repository: Path, monkeypatch: pytest.MonkeyPatch, *, changed: bool
+    repository: Path, monkeypatch: pytest.MonkeyPatch, *, changed: bool, staged: bool
 ) -> None:
-    base = _git(repository, "rev-parse", "HEAD")
+    nested = repository / "nested/Makefile"
+    nested.parent.mkdir()
+    nested.write_bytes(b"check:\n\ttool nested\n")
+    base = _commit(repository)
     if changed:
         (repository / "Makefile").write_bytes(b"check:\n\ttool check\n# added\n")
     else:
         (repository / "unrelated.txt").write_text("unrelated\n")
-    _commit(repository)
+    if staged:
+        _git(repository, "add", ".")
+    else:
+        _commit(repository)
     reads: list[tuple[str, ...]] = []
 
     def read(
@@ -94,11 +101,14 @@ def test_comparison_reads_a_shared_makefile_blob_once(
     monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Git I/O interception is the oracle.
         comparison, "read_tracked_blob_contents", read
     )
-    report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    report = analyze_repository(
+        RepositoryAnalysisRequest(root=repository, base_revision=base, staged=staged)
+    )
 
     assert report.completion == "complete"
     assert len(report.diagnostics) == int(changed)
-    assert reads == [("Makefile",)] * (2 if changed else 1)
+    assert reads[0] == ("Makefile", "nested/Makefile")
+    assert reads[1:] == ([("Makefile",)] if changed else [])
 
 
 @pytest.mark.parametrize(

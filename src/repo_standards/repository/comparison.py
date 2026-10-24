@@ -96,13 +96,12 @@ def _metrics(
         if is_makefile_path(blob.path) and (surviving is None or blob.path in surviving)
     )
     line_counts = {item.object_id: item.lines for item in known}
-    if all(blob.object_id in line_counts for blob in blobs):
-        return tuple(
-            MakefileMetric(blob.path, blob.object_id, line_counts[blob.object_id]) for blob in blobs
+    missing = tuple(blob.path for blob in blobs if blob.object_id not in line_counts)
+    if missing:
+        line_counts.update(
+            (blob.object_id, physical_lines(blob.content))
+            for blob in read_tracked_blob_contents(root, missing, identity=identity)
         )
     return tuple(
-        MakefileMetric(blob.path, blob.object_id, physical_lines(blob.content))
-        for blob in read_tracked_blob_contents(
-            root, tuple(blob.path for blob in blobs), identity=identity
-        )
+        MakefileMetric(blob.path, blob.object_id, line_counts[blob.object_id]) for blob in blobs
     )
