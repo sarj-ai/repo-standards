@@ -407,7 +407,7 @@ wheels = [
 
 [[package]]
 name = "repo-standards"
-version = "6.12.7"
+version = "6.12.8"
 source = { editable = "." }
 dependencies = [
     { name = "conventional-pre-commit" },
