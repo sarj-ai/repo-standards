@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shlex
 import shutil
 import subprocess
 from typing import TYPE_CHECKING, Literal
@@ -79,6 +81,58 @@ def test_deep_json_is_classified_without_crashing() -> None:
     content = b"[" * 2_000 + b"]" * 2_000
     with pytest.raises(ConfigurationError, match="metadata is malformed"):
         parse_project_metadata("package.json", content)
+
+
+def test_immutable_inventory_reuse_tracks_commits_without_caching_the_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = _committed_repository(tmp_path)
+    executable = shutil.which("git")
+    assert executable is not None
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    trace = tmp_path / "git-reads"
+    shim = binary / "git"
+    shim.write_text(
+        "#!/bin/sh\n"
+        "for argument do\n"
+        f'  if [ "$argument" = ls-tree ]; then echo tree >> {shlex.quote(str(trace))}; fi\n'
+        "done\n"
+        f'exec {shlex.quote(executable)} "$@"\n'
+    )
+    shim.chmod(0o700)
+    monkeypatch.setenv("PATH", str(binary), prepend=os.pathsep)
+    first = inspect_repository(repository)
+    assert read_tracked_blob_contents(repository, ("package.json",))[0].content.startswith(b"{")
+    assert inspect_repository(repository) == first
+    assert trace.read_text().splitlines() == ["tree"]
+
+    (repository / "new.txt").write_text("staged\n")
+    _git(repository, "add", "new.txt")
+    staged = git_index_identity(repository)
+    assert (
+        inspect_repository(repository, identity=staged).tracked_file_count
+        == first.tracked_file_count + 1
+    )
+    assert inspect_repository(repository) == first
+
+    (repository / "later.txt").write_text("later\n")
+    _git(repository, "add", "later.txt")
+    with pytest.raises(ConfigurationError, match="index changed"):
+        inspect_repository(repository, identity=staged)
+    _git(
+        repository,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "next",
+    )
+    second = inspect_repository(repository)
+    assert second.tracked_file_count == first.tracked_file_count + 2
+    assert trace.read_text().splitlines() == ["tree", "tree"]
 
 
 @pytest.mark.parametrize(

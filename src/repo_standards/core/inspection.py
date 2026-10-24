@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, replace
+from functools import lru_cache
 import hashlib
 from io import BytesIO
 from operator import attrgetter
@@ -694,7 +695,10 @@ def _parse_index_record(record: str) -> _IndexRecord:
     return _IndexRecord(mode, TrackedBlob(path=path, object_id=object_id), encoded_path_size)
 
 
+@lru_cache(maxsize=1)
 def _tracked_files(root: Path, tree_digest: str) -> tuple[TrackedBlob, ...]:
+    # The validated tree is immutable. Keep only the most recent inventory;
+    # index snapshots still pass through their live identity validation.
     git_executable = shutil.which("git")
     if git_executable is None:
         ConfigurationError.fail("Git executable is unavailable")
@@ -1200,15 +1204,15 @@ def _python_project(relative: str, content: bytes) -> ProjectCoordinate:
     raw = _erase_parser_type(tomllib.loads(content.decode("utf-8")))
     if not isinstance(raw, dict):
         ConfigurationError.fail(f"Python metadata must be a table: {relative}")
-    project = raw.get("project")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-    tool = raw.get("tool")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+    project = raw.get("project")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
+    tool = raw.get("tool")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
     name: str | None = None
     if isinstance(project, dict):
-        observed = project.get("name")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        observed = project.get("name")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
         name = observed if isinstance(observed, str) else None
     workspace_root = False
     if isinstance(tool, dict):
-        uv = tool.get("uv")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        uv = tool.get("uv")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
         workspace_root = isinstance(uv, dict) and "workspace" in uv
     return ProjectCoordinate(
         ecosystem="python",
@@ -1223,13 +1227,13 @@ def _python_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None
     raw = _erase_parser_type(tomllib.loads(content.decode("utf-8")))
     if not isinstance(raw, dict):
         ConfigurationError.fail(f"Python metadata must be a table: {relative}")
-    tool = raw.get("tool")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+    tool = raw.get("tool")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
     if not isinstance(tool, dict):
         return None
-    uv = tool.get("uv")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+    uv = tool.get("uv")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
     if not isinstance(uv, dict):
         return None
-    workspace = uv.get(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+    workspace = uv.get(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
         "workspace"
     )
     if workspace is None:
@@ -1237,12 +1241,12 @@ def _python_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None
     if not isinstance(workspace, dict):
         ConfigurationError.fail(f"tool.uv.workspace must be a table: {relative}")
     members = _erase_parser_type(
-        workspace.get(  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+        workspace.get(  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType] -- Parsed TOML containers retain unknown element types after narrowing.
             "members"
         )
     )
     excludes = _erase_parser_type(
-        workspace.get(  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+        workspace.get(  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType] -- Parsed TOML containers retain unknown element types after narrowing.
             "exclude", []
         )
     )
@@ -1258,7 +1262,7 @@ def _workspace_patterns(value: object, context: str) -> tuple[str, ...]:
     if not isinstance(value, list):
         ConfigurationError.fail(f"{context} must be an array")
     patterns: list[str] = []
-    for item in value:  # pyright: ignore[reportUnknownVariableType]
+    for item in value:  # pyright: ignore[reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
         if not isinstance(item, str) or not item:
             ConfigurationError.fail(f"{context} entries must be non-empty strings")
         if (
