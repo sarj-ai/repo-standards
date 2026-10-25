@@ -53,12 +53,14 @@ from .spec import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
 
-class _DocumentPackageRoots(NamedTuple):
+class _ArtifactRoots(NamedTuple):
     packages: frozenset[str]
     python_imports: frozenset[str]
+    standalone: frozenset[str]
+    terraform: frozenset[str]
 
 
 class ComponentKind(StrEnum):
@@ -692,9 +694,11 @@ def _repository_artifact_diagnostics(
         for project in snapshot.inspection.packages
         if _has_standalone_package_evidence(project, _parent_path(project.path), tracked_files)
     )
-    document_package_roots = _DocumentPackageRoots(
+    artifact_roots = _ArtifactRoots(
         package_test_roots,
         _owned_python_import_roots(snapshot, package_test_roots),
+        standalone_package_roots,
+        frozenset(snapshot.inspection.terraform_modules),
     )
     diagnostics: list[Diagnostic] = []
     components = ComponentIndex(snapshot.manifest.components)
@@ -704,8 +708,7 @@ def _repository_artifact_diagnostics(
                 snapshot,
                 tracked.path,
                 components.nearest(tracked.path),
-                document_package_roots,
-                standalone_package_roots,
+                artifact_roots,
             )
         )
     return tuple(
@@ -717,11 +720,11 @@ def _tracked_artifact_diagnostics(
     snapshot: RepositorySnapshot,
     path: str,
     component: Component | None,
-    document_package_roots: _DocumentPackageRoots,
-    standalone_package_roots: frozenset[str],
+    artifact_roots: _ArtifactRoots,
 ) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
-    package_test_roots = document_package_roots.packages
+    package_test_roots = artifact_roots.packages
+    standalone_package_roots = artifact_roots.standalone
     if path.casefold().endswith(_TFVARS_EXAMPLE_SUFFIXES):
         diagnostics.append(
             _repository_diagnostic(
@@ -772,12 +775,12 @@ def _tracked_artifact_diagnostics(
                 ),
             )
         )
-    is_terraform_path = _is_terraform_artifact_path(path, snapshot.inspection.terraform_modules)
+    is_terraform_path = _is_terraform_artifact_path(path, artifact_roots.terraform)
     is_github_automation_path = _is_github_automation_path(path)
     is_operational_path = is_terraform_path or _is_operational_path(
         path,
         component=component,
-        terraform_modules=snapshot.inspection.terraform_modules,
+        terraform_modules=artifact_roots.terraform,
     )
     is_owned_verifier = _is_owned_verifier_path(path, component, package_test_roots)
     is_owned_tool_source = path.startswith("tools/") and is_owned_verifier
@@ -887,9 +890,9 @@ def _tracked_artifact_diagnostics(
         )
     if path.casefold().endswith(".md") and not _markdown_path_is_owned(
         path,
-        package_roots=document_package_roots,
+        package_roots=artifact_roots,
         component=component,
-        terraform_modules=snapshot.inspection.terraform_modules,
+        terraform_modules=artifact_roots.terraform,
         documentation_entrypoints=(
             snapshot.manifest.documentation.entrypoints
             if snapshot.manifest.documentation is not None
@@ -932,9 +935,9 @@ def _parent_path(path: str) -> str:
 def _markdown_path_is_owned(
     path: str,
     *,
-    package_roots: _DocumentPackageRoots,
+    package_roots: _ArtifactRoots,
     component: Component | None,
-    terraform_modules: tuple[str, ...],
+    terraform_modules: Collection[str],
     documentation_entrypoints: tuple[str, ...],
 ) -> bool:
     pure_path = PurePosixPath(path)
@@ -1239,7 +1242,7 @@ def _is_operational_path(
     path: str,
     *,
     component: Component | None,
-    terraform_modules: tuple[str, ...],
+    terraform_modules: Collection[str],
 ) -> bool:
     pure = PurePosixPath(path)
     if _is_terraform_path(path, terraform_modules):
@@ -1256,14 +1259,16 @@ def _is_operational_path(
     return False
 
 
-def _is_terraform_artifact_path(path: str, terraform_modules: tuple[str, ...]) -> bool:
+def _is_terraform_artifact_path(path: str, terraform_modules: Collection[str]) -> bool:
     return "" in terraform_modules or _is_terraform_path(path, terraform_modules)
 
 
-def _is_terraform_path(path: str, terraform_modules: tuple[str, ...]) -> bool:
-    return any(
-        bool(root) and (path == root or path.startswith(f"{root}/")) for root in terraform_modules
-    )
+def _is_terraform_path(path: str, terraform_modules: Collection[str]) -> bool:
+    while path:
+        if path in terraform_modules:
+            return True
+        path = path.rpartition("/")[0]
+    return False
 
 
 def _is_github_automation_path(path: str) -> bool:

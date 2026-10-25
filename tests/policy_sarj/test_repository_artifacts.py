@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,6 +22,10 @@ from repo_standards.core.models import (
     WorkspaceEvidence,
 )
 from repo_standards.policy_sarj import SarjPolicy, policy as sarj_policy
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 _PACKAGE_ROOT = "libraries/infra"
@@ -435,6 +440,49 @@ def test_operational_script_tests_require_contract_review(path: str) -> None:
     assert remediation is not None
     assert "Retain tests" in remediation.steps[0]
     assert "only after demonstrating equivalent existing coverage" in remediation.steps[1]
+
+
+@pytest.mark.parametrize(
+    ("path", "root", "expected"),
+    [
+        ("modules/bank/tests/test_state.py", "modules/bank", True),
+        ("modules/bankruptcy/tests/test_state.py", "modules/bank", False),
+        ("modules/Bank/tests/test_state.py", "modules/bank", False),
+        ("modules/réseau/tests/test_state.py", "modules/réseau", True),
+        ("modules/bank/nested/tests/test_state.py", "modules/bank/nested", True),
+    ],
+)
+def test_terraform_membership_keeps_path_boundaries_among_unrelated_modules(
+    path: str, root: str, expected: bool
+) -> None:
+    modules = (*(f"unrelated/module-{index}" for index in range(128)), root)
+    diagnostics = SarjPolicy.evaluate_repository(_snapshot(path, terraform_modules=modules))
+    operational = tuple(
+        item
+        for item in diagnostics
+        if item.rule_id == "repository/artifacts/operational-script-tests"
+    )
+    assert bool(operational) is expected
+
+
+def test_artifact_scan_does_not_reenumerate_module_roots_for_each_file() -> None:
+    visits: list[str] = []
+
+    class CountedRoots(tuple[str, ...]):
+        __slots__ = ()
+
+        def __iter__(self) -> Iterator[str]:
+            for root in super().__iter__():
+                visits.append(root)
+                yield root
+
+    roots = CountedRoots(tuple(f"modules/unit-{index}" for index in range(64)))
+    snapshot = _snapshot(
+        *(f"services/api/source-{index}.py" for index in range(100)), terraform_modules=roots
+    )
+    visits.clear()
+    assert not SarjPolicy.evaluate_repository(snapshot)
+    assert len(visits) <= 2 * len(roots)
 
 
 @pytest.mark.parametrize(
