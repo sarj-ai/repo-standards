@@ -36,6 +36,7 @@ from repo_standards.core.models import (
     RuleId,
 )
 from repo_standards.core.parser import parse_baseline_bytes
+from repo_standards.core.render import render_text, report_dict
 from repo_standards.core.rule_reviews import RuleVersion
 
 
@@ -343,3 +344,31 @@ def test_valid_exception_stays_visible_and_nonblocking() -> None:
     assert report.diagnostics[0].disposition == "excepted"
     assert report.diagnostics[0].exception is not None
     assert report.summary["errors"] == 0
+
+
+def test_bounded_text_prioritizes_active_errors_and_keeps_complete_report() -> None:
+    warning = replace(_finding(), severity="warning", path="a-warning", manifest_anchor="warning")
+    error = replace(_finding(), path="z-error")
+    report = analyze(
+        _manifest(), EmptyPolicy(), mode=Mode.STRICT, additional_diagnostics=(warning, error)
+    )
+    text = render_text(report, max_diagnostics=1)
+    assert "z-error:" in text
+    assert "a-warning:" not in text
+    assert "1 diagnostic(s) omitted" in text
+    assert "--format json" in text
+    assert "1 errors, 1 warnings" in text
+    assert len(report.diagnostics) == 2
+    assert report_dict(report)["summary"] == report.summary
+    assert "a-warning:" in render_text(report)
+    excepted = replace(error, disposition="excepted", path="a-excepted")
+    mixed = replace(report, diagnostics=(excepted, error))
+    assert "z-error:" in render_text(mixed, max_diagnostics=1)
+    assert "a-excepted:" not in render_text(mixed, max_diagnostics=1)
+    assert "2 diagnostic(s) omitted" in render_text(mixed, max_diagnostics=0)
+
+
+def test_bounded_text_rejects_negative_limits() -> None:
+    report = analyze(_manifest(), EmptyPolicy(), mode=Mode.STRICT)
+    with pytest.raises(ValueError, match="non-negative"):
+        render_text(report, max_diagnostics=-1)
