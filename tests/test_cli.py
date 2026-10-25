@@ -1023,11 +1023,11 @@ def _manifest(root: Path, text: str) -> None:
 
 
 def _json_object(value: str) -> dict[str, object]:
-    parsed: object = json.loads(value)  # pyright: ignore[reportAny]
+    parsed: object = json.loads(value)  # pyright: ignore[reportAny] -- the JSON decoder returns Any; the object is checked below
     assert isinstance(parsed, dict)
     return {
         key: item
-        for key, item in parsed.items()  # pyright: ignore[reportUnknownVariableType]
+        for key, item in parsed.items()  # pyright: ignore[reportUnknownVariableType] -- runtime checks narrow decoded JSON keys and values
         if isinstance(key, str)
     }
 
@@ -1036,7 +1036,7 @@ def _object(value: object) -> dict[str, object]:
     assert isinstance(value, dict)
     return {
         key: item
-        for key, item in value.items()  # pyright: ignore[reportUnknownVariableType]
+        for key, item in value.items()  # pyright: ignore[reportUnknownVariableType] -- runtime checks narrow decoded JSON keys and values
         if isinstance(key, str)
     }
 
@@ -1044,8 +1044,8 @@ def _object(value: object) -> dict[str, object]:
 def _object_list(value: object) -> list[dict[str, object]]:
     assert isinstance(value, list)
     return [
-        _object(item)  # pyright: ignore[reportUnknownArgumentType]
-        for item in value  # pyright: ignore[reportUnknownVariableType]
+        _object(item)  # pyright: ignore[reportUnknownArgumentType] -- each decoded JSON element is narrowed by _object
+        for item in value  # pyright: ignore[reportUnknownVariableType] -- runtime checks narrow decoded JSON keys and values
     ]
 
 
@@ -1557,3 +1557,24 @@ def test_rest_discover_requires_explicit_selection_when_ambiguous(tmp_path: Path
     discovered = runner.invoke(app, ["rest", "discover", str(tmp_path)])
     assert discovered.exit_code == 0
     assert len(_object_list(_json_object(discovered.stdout)["candidates"])) == 2
+
+
+def test_repository_text_is_bounded_without_changing_json_or_failure(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for index in range(120):
+        (scripts / f"verify-private-{index:03}.py").write_text("pass\n", encoding="utf-8")
+    manifest = GOOD_MANIFEST.replace(
+        'repository_id = "example-repository"',
+        'repository_id = "example-repository"\n'
+        'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]',
+    )
+    _manifest(tmp_path, manifest)
+    text = runner.invoke(app, ["check", str(tmp_path)])
+    machine = runner.invoke(app, ["check", str(tmp_path), "--format", "json"])
+    assert text.exit_code == machine.exit_code == 1
+    payload = _json_object(machine.stdout)
+    diagnostics = _object_list(payload["diagnostics"])
+    assert len(diagnostics) >= 120
+    assert f"{len(diagnostics) - 50} diagnostic(s) omitted" in text.stdout
+    assert len(text.stdout.splitlines()) == 52

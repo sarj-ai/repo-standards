@@ -129,6 +129,7 @@ app.add_typer(pull_request_app, name="pull-request")
 _INSPECTION_KINDS = frozenset(
     {"all", "project", "workflow", "cloudbuild", "dockerfile", "terraform", "openapi"}
 )
+_TEXT_DIAGNOSTIC_LIMIT = 50
 _OPENAPI_BASENAMES = frozenset({"openapi.json", "openapi.yaml", "openapi.yml"})
 _MAX_RENDERED_COMMIT_FINDINGS = 3
 _MAX_REVIEW_POLICY_EVIDENCE_BYTES = 1_048_576
@@ -2222,7 +2223,7 @@ def _render(  # ruff: ignore[too-many-arguments] - stable report envelope inputs
     ratchet: Mapping[str, object],
 ) -> str:
     if output_format is OutputFormat.TEXT:
-        return render_text(report)
+        return render_text(report, max_diagnostics=_TEXT_DIAGNOSTIC_LIMIT)
     payload = _report_payload(
         report,
         command=command,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from heapq import nsmallest
 from typing import TYPE_CHECKING, NotRequired, TypedDict
 
 
@@ -219,7 +220,26 @@ def report_dict(report: AnalysisReport) -> Mapping[str, object]:
     return payload
 
 
-def render_text(report: AnalysisReport) -> str:
+def render_text(report: AnalysisReport, *, max_diagnostics: int | None = None) -> str:
+    diagnostics = report.diagnostics
+    if max_diagnostics is not None:
+        if max_diagnostics < 0:
+            msg = "max_diagnostics must be non-negative"
+            raise ValueError(msg)
+        if len(diagnostics) > max_diagnostics:
+            diagnostics = tuple(
+                nsmallest(
+                    max_diagnostics,
+                    diagnostics,
+                    key=lambda item: (
+                        item.disposition != "active",
+                        item.severity != "error",
+                        item.path,
+                        item.rule_id,
+                        item.manifest_anchor,
+                    ),
+                )
+            )
     lines = [
         f"repo-standards: analysis incomplete: {issue.code}: {issue.message}"
         for issue in report.execution_issues
@@ -228,8 +248,14 @@ def render_text(report: AnalysisReport) -> str:
         f"{item.path}: {item.rule_id} {item.message} "
         f"[observed={item.observed!r}; expected={item.expected!r}]"
         f" [anchor={item.manifest_anchor}; disposition={item.disposition}]"
-        for item in report.diagnostics
+        for item in diagnostics
     )
+    omitted = len(report.diagnostics) - len(diagnostics)
+    if omitted:
+        lines.append(
+            f"repo-standards: {omitted} diagnostic(s) omitted; "
+            "rerun with --format json or --format pretty-json for the complete report"
+        )
     lines.append(
         f"repo-standards: {report.conclusion}; {report.summary.get('errors', 0)} errors, "
         f"{report.summary.get('warnings', 0)} warnings"
