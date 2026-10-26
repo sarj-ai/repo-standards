@@ -155,6 +155,49 @@ def test_index_bytes_are_independent_of_unstaged_bytes(repository: Path) -> None
     assert len(report.diagnostics) == 1
 
 
+def test_staged_makefile_comparison_uses_the_pending_index(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _git(repository, "rev-parse", "HEAD")
+    selected_index = repository / ".git/pending-index"
+    monkeypatch.setenv("GIT_INDEX_FILE", str(selected_index))
+    _git(repository, "read-tree", "HEAD")
+    (repository / "Makefile").write_bytes(b"check:\n\ttool check\n# more\n")
+    _git(repository, "add", "Makefile")
+    selected_bytes = selected_index.read_bytes()
+    (repository / "Makefile").write_bytes(b"")
+
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository, staged=True))
+
+    assert report.completion == "complete"
+    assert [item.path for item in report.diagnostics] == ["Makefile"]
+    assert report.diagnostics[0].expected_value == 2
+    assert report.input_provenance is not None
+    assert report.input_provenance.comparison_basis == "staged"
+    assert selected_index.read_bytes() == selected_bytes
+    command = ["check", str(repository), "--staged", "--format", "json"]
+    rejected = CliRunner().invoke(app, command)
+    assert rejected.exit_code == 1, rejected.output
+    payload = TypeAdapter(dict[str, object]).validate_json(rejected.stdout)
+    diagnostics = TypeAdapter(list[dict[str, object]]).validate_python(payload["diagnostics"])
+    assert [(item["rule_id"], item["path"]) for item in diagnostics] == [(_RULE, "Makefile")]
+    assert (
+        analyze_repository(
+            RepositoryAnalysisRequest(root=repository, base_revision=base)
+        ).diagnostics
+        == ()
+    )
+    # The pending commit can omit growth staged in the ordinary index.
+    monkeypatch.delenv("GIT_INDEX_FILE")
+    (repository / "Makefile").write_bytes(b"check:\n\ttool check\n# more\n")
+    _git(repository, "add", "Makefile")
+    monkeypatch.setenv("GIT_INDEX_FILE", str(selected_index))
+    _git(repository, "read-tree", "HEAD")
+    accepted = CliRunner().invoke(app, command)
+    assert accepted.exit_code == 0, accepted.output
+    assert TypeAdapter(dict[str, object]).validate_json(accepted.stdout)["diagnostics"] == []
+
+
 def test_cleanup_lowers_the_next_comparison_ceiling(repository: Path) -> None:
     (repository / "Makefile").write_bytes(b"check:\n")
     _commit(repository)

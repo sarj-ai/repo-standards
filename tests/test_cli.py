@@ -1559,6 +1559,34 @@ def test_rest_discover_requires_explicit_selection_when_ambiguous(tmp_path: Path
     assert len(_object_list(_json_object(discovered.stdout)["candidates"])) == 2
 
 
+@pytest.mark.parametrize("count", [100, 101])
+def test_rest_discover_reports_its_tracked_input_limit(tmp_path: Path, count: int) -> None:
+    for index in range(count):
+        directory = tmp_path / f"service-{index}"
+        directory.mkdir()
+        (directory / "pyproject.toml").write_text(
+            f'[project]\nname = "service-{index}"\nversion = "0.1.0"\ndependencies = ["fastapi"]\n',
+            encoding="utf-8",
+        )
+    (tmp_path / "main.py").write_text(
+        "raise RuntimeError('application import is forbidden')\n", encoding="utf-8"
+    )
+    _commit_fixture(tmp_path)
+
+    result = runner.invoke(app, ["rest", "discover", str(tmp_path)])
+
+    assert result.exit_code == (0 if count == 100 else 2)
+    payload = _json_object(result.stdout)
+    if count == 100:
+        assert payload["completion"] == "complete"
+        assert payload["application_code_executed"] is False
+        assert _object(payload["summary"])["files_scanned"] == count
+    else:
+        assert payload["completion"] == "incomplete"
+        assert payload["conclusion"] == "inconclusive"
+        assert _object_list(payload["execution_issues"])[0]["code"] == "rest.discovery-incomplete"
+
+
 def test_repository_text_is_bounded_without_changing_json_or_failure(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     scripts.mkdir()

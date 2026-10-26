@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import shlex
 import shutil
 import subprocess
-from typing import TYPE_CHECKING, Literal
+import sys
+from typing import Literal
 
+from pydantic import RootModel
 import pytest
 
 from repo_standards.core.errors import ConfigurationError
@@ -19,10 +22,6 @@ from repo_standards.core.inspection import (
 )
 from repo_standards.core.models import InventoryKind, RuleId
 from repo_standards.policy_sarj import SarjPolicy
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 _MANIFEST = b"""\
@@ -403,6 +402,159 @@ def test_snapshot_can_select_the_exact_staged_index(tmp_path: Path) -> None:
     assert len(snapshot.provenance.tree_digest) == 64
     assert repeated.provenance == snapshot.provenance
     assert repeated.manifest == snapshot.manifest
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_staged_snapshot_honors_the_selected_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, relative: bool
+) -> None:
+    repository = _committed_repository(tmp_path)
+    ordinary_index = repository / ".git/index"
+    ordinary_bytes = ordinary_index.read_bytes()
+    selected_index = repository / ".git/pending-index"
+    monkeypatch.setenv("GIT_INDEX_FILE", ".git/pending-index" if relative else str(selected_index))
+    # Git resolves relative index selections after -C selects the repository.
+    monkeypatch.chdir(tmp_path)
+    _git(repository, "read-tree", "HEAD")
+    manifest = repository / ".repo-standards/repository.toml"
+    manifest.write_bytes(_MANIFEST.replace(b"example-repository", b"pending-repository"))
+    _git(repository, "add", ".repo-standards/repository.toml")
+    selected_bytes = selected_index.read_bytes()
+    manifest.write_bytes(_MANIFEST.replace(b"example-repository", b"unstaged-repository"))
+
+    snapshot = load_repository_snapshot(repository, identity=git_index_identity(repository))
+
+    assert snapshot.manifest.repository_id == "pending-repository"
+    assert load_repository_snapshot(repository).manifest.repository_id == "example-repository"
+    assert ordinary_index.read_bytes() == ordinary_bytes
+    assert selected_index.read_bytes() == selected_bytes
+    assert not ordinary_index.with_suffix(".lock").exists()
+    assert not selected_index.with_suffix(".lock").exists()
+
+
+def test_selected_index_preserves_deletions_and_rejects_later_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = _committed_repository(tmp_path)
+    monkeypatch.setenv("GIT_INDEX_FILE", str(repository / ".git/pending-index"))
+    _git(repository, "read-tree", "HEAD")
+    _git(repository, "rm", "--cached", "apps/application/package.json")
+    identity = git_index_identity(repository)
+    selected = inspect_repository(repository, identity=identity)
+    assert "apps/application/package.json" not in {item.path for item in selected.packages}
+    assert "apps/application/package.json" in {
+        item.path for item in inspect_repository(repository).packages
+    }
+    (repository / "new.txt").write_text("staged\n")
+    _git(repository, "add", "new.txt")
+    with pytest.raises(ConfigurationError, match="index changed"):
+        inspect_repository(repository, identity=identity)
+
+
+def test_unborn_selected_index_keeps_unrelated_git_environment_isolated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--quiet")
+    selected_index = repository / ".git/pending-index"
+    monkeypatch.setenv("GIT_INDEX_FILE", str(selected_index))
+    (repository / ".repo-standards").mkdir()
+    (repository / ".repo-standards/repository.toml").write_bytes(_MANIFEST)
+    _git(repository, "add", ".")
+    selected_bytes = selected_index.read_bytes()
+    for variable in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CONFIG_GLOBAL",
+    ):
+        monkeypatch.setenv(variable, str(tmp_path / "unrelated"))
+
+    snapshot = load_repository_snapshot(repository, identity=git_index_identity(repository))
+
+    assert snapshot.manifest.repository_id == "example-repository"
+    assert snapshot.provenance.source_revision == "0" * 40
+    assert not (repository / ".git/index").exists()
+    assert selected_index.read_bytes() == selected_bytes
+
+
+@pytest.mark.parametrize("content", [b"", b"invalid index"])
+def test_invalid_selected_index_never_falls_back_to_ordinary_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: bytes
+) -> None:
+    repository = _committed_repository(tmp_path)
+    selected_index = repository / ".git/pending-index"
+    selected_index.write_bytes(content)
+    monkeypatch.setenv("GIT_INDEX_FILE", str(selected_index))
+    with pytest.raises(ConfigurationError, match="cannot enumerate Git index"):
+        git_index_identity(repository)
+    assert load_repository_snapshot(repository).manifest.repository_id == "example-repository"
+    assert selected_index.read_bytes() == content
+
+
+def test_native_partial_commit_hook_checks_its_pending_index(tmp_path: Path) -> None:
+    repository = _committed_repository(tmp_path)
+    _git(repository, "config", "core.hooksPath", str(repository / ".git/hooks"))
+    manifest = repository / ".repo-standards/repository.toml"
+    manifest.write_bytes(
+        _MANIFEST.replace(
+            b'repository_id = "example-repository"',
+            b'repository_id = "example-repository"\n'
+            b'enabled_rules = ["repository/artifacts/local-residue"]',
+        )
+    )
+    _git(repository, "add", ".repo-standards/repository.toml")
+    _git(
+        repository,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "enable policy",
+    )
+    (repository / "cache.pyc").write_bytes(b"inert private fixture; never imported")
+    _git(repository, "add", "cache.pyc")
+    (repository / "package.json").write_text('{"private":true}\n', encoding="utf-8")
+    receipt = tmp_path / "hook-receipt.json"
+    source = Path(__file__).resolve().parents[2] / "src"
+    hook = repository / ".git/hooks/pre-commit"
+    hook.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\nfrom pathlib import Path\n"
+        f"sys.path.insert(0, {str(source)!r})\n"
+        "from repo_standards.repository import RepositoryAnalysisRequest, analyze_repository\n"
+        "report = analyze_repository(RepositoryAnalysisRequest(root=Path.cwd(), staged=True))\n"
+        f"Path({str(receipt)!r}).write_text(json.dumps({{"
+        "'index': os.environ.get('GIT_INDEX_FILE'), 'completion': report.completion, "
+        "'paths': [item.path for item in report.diagnostics]}))\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o700)
+    _git(
+        repository,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--only",
+        "package.json",
+        "--quiet",
+        "-m",
+        "partial commit",
+    )
+    observed = (
+        RootModel[dict[str, object]].model_validate_json(receipt.read_text(encoding="utf-8")).root
+    )
+    assert observed["index"]
+    assert observed["index"] != str(repository / ".git/index")
+    assert observed["completion"] == "complete"
+    assert observed["paths"] == []
 
 
 def test_snapshot_can_select_an_unborn_staged_index(tmp_path: Path) -> None:
