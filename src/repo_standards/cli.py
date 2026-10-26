@@ -1655,9 +1655,9 @@ def rest_discover_command(
         resolved = root.resolve(strict=True)
         identity = git_identity(resolved)
         inspection = inspect_repository(resolved, identity=identity)
+        detection = _detect_rest_snapshot(resolved, identity, inspection)
     except (ConfigurationError, OSError) as error:
         _emit_rest_error("rest.discover", "rest.discovery-incomplete", str(error), identity)
-    detection = _detect_rest_snapshot(resolved, identity, inspection)
     candidates = _openapi_candidates(inspection)
     completion = (
         "incomplete"

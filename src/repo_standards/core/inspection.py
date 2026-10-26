@@ -15,7 +15,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed Git meta
 import tempfile
 import threading
 import tomllib
-from typing import ClassVar, Literal, NamedTuple
+from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 import yaml
@@ -41,6 +41,10 @@ from .models import (
     WorkspaceEvidence,
 )
 from .parser import parse_baseline_bytes, parse_manifest_bytes
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 _MAX_FILES = 100_000
@@ -622,6 +626,10 @@ def _indexed_files(root: Path) -> _IndexedFiles:
     git_executable = shutil.which("git")
     if git_executable is None:
         ConfigurationError.fail("Git executable is unavailable")
+    environment = dict(GIT_ENVIRONMENT)
+    index_file = os.environ.get("GIT_INDEX_FILE")  # ruff: ignore[banned-api] -- Native pre-commit hooks select the prospective commit with this Git-owned environment variable.
+    if index_file is not None:
+        environment["GIT_INDEX_FILE"] = index_file
     payload = _bounded_git_payload(
         [
             git_executable,
@@ -637,6 +645,7 @@ def _indexed_files(root: Path) -> _IndexedFiles:
             "--full-name",
         ],
         noun="Git index",
+        environment=environment,
     )
     try:
         records = deque(filter(None, payload.decode("utf-8").split("\0")))
@@ -759,13 +768,15 @@ def _git_tree_payload(root: Path, git_executable: str, tree_digest: str) -> byte
     return _bounded_git_payload(command, noun="Git tree")
 
 
-def _bounded_git_payload(command: list[str], *, noun: str) -> bytes:
+def _bounded_git_payload(
+    command: list[str], *, noun: str, environment: Mapping[str, str] = GIT_ENVIRONMENT
+) -> bytes:
     try:
         process: subprocess.Popen[bytes] = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed trusted Git executable and arguments
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env=GIT_ENVIRONMENT,
+            env=environment,
         )
     except OSError:
         ConfigurationError.fail(f"cannot enumerate {noun}")
