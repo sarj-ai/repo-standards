@@ -294,3 +294,10 @@ def test_embedded_schema_mutation_cannot_change_later_catalogs() -> None:
         assert isinstance(descriptor.document, dict)
         descriptor.document.clear()
     assert build_catalog(app, package_version="1.0.0").model_dump_json() == expected
+
+
+def test_catalog_uses_the_canonical_engineering_reference() -> None:
+    catalog = _catalog_payload()
+    product = catalog["product"]
+    assert isinstance(product, dict)
+    assert product["website_url"] == "https://engineering.sarj.ai/projects/repo-standards/"

@@ -1,10 +1,10 @@
 import type { APIRoute } from 'astro';
 
-import { catalog } from '../lib/catalog';
+import { SITE_BASE_PATH, SITE_URL } from '../lib/site';
 
-const origin = catalog.product["website_url"].replace(/\/$/u, '');
+const origin = SITE_URL.replace(/\/$/u, '');
 const body = `User-agent: *
-Allow: /
+Allow: ${SITE_BASE_PATH}
 
 Sitemap: ${origin}/sitemap-index.xml
 `;

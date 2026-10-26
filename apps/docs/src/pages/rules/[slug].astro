@@ -1,4 +1,5 @@
 ---
+import { siteHref } from '../../lib/site';
 import RulePager from '@sarj/design/RulePager.astro';
 
 import ReferencePage from '../../components/ReferencePage.astro';
@@ -22,12 +23,12 @@ export function getStaticPaths() {
 interface Props { rule: Rule }
 const { rule } = Astro.props;
 const sourceUrl = `${catalog.product["repository_url"]}/blob/${sourceRevision}/${rule.source.path}`;
-const ruleJsonUrl = `/api/rules/${rule["rule_id"].split('/').map(encodeURIComponent).join('/')}.json`;
+const ruleJsonUrl = siteHref(`/api/rules/${rule["rule_id"].split('/').map(encodeURIComponent).join('/')}.json`);
 const { category, topic, previous, next } = rulePage(rule);
 const description = ruleDescription(rule);
 const examples = ruleExamples(rule);
 const [primaryExample, ...additionalExamples] = examples;
-const categoryUrl = `/rules/categories/${encodeURIComponent(rule["category_id"])}/`;
+const categoryUrl = siteHref(`/rules/categories/${encodeURIComponent(rule["category_id"])}/`);
 const referenceLinks = [...new Set(rule.references)].map((href) => ({
   href,
   label: new URL(href).hostname.replace(/^www\./, ''),
@@ -67,7 +68,7 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
         <code>{rule["rule_id"]}</code>
         <a href={sourceUrl}>Rule source</a>
         <a href={ruleJsonUrl}>Rule JSON</a>
-        <a href="/api/catalog.json">Catalog JSON</a>
+        <a href={siteHref("/api/catalog.json")}>Catalog JSON</a>
         {referenceLinks.map(({ href, label }) => <a href={href}>{label}</a>)}
       </div>
     </header>

@@ -1,7 +1,10 @@
 import { hash } from 'node:crypto';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 
-const outputDirectory = new URL('../dist/', import.meta.url);
+import { SITE_BASE_PATH, SITE_ORIGIN, SITE_URL, siteHref, siteUrl } from '../src/lib/site.ts';
+
+const assetDirectory = new URL('../dist/', import.meta.url);
+const outputDirectory = new URL(`.${SITE_BASE_PATH}`, assetDirectory);
 const htmlPaths = (await readdir(outputDirectory, { recursive: true }))
   .filter((path) => path.endsWith('.html'))
   .sort();
@@ -32,7 +35,7 @@ async function verifySearchDiscovery(
   );
   const catalog = parseDiscoveryCatalog(catalogValue);
   const sitemapIndex = await readFile(new URL('sitemap-index.xml', directory), 'utf8');
-  if (!sitemapIndex.includes('https://repo-standards.sarj.ai/sitemap-0.xml')) {
+  if (!sitemapIndex.includes(siteUrl('/sitemap-0.xml'))) {
     throw new Error('Sitemap index does not reference the canonical repo-standards sitemap.');
   }
   const sitemap = await readFile(new URL('sitemap-0.xml', directory), 'utf8');
@@ -40,8 +43,8 @@ async function verifySearchDiscovery(
     [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/gu)].map((match) => match[1]),
   );
   const expected = [
-    'https://repo-standards.sarj.ai/rules/',
-    ...catalog.rules.map((rule: { slug: string }) => `https://repo-standards.sarj.ai/rules/${rule.slug}/`),
+    siteUrl('/rules/'),
+    ...catalog.rules.map((rule: { slug: string }) => siteUrl(`/rules/${rule.slug}/`)),
   ];
   for (const location of expected) {
     if (!locations.has(location)) throw new Error(`Indexable page is missing from the sitemap: ${location}`);
@@ -49,12 +52,20 @@ async function verifySearchDiscovery(
 
   const pagesByPath = new Map(pages);
   await verifySidebarCategories(catalog, pagesByPath);
+  const llms = await readFile(new URL('llms.txt', directory), 'utf8');
+  for (const category of catalog.categories) {
+    const path = `rules/categories/${encodeURIComponent(category.id)}/`;
+    if (!llms.includes(`](${siteUrl(`/${path}`)})`) || !pagesByPath.has(`${path}index.html`)) {
+      throw new Error(`LLM reference category is missing its canonical rendered page: ${category.id}`);
+    }
+  }
+
   for (const location of locations) {
     const url = new URL(location);
-    if (url.origin !== 'https://repo-standards.sarj.ai') {
+    if (url.origin !== SITE_ORIGIN || !url.pathname.startsWith(SITE_BASE_PATH)) {
       throw new Error(`Cross-origin sitemap URL: ${location}`);
     }
-    const path = url.pathname === '/' ? 'index.html' : `${url.pathname.slice(1)}index.html`;
+    const path = `${url.pathname.slice(SITE_BASE_PATH.length)}index.html`;
     const document = pagesByPath.get(path);
     if (document === undefined) throw new Error(`Sitemap URL has no rendered page: ${location}`);
     if (/name="robots" content="[^"]*noindex/iu.test(document)) {
@@ -115,6 +126,9 @@ function parseDiscoveryCatalog(value: unknown): DiscoveryCatalog {
   if (!isRecord(value) || !Array.isArray(value.categories) || !Array.isArray(value.rules)) {
     throw new Error('Generated catalog is missing its category or rule collection.');
   }
+  if (!isRecord(value.product) || value.product["website_url"] !== SITE_URL) {
+    throw new Error('Catalog and website canonical addresses differ.');
+  }
   const categories = value.categories.map((candidate) => {
     if (!isRecord(candidate) || typeof candidate["category_id"] !== 'string' || typeof candidate.label !== 'string') {
       throw new Error('Generated catalog contains an invalid category descriptor.');
@@ -153,10 +167,12 @@ if (/^\s*X-Robots-Tag:/imu.test(headers)) {
   throw new Error('Indexing directives must be expressed per page, not as a global response header.');
 }
 await writeFile(
-  headersUrl,
-  headers.replace('/*\n', `/*\n${policyHeader}\n`),
+  new URL('_headers', assetDirectory),
+  headers.replace('/*\n', `/*\n${policyHeader}\n`)
+    .replaceAll(/^\/(.*)$/gmu, (_match: string, path: string) => siteHref(`/${path}`)),
   'utf8',
 );
+if (outputDirectory.href !== assetDirectory.href) await rm(headersUrl);
 
 function policyPattern(): RegExp {
   return /<meta http-equiv="content-security-policy" content="([^"]+)">/u;

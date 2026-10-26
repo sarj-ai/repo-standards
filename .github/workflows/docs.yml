@@ -93,7 +93,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: repo-standards-production
-      url: https://repo-standards.sarj.ai
+      url: https://engineering.sarj.ai/projects/repo-standards/
     defaults:
       run:
         working-directory: apps/docs
@@ -128,7 +128,9 @@ jobs:
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: ../../.github/deploy/node_modules/.bin/wrangler deploy --config wrangler.jsonc
+        run: |
+          ../../.github/deploy/node_modules/.bin/wrangler triggers deploy --config wrangler.jsonc
+          ../../.github/deploy/node_modules/.bin/wrangler deploy --config wrangler.jsonc
       - name: Verify deployed revision and catalog
         env:
           EXPECTED_COMMIT: ${{ github.sha }}

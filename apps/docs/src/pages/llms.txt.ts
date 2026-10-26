@@ -1,8 +1,8 @@
 import type { APIRoute } from 'astro';
 
 import { catalog, categoryHref } from '../lib/catalog';
+import { SITE_ORIGIN, siteUrl } from '../lib/site';
 
-const origin = catalog.product["website_url"].replace(/\/$/u, '');
 const lines = [
   `# ${catalog.product.title}`,
   '',
@@ -10,16 +10,16 @@ const lines = [
   '',
   '## Reference',
   '',
-  `- [Rules](${origin}/rules/)`,
-  `- [Git policies](${origin}/git-policies/)`,
-  `- [CLI](${origin}/cli/)`,
-  `- [Schemas](${origin}/schemas/)`,
-  `- [Catalog JSON](${origin}/api/catalog.json)`,
-  `- [Catalog schema](${origin}/api/catalog.schema.json)`,
+  `- [Rules](${siteUrl('/rules/')})`,
+  `- [Git policies](${siteUrl('/git-policies/')})`,
+  `- [CLI](${siteUrl('/cli/')})`,
+  `- [Schemas](${siteUrl('/schemas/')})`,
+  `- [Catalog JSON](${siteUrl('/api/catalog.json')})`,
+  `- [Catalog schema](${siteUrl('/api/catalog.schema.json')})`,
   '',
   '## Rule categories',
   '',
-  ...catalog.categories.map((category) => `- [${category.label}](${origin}${categoryHref(category["category_id"])})`),
+  ...catalog.categories.map((category) => `- [${category.label}](${new URL(categoryHref(category["category_id"]), SITE_ORIGIN).href})`),
   '',
 ];
 

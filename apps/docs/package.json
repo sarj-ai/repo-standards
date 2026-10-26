@@ -11,7 +11,7 @@
     "dev": "npm run catalog && astro dev",
     "lint": "npm run catalog && eslint . --max-warnings 0",
     "preview": "astro preview",
-    "test": "node --test ./scripts/verify-deployment.test.ts",
+    "test": "node --test ./scripts/*.test.ts",
     "typecheck": "astro check && tsc --project tsconfig.node.json",
     "verify:deployment": "node ./scripts/verify-deployment.ts"
   },
@@ -48,5 +48,6 @@
       "@astrojs/starlight": "$@astrojs/starlight"
     }
   },
-  "packageManager": "npm@12.2.1"
+  "packageManager": "npm@12.2.1",
+  "homepage": "https://engineering.sarj.ai/projects/repo-standards/"
 }
