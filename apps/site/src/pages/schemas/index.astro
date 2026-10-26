@@ -1,4 +1,5 @@
 ---
+import { siteHref } from '../../lib/site';
 import ReferencePage from '../../components/ReferencePage.astro';
 import { catalog } from '../../lib/catalog';
 ---
@@ -13,7 +14,7 @@ import { catalog } from '../../lib/catalog';
           <dt>ID</dt><dd><code>{schema["schema_id"]}</code></dd>
           <dt>CLI</dt><dd><code>repo-standards schema {schema["cli_selector"]}</code></dd>
         </dl>
-        <a href={`/api/schemas/${encodeURIComponent(schema["schema_id"])}.schema.json`}>JSON Schema</a>
+        <a href={siteHref(`/api/schemas/${encodeURIComponent(schema["schema_id"])}.schema.json`)}>JSON Schema</a>
       </article>
     ))}
   </div>

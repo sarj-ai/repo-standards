@@ -1,9 +1,16 @@
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+import { rm } from 'node:fs/promises';
+
+import { SITE_BASE_PATH, SITE_ORIGIN } from './src/lib/site.ts';
+
+const ASSET_ROOT = new URL('./dist/', import.meta.url);
 
 export default defineConfig({
-  site: 'https://repo-standards.sarj.ai',
+  site: SITE_ORIGIN,
+  base: SITE_BASE_PATH,
+  outDir: `./dist${SITE_BASE_PATH}`,
   output: 'static',
   trailingSlash: 'always',
   compressHTML: true,
@@ -29,6 +36,12 @@ export default defineConfig({
     },
   },
   integrations: [
+    {
+      name: 'repo-standards-clean-static-output',
+      hooks: {
+        'astro:build:start': () => rm(ASSET_ROOT, { recursive: true, force: true }),
+      },
+    },
     sitemap(),
     starlight({
       title: 'Sarj Repo Standards',

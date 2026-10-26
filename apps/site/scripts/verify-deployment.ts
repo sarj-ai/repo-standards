@@ -1,6 +1,8 @@
 import { pathToFileURL } from 'node:url';
 
-const DEFAULT_BASE_URL = 'https://repo-standards.sarj.ai/';
+import { SITE_URL } from '../src/lib/site.ts';
+
+const DEFAULT_BASE_URL = SITE_URL;
 const DEFAULT_ATTEMPTS = 10;
 const RETRY_DELAY_MS = 3000;
 

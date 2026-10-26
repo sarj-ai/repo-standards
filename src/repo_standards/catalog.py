@@ -38,6 +38,7 @@ from repo_standards.core.render import analysis_outcome_schema, baseline_schema,
 from repo_standards.core.taxonomy import CATEGORIES
 from repo_standards.policy_sarj.policy import POLICY_SPEC, SarjPolicy
 from repo_standards.rest import instrumentation_capabilities
+from repo_standards.site import WEBSITE_URL
 
 
 if TYPE_CHECKING:
@@ -454,7 +455,7 @@ def build_catalog(app: typer.Typer, *, package_version: str) -> Catalog:
             distribution="repo-standards",
             executables=("repo-standards",),
             repository_url="https://github.com/sarj-ai/repo-standards",
-            website_url="https://repo-standards.sarj.ai/",
+            website_url=WEBSITE_URL,
         ),
         provenance=ProvenanceDescriptor(
             distribution="repo-standards",

@@ -37,12 +37,16 @@ case "${1:-}" in
   dependencies)
     uv sync --locked --python 3.15 --no-dev &
     python_pid=$!
-    npm --prefix apps/docs ci --ignore-scripts --no-audit --no-fund &
+    npm --prefix apps/site ci --ignore-scripts --no-audit --no-fund &
     node_pid=$!
     result=0
     wait "$python_pid" || result=1
     wait "$node_pid" || result=1
     exit "$result"
+    ;;
+  compiler)
+    compiler_version="$(npm --prefix apps/site exec --offline -- tsc --version)"
+    test "$compiler_version" = 'Version 7.0.2'
     ;;
   bind)
     shift
@@ -84,7 +88,7 @@ case "${1:-}" in
     done
     ;;
   *)
-    printf 'usage: ci-workflow.sh python|smoke|dependencies|credentials|wait-main|bind DIRECTORY\n' >&2
+    printf 'usage: ci-workflow.sh python|smoke|dependencies|compiler|credentials|wait-main|bind DIRECTORY\n' >&2
     exit 2
     ;;
 esac

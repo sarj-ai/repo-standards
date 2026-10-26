@@ -1,4 +1,5 @@
 ---
+import { siteHref } from '../lib/site';
 import { Code } from '@astrojs/starlight/components';
 
 import ReferencePage from '../components/ReferencePage.astro';
@@ -12,12 +13,12 @@ const quickStart = `uvx --from ${catalog.product.distribution} repo-standards pu
     <h1>About</h1>
     <p>Repository standards should be easy to understand before they are enforced.</p>
     <p>Repo Standards checks repository structure, pull-request size, commit messages, and reviewable Git history.</p>
-    <p><a href="/rules/">Browse rules</a> or <a href="/git-policies/">understand Git policies</a>.</p>
+    <p><a href={siteHref("/rules/")}>Browse rules</a> or <a href={siteHref("/git-policies/")}>understand Git policies</a>.</p>
 
     <section aria-labelledby="quick-start">
       <h2 id="quick-start">Quick start</h2>
       <Code code={quickStart} lang="bash" frame="terminal" wrap />
-      <p><a href="/cli/">CLI reference</a></p>
+      <p><a href={siteHref("/cli/")}>CLI reference</a></p>
     </section>
 
     <section class="sarj-related-standards" aria-labelledby="related-standards">

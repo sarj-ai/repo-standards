@@ -11,6 +11,7 @@ import stat
 import sys
 import tarfile
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Protocol, final
+from urllib.parse import urlsplit
 import zipfile
 
 from jsonschema import Draft202012Validator
@@ -21,6 +22,7 @@ import typer
 from repo_standards.core.canonical import canonical_json, canonical_path
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import JSONValue
+from repo_standards.site import WEBSITE_URL
 
 
 if TYPE_CHECKING:
@@ -53,6 +55,7 @@ SITE_SUFFIXES = frozenset(
         ".xml",
     }
 )
+_SITE_PREFIX = PurePosixPath(urlsplit(WEBSITE_URL).path.lstrip("/"))
 REQUIRED_SITE_FILES = frozenset(
     {
         "api/catalog.json",
@@ -349,6 +352,8 @@ def _verify_sdist(path: Path) -> list[str]:
 def verify_site(directory: Path) -> list[str]:
     if not directory.is_dir():
         return [f"site artifact does not exist: {directory}"]
+    project_directory = _site_directory(directory)
+    mounted = project_directory != directory
     violations: list[str] = []
     observed: set[str] = set()
     documents: list[tuple[str, str]] = []
@@ -358,36 +363,91 @@ def verify_site(directory: Path) -> list[str]:
             continue
         relative_path = path.relative_to(directory)
         artifact_path = _safe_path(relative_path.as_posix())
-        observed.add(str(artifact_path))
         if path.is_symlink() or not path.is_file():
             violations.append(f"site:{artifact_path}: links are not publishable")
             continue
-        if artifact_path.parts[0] == "pagefind":
-            violations.append(f"site:{artifact_path}: search artifacts are not publishable")
-        if (
-            artifact_path.name not in {"_headers", "_redirects"}
-            and artifact_path.suffix.casefold() not in SITE_SUFFIXES
-        ):
-            violations.append(f"site:{artifact_path}: unexpected static-site file type")
-        if artifact_path.name.casefold().endswith(".map"):
-            violations.append(f"site:{artifact_path}: source map is not publishable")
+        in_project = path.is_relative_to(project_directory)
+        logical_path = (
+            _safe_path(path.relative_to(project_directory).as_posix())
+            if in_project
+            else artifact_path
+        )
+        if in_project:
+            observed.add(str(logical_path))
+        elif str(artifact_path) != "_headers":
+            violations.append(f"site:{artifact_path}: unexpected file outside the project mount")
+        violations.extend(_verify_site_path(artifact_path, logical_path))
         content = path.read_bytes()
         if artifact_path.suffix == ".html":
-            documents.append((str(artifact_path), content.decode("utf-8")))
+            document = content.decode("utf-8")
+            documents.append((str(artifact_path), document))
         elif str(artifact_path) == "_headers":
             headers = content.decode("utf-8")
-        display_name = f"site:{artifact_path}"
-        violations.extend(_scan_identity(display_name, content))
-        if artifact_path.parts[0] != "_astro":
-            violations.extend(_scan_emails(display_name, content))
+        violations.extend(
+            _scan_site_privacy(artifact_path, logical_path, content, in_project=in_project)
+        )
     violations.extend(
         f"site:{name}: required generated file is missing"
         for name in sorted(REQUIRED_SITE_FILES - observed)
     )
-    violations.extend(verify_site_catalog(directory))
-    violations.extend(_verify_site_semantics(directory, documents))
+    if {"api/catalog.json", "api/catalog.schema.json"}.issubset(observed):
+        violations.extend(verify_site_catalog(project_directory))
+        violations.extend(
+            _verify_site_semantics(
+                project_directory,
+                _project_documents(documents, mounted=mounted),
+                base_path="/" + str(_SITE_PREFIX) if mounted else "",
+            )
+        )
     violations.extend(_verify_site_csp(headers, documents))
     return violations
+
+
+def _site_directory(directory: Path) -> Path:
+    candidate = directory
+    for segment in _SITE_PREFIX.parts:
+        candidate /= segment
+        if candidate.is_symlink() or not candidate.is_dir():
+            return directory
+    return candidate
+
+
+def _verify_site_path(artifact_path: PurePosixPath, logical_path: PurePosixPath) -> list[str]:
+    violations: list[str] = []
+    if logical_path.parts[0] == "pagefind":
+        violations.append(f"site:{artifact_path}: search artifacts are not publishable")
+    if (
+        artifact_path.name not in {"_headers", "_redirects"}
+        and artifact_path.suffix.casefold() not in SITE_SUFFIXES
+    ):
+        violations.append(f"site:{artifact_path}: unexpected static-site file type")
+    if artifact_path.name.casefold().endswith(".map"):
+        violations.append(f"site:{artifact_path}: source map is not publishable")
+    return violations
+
+
+def _scan_site_privacy(
+    artifact_path: PurePosixPath,
+    logical_path: PurePosixPath,
+    content: bytes,
+    *,
+    in_project: bool,
+) -> list[str]:
+    display_name = f"site:{artifact_path}"
+    violations = _scan_identity(display_name, content)
+    if not in_project or logical_path.parts[0] != "_astro":
+        violations.extend(_scan_emails(display_name, content))
+    return violations
+
+
+def _project_documents(
+    documents: Iterable[tuple[str, str]], *, mounted: bool
+) -> Iterable[tuple[str, str]]:
+    prefix = _SITE_PREFIX if mounted else PurePosixPath()
+    for relative, document in documents:
+        path = PurePosixPath(relative)
+        if path.is_relative_to(prefix):
+            yield str(path.relative_to(prefix)), document
 
 
 def verify_site_catalog(directory: Path) -> list[str]:
@@ -451,7 +511,9 @@ def _verify_site_csp(headers: str | None, documents: Iterable[tuple[str, str]]) 
     return violations
 
 
-def _verify_site_semantics(directory: Path, documents: Iterable[tuple[str, str]]) -> list[str]:
+def _verify_site_semantics(
+    directory: Path, documents: Iterable[tuple[str, str]], *, base_path: str = ""
+) -> list[str]:
     violations: list[str] = []
     catalog_path = directory / "api/catalog.json"
     if not catalog_path.is_file():
@@ -463,7 +525,7 @@ def _verify_site_semantics(directory: Path, documents: Iterable[tuple[str, str]]
         parser = PageSemantics()
         parser.feed(document)
         if relative == "git-policies/index.html":
-            violations.extend(_verify_git_policy_reference(parser))
+            violations.extend(_verify_git_policy_reference(parser, base_path=base_path))
         violations.extend(_verify_page_landmarks(relative, parser))
         if parser.rule_id is None:
             if relative.startswith("rules/categories/") and (
@@ -471,7 +533,8 @@ def _verify_site_semantics(directory: Path, documents: Iterable[tuple[str, str]]
             ):
                 violations.append(f"site:{relative}: category breadcrumb is incomplete")
             continue
-        violations.extend(verify_rule_page(relative, parser, expected_rules, observed_rules))
+        observed_rules.add(parser.rule_id)
+        violations.extend(verify_rule_page(relative, parser, expected_rules))
     if observed_rules != set(expected_rules):
         violations.append("site: rendered rule routes differ from the catalog")
     return violations
@@ -488,16 +551,16 @@ def _verify_page_landmarks(relative: str, parser: PageSemantics) -> list[str]:
     return violations
 
 
-def _verify_git_policy_reference(parser: PageSemantics) -> list[str]:
+def _verify_git_policy_reference(parser: PageSemantics, *, base_path: str = "") -> list[str]:
     rendered_text = " ".join("".join(parser.text).split())
     required_text = (
         "They are commands and hooks, so they do not appear in the rule count.",
         "[(i/N) ][TICKET] type(scope)!: description",
     )
     required_links = (
-        "/cli/#commit-message",
-        "/cli/#pull-request.commits",
-        "/git-policies/",
+        f"{base_path}/cli/#commit-message",
+        f"{base_path}/cli/#pull-request.commits",
+        f"{base_path}/git-policies/",
     )
     violations = [
         f"site:git-policies/index.html: missing public contract text: {text}"
@@ -516,11 +579,9 @@ def verify_rule_page(
     relative: str,
     parser: PageSemantics,
     expected_rules: dict[str, SiteRule],
-    observed_rules: set[str],
 ) -> list[str]:
     if parser.rule_id is None:
         return []
-    observed_rules.add(parser.rule_id)
     rule = expected_rules.get(parser.rule_id)
     if rule is None:
         return [f"site:{relative}: unknown rendered rule id"]

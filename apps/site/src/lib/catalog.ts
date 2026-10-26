@@ -1,5 +1,6 @@
 import rawCatalogJson from '../generated/catalog.json?raw';
 import { generatedCatalog } from '../generated/catalog.generated';
+import { siteHref } from './site';
 
 export const catalog = generatedCatalog;
 export const catalogJson = rawCatalogJson;
@@ -29,11 +30,15 @@ export interface CategoryView {
 }
 
 function ruleHref(rule: Rule): string {
-  return `/rules/${encodeURIComponent(rule.slug)}/`;
+  return siteHref(`/rules/${encodeURIComponent(rule.slug)}/`);
+}
+
+function categoryPath(value: string): string {
+  return `/rules/categories/${encodeURIComponent(value)}/`;
 }
 
 export function categoryHref(value: string): string {
-  return `/rules/categories/${encodeURIComponent(value)}/`;
+  return siteHref(categoryPath(value));
 }
 
 export const referenceCatalog: readonly CategoryView[] = catalog.categories
@@ -89,7 +94,7 @@ export function referenceSidebar() {
         ...referenceCatalog
           .map((value) => ({
             label: value.category.label,
-            link: categoryHref(value.category["category_id"]),
+            link: categoryPath(value.category["category_id"]),
             attrs: { 'data-sidebar-category': value.category["category_id"] },
           })),
       ],

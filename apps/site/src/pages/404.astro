@@ -1,4 +1,5 @@
 ---
+import { siteHref } from '../lib/site';
 import ReferencePage from '../components/ReferencePage.astro';
 import { catalog } from '../lib/catalog';
 ---
@@ -7,6 +8,6 @@ import { catalog } from '../lib/catalog';
   <div class="not-found">
     <h1>Page not found</h1>
     <p>That address does not match a page.</p>
-    <a class="primary-action" href="/rules/">Browse rules</a>
+    <a class="primary-action" href={siteHref("/rules/")}>Browse rules</a>
   </div>
 </ReferencePage>

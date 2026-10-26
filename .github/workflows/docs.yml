@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'apps/docs/**'
+      - 'apps/site/**'
       - 'src/repo_standards/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -44,7 +44,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           python ci_artifacts.py --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
-          --kind site --destination apps/docs/dist --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+          --kind site --destination apps/site/dist --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
       - name: Install uv
         if: steps.reuse.outputs.reused != 'true'
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
@@ -58,13 +58,13 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: apps/docs/package-lock.json
+          cache-dependency-path: apps/site/package-lock.json
       - name: Install locked toolchains
         if: steps.reuse.outputs.reused != 'true'
         run: bash .github/scripts/ci-workflow.sh dependencies
       - name: Verify native TypeScript compiler
         if: steps.reuse.outputs.reused != 'true'
-        run: test "$(npm --prefix apps/docs exec --offline -- tsc --version)" = 'Version 7.0.2'
+        run: bash .github/scripts/ci-workflow.sh compiler
       - name: Lint and build generated reference
         if: steps.reuse.outputs.reused != 'true'
         env:
@@ -73,13 +73,13 @@ jobs:
           bash .github/scripts/verify-reference.sh
       - name: Verify public site artifacts
         if: steps.reuse.outputs.reused != 'true'
-        run: uv run --frozen --no-dev --group artifacts python -m repo_standards.verify_release_artifacts --site apps/docs/dist
+        run: uv run --frozen --no-dev --group artifacts python -m repo_standards.verify_release_artifacts --site apps/site/dist
       - name: Upload immutable site
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: repo-standards-site
-          path: apps/docs/dist
+          path: apps/site/dist
           if-no-files-found: error
           retention-days: 1
 
@@ -93,10 +93,10 @@ jobs:
     timeout-minutes: 10
     environment:
       name: repo-standards-production
-      url: https://repo-standards.sarj.ai
+      url: https://engineering.sarj.ai/projects/repo-standards/
     defaults:
       run:
-        working-directory: apps/docs
+        working-directory: apps/site
     steps:
       - name: Harden the runner
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
@@ -116,7 +116,7 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: repo-standards-site
-          path: apps/docs/dist
+          path: apps/site/dist
       - name: Install locked deployment toolchain
         run: npm --prefix ../../.github/deploy ci --ignore-scripts --no-audit --no-fund
       - name: Verify production credentials
@@ -128,7 +128,9 @@ jobs:
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: ../../.github/deploy/node_modules/.bin/wrangler deploy --config wrangler.jsonc
+        run: |
+          ../../.github/deploy/node_modules/.bin/wrangler triggers deploy --config wrangler.jsonc
+          ../../.github/deploy/node_modules/.bin/wrangler deploy --config wrangler.jsonc
       - name: Verify deployed revision and catalog
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
