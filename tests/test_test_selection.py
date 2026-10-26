@@ -140,7 +140,7 @@ def test_native_pytest_filenames_are_included_once_in_full_and_changed_plans(
 
 
 def test_missing_required_documentation_contract_falls_back_to_full(repository: Path) -> None:
-    path = repository / "apps/docs/new.ts"
+    path = repository / "apps/site/new.ts"
     path.parent.mkdir(parents=True)
     path.write_text("changed\n")
     plan = select_tests(repository, base="HEAD")
@@ -263,7 +263,11 @@ def test_worker_startup_is_avoided_for_small_or_serial_plans(
     )
     calls: list[tuple[str, ...]] = []
 
-    def run(command: tuple[str, ...], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def run(
+        command: tuple[str, ...], *, cwd: Path, check: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert cwd.is_dir()
+        assert not check
         calls.append(command)
         return subprocess.CompletedProcess(command, 0)
 
@@ -322,14 +326,14 @@ def test_saved_plan_and_summary_preserve_test_failure(
 def test_delivery_helpers_select_contracts_and_fall_back_when_a_contract_is_missing(
     repository: Path, helper: str
 ) -> None:
-    for name in test_selection._TOOL_TESTS[helper]:  # ruff: ignore[private-member-access]  # pyright: ignore[reportPrivateUsage]
+    for name in test_selection._TOOL_TESTS[helper]:  # ruff: ignore[private-member-access]  # pyright: ignore[reportPrivateUsage] -- fixture installs the reviewed private cohort before deleting a required contract.
         (repository / name).write_text("pass\n")
     path = repository / helper
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("changed\n")
     plan = select_tests(repository, base="HEAD")
     assert plan.reason == "reviewed PR cohort"
-    assert set(test_selection._TOOL_TESTS[helper]).issubset(plan.tests)  # ruff: ignore[private-member-access]  # pyright: ignore[reportPrivateUsage]
+    assert set(test_selection._TOOL_TESTS[helper]).issubset(plan.tests)  # ruff: ignore[private-member-access]  # pyright: ignore[reportPrivateUsage] -- verify the selector includes its declared delivery cohort before testing fallback.
     (repository / "tests/test_distribution_fast_paths.py").unlink()
     fallback = select_tests(repository, base="HEAD")
     assert len(fallback.tests) == fallback.total_files
@@ -353,6 +357,6 @@ def test_missing_or_malformed_own_version_runs_full(repository: Path, version_li
         "-m",
         "version",
     )
-    project.write_text('[project]\nname="repo-standards"\n' + version_line)
+    project.write_text(f'[project]\nname="repo-standards"\n{version_line}')
     plan = select_tests(repository, base="HEAD")
     assert len(plan.tests) == plan.total_files

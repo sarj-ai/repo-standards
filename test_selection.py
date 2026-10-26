@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse  # ruff: ignore[banned-api] -- dependency-free developer and CI entry point.
 from dataclasses import asdict, dataclass
+import datetime as dt
 import json
 from pathlib import Path
 import re
@@ -12,6 +13,19 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import] -- fixed Git and
 import sys
 import time
 import tomllib
+
+
+type _TomlValue = (
+    bool
+    | dt.date
+    | dt.datetime
+    | dt.time
+    | float
+    | int
+    | str
+    | list[_TomlValue]
+    | dict[str, _TomlValue]
+)
 
 
 _PARALLEL_FILE_THRESHOLD = 8
@@ -85,11 +99,11 @@ def select_tests(root: Path, *, base: str = "") -> TestPlan:
         return full("deletion, rename or unsupported Git change")
     if not changes:
         return full("no changed files; full validation")
-    selected = set(_CONTRACTS)
+    selected: set[str] = set(_CONTRACTS)
     for path in changes:
         if path in all_tests and path not in _CONTRACTS:
             selected.add(path)
-        elif path.startswith(("apps/docs/", ".github/deploy/")):
+        elif path.startswith(("apps/site/", ".github/deploy/")):
             selected.update(_DOCS_TESTS)
         elif path in {"pyproject.toml", "uv.lock"} and _version_only(root, ancestor, path):
             selected.update(_VERSION_TESTS)
@@ -112,7 +126,7 @@ def discover_test_files(root: Path) -> tuple[str, ...]:
     )
 
 
-def _drop_version(record: dict[str, object]) -> dict[str, object]:
+def _drop_version(record: dict[str, _TomlValue]) -> dict[str, _TomlValue]:
     version = record.get("version")
     if not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
         message = "invalid stable release version"
@@ -120,8 +134,8 @@ def _drop_version(record: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in record.items() if key != "version"}
 
 
-def _without_version(source: str, path: str) -> object:
-    document = tomllib.loads(source)
+def _without_version(source: str, path: str) -> dict[str, _TomlValue]:
+    document: dict[str, _TomlValue] = tomllib.loads(source)
     if path == "pyproject.toml":
         project = document["project"]
         if not isinstance(project, dict) or project.get("name") != "repo-standards":
@@ -131,10 +145,7 @@ def _without_version(source: str, path: str) -> object:
             **document,
             "project": _drop_version(project),
         }
-    packages = document["package"]
-    if not isinstance(packages, list) or any(not isinstance(package, dict) for package in packages):
-        message = "invalid package records"
-        raise ValueError(message)
+    packages = _lock_packages(document["package"])
     owned = [
         package
         for package in packages
@@ -143,12 +154,23 @@ def _without_version(source: str, path: str) -> object:
     if len(owned) != 1:
         message = "missing or ambiguous editable package"
         raise ValueError(message)
-    return {
-        **document,
-        "package": [
-            _drop_version(package) if package is owned[0] else package for package in packages
-        ],
-    }
+    normalized_packages: list[_TomlValue] = [
+        _drop_version(package) if package is owned[0] else package for package in packages
+    ]
+    return {**document, "package": normalized_packages}
+
+
+def _lock_packages(value: _TomlValue) -> list[dict[str, _TomlValue]]:
+    if not isinstance(value, list):
+        message = "invalid package records"
+        raise TypeError(message)
+    packages: list[dict[str, _TomlValue]] = []
+    for package in value:
+        if not isinstance(package, dict):
+            message = "invalid package records"
+            raise TypeError(message)
+        packages.append(package)
+    return packages
 
 
 def _version_only(root: Path, ancestor: str, path: str) -> bool:

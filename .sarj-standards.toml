@@ -24,7 +24,7 @@ durable = [".github/**"]
 kotlin = "."
 python = "."
 swift = "."
-typescript = "apps/docs"
+typescript = "apps/site"
 
 [hooks]
 manager = "pre-commit"
