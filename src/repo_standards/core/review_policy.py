@@ -13,6 +13,7 @@ from .models import GitObjectId
 ZERO_REVIEW_BELOW_LINES = 200
 ONE_REVIEW_MAXIMUM_LINES = 800
 MIGRATION_REVIEW_FLOOR = 1
+ALLOWLISTED_BOT_APPROVAL_LIMIT = 1
 
 RequiredReviewCount = Literal[0, 1, 2]
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}\Z")
@@ -60,6 +61,7 @@ class ReviewPolicyReason(StrEnum):
     REVIEW_EVIDENCE_AMBIGUOUS = "review_evidence_ambiguous"
     STALE_APPROVAL = "stale_approval"
     APPROVAL_CARRIED_FORWARD = "approval_carried_forward"
+    ALLOWLISTED_BOT_APPROVAL_NOT_COUNTED = "allowlisted_bot_approval_not_counted"
     CHANGES_REQUESTED = "changes_requested"
     APPROVALS_MISSING = "approvals_missing"
     THREAD_EVIDENCE_MISSING = "thread_evidence_missing"
@@ -133,6 +135,7 @@ class HumanReviewEvidence:
     state: ReviewState
     commit_sha: GitObjectId | None
     since_review: SinceReviewEvidence | None = None
+    allowlisted_bot: bool = False
 
     def __post_init__(self) -> None:
         if not self.reviewer or self.reviewer != self.reviewer.strip():
@@ -152,6 +155,7 @@ class ReviewPolicyEvidence:
     required_checks: tuple[RequiredCheckEvidence, ...] | None
     latest_human_reviews: tuple[HumanReviewEvidence, ...] | None
     threads_resolved: bool | None
+    author_is_bot: bool = False
 
     def __post_init__(self) -> None:
         if type(self.counted_lines) is not int or self.counted_lines < 0:
@@ -177,6 +181,7 @@ class ReviewPolicyResult:
     merge_ready: bool
     reasons: tuple[ReviewPolicyReason, ...]
     carried_forward_reviewers: tuple[str, ...] = ()
+    allowlisted_bot_approvers: tuple[str, ...] = ()
 
 
 def evaluate_review_policy(
@@ -215,8 +220,7 @@ def evaluate_review_policy(
         )
     )
     review_assessment = _review_reasons(
-        evidence.latest_human_reviews,
-        expected_head=evidence.evaluated_head_sha,
+        evidence,
         required_reviews=required_reviews,
         head_matches=head_matches,
         config=config,
@@ -237,14 +241,16 @@ def evaluate_review_policy(
         ReviewPolicyReason.AUTHOR_REVIEW_FLOOR,
         ReviewPolicyReason.STALE_APPROVAL,
         ReviewPolicyReason.APPROVAL_CARRIED_FORWARD,
+        ReviewPolicyReason.ALLOWLISTED_BOT_APPROVAL_NOT_COUNTED,
     }
     return ReviewPolicyResult(
         required_human_reviews=required_reviews,
-        current_human_approvals=review_assessment.approvals,
+        current_human_approvals=review_assessment.human_approvals,
         touches_migration=touches_migration,
         merge_ready=not any(reason in blocking for reason in reasons),
         reasons=tuple(reasons),
         carried_forward_reviewers=review_assessment.carried_forward_reviewers,
+        allowlisted_bot_approvers=review_assessment.allowlisted_bot_approvers,
     )
 
 
@@ -315,43 +321,91 @@ def _check_reasons(
 @dataclass(frozen=True, slots=True)
 class _ReviewAssessment:
     reasons: tuple[ReviewPolicyReason, ...]
-    approvals: int
+    human_approvals: int
     carried_forward_reviewers: tuple[str, ...] = ()
+    allowlisted_bot_approvers: tuple[str, ...] = ()
 
 
 def _review_reasons(
-    reviews: tuple[HumanReviewEvidence, ...] | None,
+    evidence: ReviewPolicyEvidence,
     *,
-    expected_head: GitObjectId,
     required_reviews: RequiredReviewCount,
     head_matches: bool,
     config: ReviewPolicyConfig,
 ) -> _ReviewAssessment:
+    reviews = evidence.latest_human_reviews
     if reviews is None:
         return _ReviewAssessment((ReviewPolicyReason.REVIEW_EVIDENCE_MISSING,), 0)
     reviewers = tuple(review.reviewer.casefold() for review in reviews)
     if len(reviewers) != len(set(reviewers)):
         return _ReviewAssessment((ReviewPolicyReason.REVIEW_EVIDENCE_AMBIGUOUS,), 0)
 
+    approvals = _current_approvals(
+        reviews,
+        expected_head=evidence.evaluated_head_sha,
+        head_matches=head_matches,
+        config=config,
+    )
+    bot_approvals = sum(review.allowlisted_bot for review in approvals.current)
+    human_approvals = len(approvals.current) - bot_approvals
+    counted_bot_approvers = _counted_allowlisted_bot_approvers(
+        approvals.current, author_is_bot=evidence.author_is_bot
+    )
+    reasons: list[ReviewPolicyReason] = []
+    if approvals.stale:
+        reasons.append(ReviewPolicyReason.STALE_APPROVAL)
+    if approvals.carried:
+        reasons.append(ReviewPolicyReason.APPROVAL_CARRIED_FORWARD)
+    if len(counted_bot_approvers) < bot_approvals:
+        reasons.append(ReviewPolicyReason.ALLOWLISTED_BOT_APPROVAL_NOT_COUNTED)
+    if any(review.state is ReviewState.CHANGES_REQUESTED for review in reviews):
+        reasons.append(ReviewPolicyReason.CHANGES_REQUESTED)
+    if human_approvals + len(counted_bot_approvers) < required_reviews:
+        reasons.append(ReviewPolicyReason.APPROVALS_MISSING)
+    return _ReviewAssessment(
+        tuple(reasons),
+        human_approvals,
+        tuple(review.reviewer for review in approvals.carried),
+        counted_bot_approvers,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _CurrentApprovals:
+    current: tuple[HumanReviewEvidence, ...]
+    carried: tuple[HumanReviewEvidence, ...]
+    stale: bool
+
+
+def _current_approvals(
+    reviews: tuple[HumanReviewEvidence, ...],
+    *,
+    expected_head: GitObjectId,
+    head_matches: bool,
+    config: ReviewPolicyConfig,
+) -> _CurrentApprovals:
     approved = tuple(review for review in reviews if review.state is ReviewState.APPROVED)
-    exact = sum(review.commit_sha == expected_head and head_matches for review in approved)
+    exact = tuple(
+        review for review in approved if head_matches and review.commit_sha == expected_head
+    )
     earlier = tuple(review for review in approved if review.commit_sha != expected_head)
     carried = tuple(
-        review.reviewer
+        review
         for review in earlier
         if head_matches and _carries_forward(review.since_review, config=config)
     )
-    approvals = exact + len(carried)
-    reasons: list[ReviewPolicyReason] = []
-    if len(carried) < len(earlier):
-        reasons.append(ReviewPolicyReason.STALE_APPROVAL)
-    if carried:
-        reasons.append(ReviewPolicyReason.APPROVAL_CARRIED_FORWARD)
-    if any(review.state is ReviewState.CHANGES_REQUESTED for review in reviews):
-        reasons.append(ReviewPolicyReason.CHANGES_REQUESTED)
-    if approvals < required_reviews:
-        reasons.append(ReviewPolicyReason.APPROVALS_MISSING)
-    return _ReviewAssessment(tuple(reasons), approvals, carried)
+    return _CurrentApprovals(exact + carried, carried, stale=len(carried) < len(earlier))
+
+
+def _counted_allowlisted_bot_approvers(
+    current: tuple[HumanReviewEvidence, ...],
+    *,
+    author_is_bot: bool,
+) -> tuple[str, ...]:
+    if author_is_bot:
+        return ()
+    approvers = tuple(review.reviewer for review in current if review.allowlisted_bot)
+    return approvers[:ALLOWLISTED_BOT_APPROVAL_LIMIT]
 
 
 def _carries_forward(

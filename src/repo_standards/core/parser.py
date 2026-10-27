@@ -77,7 +77,7 @@ def _mapping(value: object, context: str) -> dict[str, object]:
         ConfigurationError.fail(f"{context} must be a table/object")
     return {
         key: item
-        for key, item in value.items()  # pyright: ignore[reportUnknownVariableType]
+        for key, item in value.items()  # pyright: ignore[reportUnknownVariableType] -- isinstance(dict) cannot type parsed TOML keys and values
         if isinstance(key, str)
     }
 
@@ -87,7 +87,7 @@ def _list(value: object, context: str) -> list[object]:
         ConfigurationError.fail(f"{context} must be an array")
     return [  # ruff: ignore[unnecessary-comprehension] - narrows untyped JSON/TOML arrays
         item
-        for item in value  # pyright: ignore[reportUnknownVariableType]
+        for item in value  # pyright: ignore[reportUnknownVariableType] -- isinstance(list) cannot type parsed TOML items
     ]
 
 
@@ -368,6 +368,7 @@ def parse_pull_request_review_policy(
         "transition_exemptions",
         "transition_actors",
         "trusted_bot_authors",
+        "allowlisted_bot_reviewers",
         "accepted_check_conclusions",
         "require_resolved_threads",
     }
@@ -462,7 +463,10 @@ def parse_pull_request_review_policy(
             context=context,
             transition_exemptions=transition_exemptions,
         ),
-        trusted_bot_authors=_review_policy_trusted_bot_authors(data, context=context),
+        trusted_bot_authors=_github_app_logins(data, "trusted_bot_authors", context=context),
+        allowlisted_bot_reviewers=_github_app_logins(
+            data, "allowlisted_bot_reviewers", context=context
+        ),
         accepted_check_conclusions=accepted_check_conclusions,
         require_resolved_threads=_boolean(data, "require_resolved_threads", context, default=True),
     )
@@ -494,15 +498,15 @@ def _github_logins(data: dict[str, object], key: str, *, context: str) -> tuple[
     return logins
 
 
-def _review_policy_trusted_bot_authors(data: dict[str, object], *, context: str) -> tuple[str, ...]:
-    authors = _github_logins(data, "trusted_bot_authors", context=context)
+def _github_app_logins(data: dict[str, object], key: str, *, context: str) -> tuple[str, ...]:
+    logins = _github_logins(data, key, context=context)
     if any(
-        not author.casefold().endswith(_GITHUB_APP_LOGIN_SUFFIX)
-        or len(author) == len(_GITHUB_APP_LOGIN_SUFFIX)
-        for author in authors
+        not login.casefold().endswith(_GITHUB_APP_LOGIN_SUFFIX)
+        or len(login) == len(_GITHUB_APP_LOGIN_SUFFIX)
+        for login in logins
     ):
-        ConfigurationError.fail(f"{context}.trusted_bot_authors must contain GitHub App bot logins")
-    return authors
+        ConfigurationError.fail(f"{context}.{key} must contain GitHub App bot logins")
+    return logins
 
 
 def _review_policy_transition_actors(

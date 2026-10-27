@@ -137,6 +137,7 @@ class PullRequestReviewPolicyConfig:
     transition_exemptions: tuple[str, ...] = ()
     transition_actors: tuple[str, ...] = ()
     trusted_bot_authors: tuple[str, ...] = ()
+    allowlisted_bot_reviewers: tuple[str, ...] = ()
     accepted_check_conclusions: tuple[str, ...] = ("success",)
     require_resolved_threads: bool = True
 

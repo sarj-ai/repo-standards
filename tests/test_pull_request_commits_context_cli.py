@@ -189,9 +189,7 @@ def test_github_event_observe_mode_reports_without_blocking(tmp_path: Path) -> N
     _git(tmp_path, "init", "--quiet", "--initial-branch=dev")
     policy = tmp_path / ".repo-standards"
     policy.mkdir()
-    (policy / "repository.toml").write_text(
-        _manifest(enforcement="observe"), encoding="utf-8"
-    )
+    (policy / "repository.toml").write_text(_manifest(enforcement="observe"), encoding="utf-8")
     (tmp_path / "change.txt").write_text("base\n", encoding="utf-8")
     base = _commit(tmp_path, "chore: configure policy")
     (tmp_path / "change.txt").write_text("change\n", encoding="utf-8")

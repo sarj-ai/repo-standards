@@ -195,6 +195,7 @@ def _review_policy_fixture(
     *,
     require_resolved_threads: bool = True,
     trusted_bot_authors: tuple[str, ...] = (),
+    allowlisted_bot_reviewers: tuple[str, ...] = (),
 ) -> str:
     _git(repository, "init", "--quiet")
     policy = repository / ".repo-standards"
@@ -224,7 +225,8 @@ transition_exemptions = ["promote"]
 transition_actors = ["release-automation[bot]"]
 """.lstrip()
         + f"require_resolved_threads = {str(require_resolved_threads).lower()}\n"
-        + f"trusted_bot_authors = {json.dumps(list(trusted_bot_authors))}\n",
+        + f"trusted_bot_authors = {json.dumps(list(trusted_bot_authors))}\n"
+        + f"allowlisted_bot_reviewers = {json.dumps(list(allowlisted_bot_reviewers))}\n",
         encoding="utf-8",
     )
     (repository / "README.md").write_text("base\n", encoding="utf-8")
@@ -533,6 +535,7 @@ def test_pull_request_review_policy_carries_approval_across_rebase(
             "commit_sha": rebased.reviewed,
             "counted_lines_since_review": edit_lines,
             "carried_forward": carried_forward,
+            "allowlisted_bot": False,
         }
     ]
 
@@ -738,7 +741,7 @@ def _approvals(head: str, count: int) -> list[dict[str, object]]:
         pytest.param(900, 2, 0, 2, ["two_review_threshold"], id="two-review-tier-passes"),
     ],
 )
-def test_review_policy_trusted_bot_author_always_needs_human_approval(  # ruff: ignore[too-many-arguments] - one decision-table row per tier
+def test_review_policy_allowlisted_bot_author_always_needs_human_approval(  # ruff: ignore[too-many-arguments] - one decision-table row per tier
     tmp_path: Path,
     *,
     changed_lines: int,
@@ -824,7 +827,7 @@ def test_review_policy_ignores_trusted_bot_authors_added_by_the_pull_request(
     assert run.summary["reasons"] == ["one_review_threshold", "bot_authored_pull_request"]
 
 
-def test_review_policy_trusted_bot_promotion_keeps_its_transition_exemption(
+def test_review_policy_allowlisted_bot_promotion_keeps_its_transition_exemption(
     tmp_path: Path,
 ) -> None:
     base = _review_policy_fixture(tmp_path, trusted_bot_authors=("release-automation[bot]",))
@@ -838,6 +841,114 @@ def test_review_policy_trusted_bot_promotion_keeps_its_transition_exemption(
     assert run.exit_code == 0
     assert run.summary["transition_exemption"] == "promote"
     assert run.summary["tier"] == 0
+
+
+ALLOWLISTED_BOT_REVIEWER = "348999126:bulbul-review[bot]"
+
+
+def _bot_approval(head: str, reviewer: str = ALLOWLISTED_BOT_REVIEWER) -> dict[str, object]:
+    return {"reviewer": reviewer, "state": "approved", "commit_sha": head, "reviewer_is_bot": True}
+
+
+def test_review_policy_counts_a_listed_bot_approval_apart_from_humans(tmp_path: Path) -> None:
+    base = _review_policy_fixture(tmp_path, allowlisted_bot_reviewers=("Bulbul-Review[bot]",))
+    (tmp_path / "fix.py").write_text("value = 1\n" * 300, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(tmp_path, head=head, reviews=[_bot_approval(head)])
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = _json_object(result.stdout)
+    assert _object(payload["policy"])["allowlisted_bot_reviewers"] == ["Bulbul-Review[bot]"]
+    summary = _object(payload["summary"])
+    assert summary["current_human_approvals"] == 0
+    assert summary["current_allowlisted_bot_approvals"] == 1
+    assert summary["allowlisted_bot_approvers"] == [ALLOWLISTED_BOT_REVIEWER]
+    counts = _object(payload["counts"])
+    assert (counts["human_reviews"], counts["allowlisted_bot_reviews"]) == (0, 1)
+
+
+def test_review_policy_ignores_a_listed_bot_approval_on_a_bot_authored_pull_request(
+    tmp_path: Path,
+) -> None:
+    base = _review_policy_fixture(
+        tmp_path,
+        trusted_bot_authors=("sarj-bulbul[bot]",),
+        allowlisted_bot_reviewers=("bulbul-review[bot]",),
+    )
+    (tmp_path / "fix.py").write_text("value = 1\n" * 300, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        reviews=[_bot_approval(head)],
+        author_is_bot=True,
+        author_login="sarj-bulbul[bot]",
+    )
+
+    run = _invoke_review_policy(tmp_path, base=base, head=head, evidence=evidence)
+
+    assert run.exit_code == 1
+    assert run.summary["current_allowlisted_bot_approvals"] == 0
+    assert run.summary["reasons"] == [
+        "one_review_threshold",
+        "allowlisted_bot_approval_not_counted",
+        "approvals_missing",
+    ]
+
+
+@pytest.mark.parametrize(
+    "reviewer", ["30:other-bot[bot]", "31:evil-bulbul-review[bot]", "32:bulbul-review"]
+)
+def test_review_policy_rejects_bot_review_evidence_from_unlisted_reviewers(
+    tmp_path: Path,
+    reviewer: str,
+) -> None:
+    base = _review_policy_fixture(tmp_path, allowlisted_bot_reviewers=("bulbul-review[bot]",))
+    (tmp_path / "fix.py").write_text("value = 1\n" * 300, encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path, head=head, reviews=[_bot_approval(head, reviewer=reviewer)]
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 2
+    payload = _json_object(result.stdout)
+    assert payload["completion"] == "incomplete"
+    assert "allowlisted_bot_reviewers" in str(
+        _object_list(payload["execution_issues"])[0]["message"]
+    )
 
 
 def test_pull_request_review_policy_reports_missing_body_sections(tmp_path: Path) -> None:

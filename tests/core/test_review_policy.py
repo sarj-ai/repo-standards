@@ -12,6 +12,7 @@ from repo_standards.pull_request import (
     ReviewPolicyConfig,
     ReviewPolicyEvidence,
     ReviewPolicyReason,
+    ReviewPolicyResult,
     ReviewState,
     SinceReviewEvidence,
     evaluate_review_policy,
@@ -39,6 +40,7 @@ def _evidence(  # ruff: ignore[too-many-arguments] - evidence dimensions are ind
     required_checks: tuple[RequiredCheckEvidence, ...] | None = PASSING_CHECKS,
     latest_human_reviews: tuple[HumanReviewEvidence, ...] | None = (),
     threads_resolved: bool | None = True,
+    author_is_bot: bool = False,
 ) -> ReviewPolicyEvidence:
     return ReviewPolicyEvidence(
         counted_lines=counted_lines,
@@ -48,6 +50,7 @@ def _evidence(  # ruff: ignore[too-many-arguments] - evidence dimensions are ind
         required_checks=required_checks,
         latest_human_reviews=latest_human_reviews,
         threads_resolved=threads_resolved,
+        author_is_bot=author_is_bot,
     )
 
 
@@ -92,19 +95,29 @@ def _approval(
     *,
     commit_sha: GitObjectId | None = HEAD,
     since_review: SinceReviewEvidence | None = None,
+    allowlisted_bot: bool = False,
 ) -> HumanReviewEvidence:
-    return HumanReviewEvidence(reviewer, ReviewState.APPROVED, commit_sha, since_review)
+    return HumanReviewEvidence(
+        reviewer, ReviewState.APPROVED, commit_sha, since_review, allowlisted_bot=allowlisted_bot
+    )
+
+
+def _bot_approval(reviewer: str = "bulbul-review[bot]") -> HumanReviewEvidence:
+    return _approval(reviewer, allowlisted_bot=True)
 
 
 def _earlier_approval(
     lines: int,
     paths: tuple[str, ...] = ("README.md",),
     reviewer: str = "reviewer",
+    *,
+    allowlisted_bot: bool = False,
 ) -> HumanReviewEvidence:
     return _approval(
         reviewer,
         commit_sha=OTHER_HEAD,
         since_review=SinceReviewEvidence(counted_lines=lines, changed_paths=paths),
+        allowlisted_bot=allowlisted_bot,
     )
 
 
@@ -397,6 +410,85 @@ def test_insufficient_exact_head_approvals_fail_closed() -> None:
     assert ReviewPolicyReason.APPROVALS_MISSING in result.reasons
 
 
+def test_allowlisted_bot_approval_meets_one_review_tier() -> None:
+    result = evaluate_review_policy(
+        _evidence(counted_lines=500, latest_human_reviews=(_bot_approval(),))
+    )
+
+    assert result.merge_ready
+    assert result.current_human_approvals == 0
+    assert result.allowlisted_bot_approvers == ("bulbul-review[bot]",)
+
+
+def test_allowlisted_bot_approval_never_counts_on_bot_authored_pull_request() -> None:
+    result = evaluate_review_policy(
+        _evidence(counted_lines=500, latest_human_reviews=(_bot_approval(),), author_is_bot=True)
+    )
+
+    assert not result.merge_ready
+    assert result.allowlisted_bot_approvers == ()
+    assert ReviewPolicyReason.ALLOWLISTED_BOT_APPROVAL_NOT_COUNTED in result.reasons
+    assert ReviewPolicyReason.APPROVALS_MISSING in result.reasons
+
+
+def test_only_one_allowlisted_bot_approval_counts() -> None:
+    reviews = (_bot_approval("first[bot]"), _bot_approval("second[bot]"))
+
+    result = evaluate_review_policy(_evidence(counted_lines=801, latest_human_reviews=reviews))
+
+    assert not result.merge_ready
+    assert result.allowlisted_bot_approvers == ("first[bot]",)
+    assert ReviewPolicyReason.ALLOWLISTED_BOT_APPROVAL_NOT_COUNTED in result.reasons
+    assert ReviewPolicyReason.APPROVALS_MISSING in result.reasons
+
+
+@pytest.mark.parametrize(("human_approvals", "merge_ready"), [(0, False), (1, True)])
+def test_two_review_tier_needs_a_human_beside_a_allowlisted_bot(
+    *, human_approvals: int, merge_ready: bool
+) -> None:
+    reviews = (_bot_approval(), *(_approval(f"human-{index}") for index in range(human_approvals)))
+
+    result = evaluate_review_policy(_evidence(counted_lines=801, latest_human_reviews=reviews))
+
+    assert result.required_human_reviews == 2
+    assert result.merge_ready is merge_ready
+    assert result.current_human_approvals == human_approvals
+    assert result.allowlisted_bot_approvers == ("bulbul-review[bot]",)
+    assert (ReviewPolicyReason.APPROVALS_MISSING in result.reasons) is not merge_ready
+
+
+@pytest.mark.parametrize(("lines_since_review", "approvals"), [(5, 1), (801, 0)])
+def test_earlier_allowlisted_bot_approval_follows_human_carry_forward_rules(
+    *, lines_since_review: int, approvals: int
+) -> None:
+    def evaluate(*, allowlisted_bot: bool) -> ReviewPolicyResult:
+        review = _earlier_approval(lines_since_review, allowlisted_bot=allowlisted_bot)
+        return evaluate_review_policy(_evidence(counted_lines=500, latest_human_reviews=(review,)))
+
+    human = evaluate(allowlisted_bot=False)
+    bot = evaluate(allowlisted_bot=True)
+
+    assert bot.reasons == human.reasons
+    assert bot.merge_ready is human.merge_ready is (approvals == 1)
+    assert bot.carried_forward_reviewers == human.carried_forward_reviewers
+    assert human.current_human_approvals == len(bot.allowlisted_bot_approvers) == approvals
+    assert bot.current_human_approvals == 0
+
+
+def test_allowlisted_bot_change_request_blocks_like_a_human_one() -> None:
+    reviews = (
+        _approval("human"),
+        HumanReviewEvidence(
+            "bulbul-review[bot]", ReviewState.CHANGES_REQUESTED, HEAD, allowlisted_bot=True
+        ),
+    )
+
+    result = evaluate_review_policy(_evidence(counted_lines=500, latest_human_reviews=reviews))
+
+    assert not result.merge_ready
+    assert ReviewPolicyReason.CHANGES_REQUESTED in result.reasons
+
+
 @pytest.mark.parametrize(
     ("current_head", "reason"),
     [
@@ -484,9 +576,9 @@ def test_evidence_and_result_are_frozen() -> None:
     result = evaluate_review_policy(evidence)
 
     with pytest.raises(FrozenInstanceError):
-        evidence.counted_lines = 1  # pyright: ignore[reportAttributeAccessIssue]
+        evidence.counted_lines = 1  # pyright: ignore[reportAttributeAccessIssue] -- exercise runtime refusal to mutate frozen evidence.
     with pytest.raises(FrozenInstanceError):
-        result.merge_ready = False  # pyright: ignore[reportAttributeAccessIssue]
+        result.merge_ready = False  # pyright: ignore[reportAttributeAccessIssue] -- exercise runtime refusal to mutate a frozen result.
 
 
 def test_invalid_scalar_and_path_inputs_are_rejected() -> None:

@@ -241,6 +241,7 @@ def test_manifest_parses_review_policy() -> None:
     assert policy.transition_exemptions == ("dev-preview",)
     assert policy.transition_actors == ("release-automation[bot]",)
     assert policy.trusted_bot_authors == ()
+    assert policy.allowlisted_bot_reviewers == ()
     assert policy.accepted_check_conclusions == ("success",)
 
 
@@ -254,6 +255,18 @@ def test_review_policy_parses_trusted_bot_authors() -> None:
     assert manifest.pull_request is not None
     assert manifest.pull_request.review_policy is not None
     assert manifest.pull_request.review_policy.trusted_bot_authors == ("sarj-bulbul[bot]",)
+
+
+def test_review_policy_parses_allowlisted_bot_reviewers() -> None:
+    manifest = parse_manifest_bytes(
+        _manifest_with_review_policy(
+            review_policy=_REVIEW_POLICY + b'allowlisted_bot_reviewers = ["bulbul-review[bot]"]\n'
+        )
+    )
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.review_policy is not None
+    assert manifest.pull_request.review_policy.allowlisted_bot_reviewers == ("bulbul-review[bot]",)
 
 
 def test_review_policy_defaults_to_successful_checks() -> None:
@@ -393,6 +406,29 @@ advisory_base_ref = "dev"
             b'accepted_check_conclusions = ["success"]',
             b'accepted_check_conclusions = ["success"]\ntrusted_bot_authors = ["a[bot]", "A[bot]"]',
             "trusted_bot_authors must contain unique GitHub logins",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            b'accepted_check_conclusions = ["success"]\nallowlisted_bot_reviewers = "x[bot]"',
+            "allowlisted_bot_reviewers must be an array",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            (
+                b'accepted_check_conclusions = ["success"]\n'
+                b'allowlisted_bot_reviewers = ["bulbul-review"]'
+            ),
+            "allowlisted_bot_reviewers must contain GitHub App bot logins",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            b'accepted_check_conclusions = ["success"]\nallowlisted_bot_reviewers = ["[bot]"]',
+            "allowlisted_bot_reviewers must contain GitHub App bot logins",
+        ),
+        (
+            b'accepted_check_conclusions = ["success"]',
+            b'allowlisted_bot_reviewers = ["a[bot]", "A[bot]"]',
+            "allowlisted_bot_reviewers must contain unique GitHub logins",
         ),
         (
             b'accepted_check_conclusions = ["success"]',

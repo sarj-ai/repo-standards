@@ -188,6 +188,7 @@ class _ReviewPolicyReviewInput(BaseModel):
     reviewer: str = Field(min_length=1, max_length=256)
     state: ReviewState
     commit_sha: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    reviewer_is_bot: bool = False
 
 
 BaseRepositoryId = NewType("BaseRepositoryId", int)
@@ -666,6 +667,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         configured = trusted_policy.config
         provider = _load_review_policy_evidence(evidence)
         _require_complete_review_policy_evidence(provider)
+        _require_allowlisted_bot_reviews(provider, configured)
         if provider.evaluated_head_sha != head:
             ConfigurationError.fail(
                 "evidence evaluated_head_sha must equal the exact --head commit SHA"
@@ -714,6 +716,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                     head=head,
                     generated_attribute=generated_attribute,
                 ),
+                allowlisted_bot=item.reviewer_is_bot,
             )
             for item in provider.latest_human_reviews
         )
@@ -729,13 +732,14 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                 ),
                 latest_human_reviews=reviews,
                 threads_resolved=provider.threads_resolved,
+                author_is_bot=provider.author_is_bot,
             ),
             ReviewPolicyConfig(
                 zero_review_below_lines=configured.zero_review_below_counted_lines,
                 one_review_maximum_lines=configured.two_reviews_above_counted_lines,
                 migration_roots=configured.migration_roots,
                 author_review_floor=1
-                if transition_exemption is None and _is_trusted_bot_author(provider, configured)
+                if transition_exemption is None and _is_allowlisted_bot_author(provider, configured)
                 else 0,
                 accepted_check_conclusions=frozenset(
                     CheckConclusion(item) for item in configured.accepted_check_conclusions
@@ -825,6 +829,21 @@ def _require_complete_review_policy_evidence(provider: _ReviewPolicyEvidenceInpu
         ConfigurationError.fail(f"provider evidence is incomplete for: {', '.join(incomplete)}")
 
 
+def _require_allowlisted_bot_reviews(
+    provider: _ReviewPolicyEvidenceInput,
+    configured: PullRequestReviewPolicyConfig,
+) -> None:
+    trusted = {login.casefold() for login in configured.allowlisted_bot_reviewers}
+    if any(
+        item.reviewer_is_bot and item.reviewer.rpartition(":")[2].casefold() not in trusted
+        for item in provider.latest_human_reviews
+    ):
+        ConfigurationError.fail(
+            "bot review evidence must come from "
+            "pull_request.review_policy.allowlisted_bot_reviewers"
+        )
+
+
 def _matching_review_policy_transition(
     *,
     root: Path,
@@ -863,7 +882,7 @@ def _matching_review_policy_transition(
     )
 
 
-def _is_trusted_bot_author(
+def _is_allowlisted_bot_author(
     provider: _ReviewPolicyEvidenceInput,
     configured: PullRequestReviewPolicyConfig,
 ) -> bool:
@@ -888,7 +907,7 @@ def _review_policy_merge_ready(
         and (
             not provider.author_is_bot
             or transition_exemption is not None
-            or _is_trusted_bot_author(provider, configured)
+            or _is_allowlisted_bot_author(provider, configured)
         )
         and provider.head_repository_id == provider.base_repository_id
         and all(check.head_sha == provider.evaluated_head_sha for check in provider.required_checks)
@@ -943,12 +962,15 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             "transition_exemptions": list(configured.transition_exemptions),
             "transition_actors": list(configured.transition_actors),
             "trusted_bot_authors": list(configured.trusted_bot_authors),
+            "allowlisted_bot_reviewers": list(configured.allowlisted_bot_reviewers),
         },
         "summary": {
             "merge_ready": merge_ready,
             "tier": result.required_human_reviews,
             "required_human_reviews": result.required_human_reviews,
             "current_human_approvals": result.current_human_approvals,
+            "current_allowlisted_bot_approvals": len(result.allowlisted_bot_approvers),
+            "allowlisted_bot_approvers": list(result.allowlisted_bot_approvers),
             "touches_migration": result.touches_migration,
             "transition_exemption": transition_exemption,
             "missing_body_sections": list(missing_sections),
@@ -960,7 +982,8 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             "excluded_files": summary.excluded_files if summary is not None else None,
             "binary_files": summary.binary_files if summary is not None else None,
             "required_checks": len(configured.required_checks),
-            "human_reviews": len(provider.latest_human_reviews),
+            "human_reviews": sum(not review.allowlisted_bot for review in reviews),
+            "allowlisted_bot_reviews": sum(review.allowlisted_bot for review in reviews),
         },
         "earlier_approvals": [
             {
@@ -970,6 +993,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
                     review.since_review.counted_lines if review.since_review is not None else None
                 ),
                 "carried_forward": review.reviewer in result.carried_forward_reviewers,
+                "allowlisted_bot": review.allowlisted_bot,
             }
             for review in reviews
             if review.state is ReviewState.APPROVED
@@ -1035,7 +1059,7 @@ def _review_policy_receipt_reasons(
     if (
         provider.author_is_bot
         and transition_exemption is None
-        and not _is_trusted_bot_author(provider, configured)
+        and not _is_allowlisted_bot_author(provider, configured)
     ):
         reasons.append("bot_authored_pull_request")
     if provider.head_repository_id != provider.base_repository_id:

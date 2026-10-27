@@ -24,6 +24,7 @@ from repo_standards.github_review_policy import (
     GitHubUserId,
     PullRequestSnapshot,
     ReconciliationError,
+    allowlisted_bot_reviewer_logins,
     check_conclusion,
     collect_required_checks,
     eligible_reviewer_ids,
@@ -325,6 +326,40 @@ def test_required_checks_come_from_trusted_manifest() -> None:
     assert required_check_names(manifest) == ("lint", "test")
 
 
+@pytest.mark.parametrize(
+    ("policy", "expected"),
+    [
+        pytest.param({}, frozenset[str](), id="absent-key-trusts-no-bot"),
+        pytest.param(
+            {"allowlisted_bot_reviewers": ["Bulbul-Review[bot]"]},
+            frozenset({"bulbul-review[bot]"}),
+            id="listed-login-is-casefolded",
+        ),
+    ],
+)
+def test_allowlisted_bot_reviewers_come_from_trusted_manifest(
+    policy: dict[str, object], expected: frozenset[str]
+) -> None:
+    manifest = {"pull_request": {"review_policy": policy}}
+
+    assert allowlisted_bot_reviewer_logins(manifest) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("bulbul-review[bot]", id="string-not-array"),
+        pytest.param(["bulbul-review"], id="login-without-bot-suffix"),
+        pytest.param([7], id="non-string-entry"),
+    ],
+)
+def test_allowlisted_bot_reviewers_reject_non_bot_entries(value: object) -> None:
+    manifest = {"pull_request": {"review_policy": {"allowlisted_bot_reviewers": value}}}
+
+    with pytest.raises(ReconciliationError, match="allowlisted_bot_reviewers"):
+        allowlisted_bot_reviewer_logins(manifest)
+
+
 def test_rest_pagination_collects_every_page() -> None:
     calls: list[str] = []
 
@@ -501,6 +536,7 @@ def test_latest_reviews_exclude_author_and_bots_and_keep_latest_decisive() -> No
             "reviewer": "20:reviewer",
             "state": "changes_requested",
             "commit_sha": head,
+            "reviewer_is_bot": False,
         },
     )
 
@@ -558,6 +594,78 @@ def test_reviewer_requires_resolved_write_permission() -> None:
     client = _RequestFixture(request)
 
     assert eligible_reviewer_ids(client, reviews, author_id=10) == frozenset({20})
+
+
+ALLOWLISTED_BOT_REVIEWERS = frozenset({"bulbul-review[bot]"})
+
+
+def _bot_review(user_id: int, login: str, *, user_type: str = "Bot") -> dict[str, object]:
+    return {
+        "id": user_id,
+        "user": {"id": user_id, "login": login, "type": user_type},
+        "state": "APPROVED",
+        "submitted_at": "2026-01-01T00:00:00Z",
+        "commit_id": "a" * 40,
+    }
+
+
+def _no_permission_lookup(method: str, path: str) -> object:
+    pytest.fail(f"unexpected permission lookup: {method} {path}")
+
+
+def test_listed_bot_reviewer_is_eligible_without_a_collaborator_permission() -> None:
+    reviews = [
+        _bot_review(348999126, "Bulbul-Review[bot]"),
+        _bot_review(30, "other-bot[bot]"),
+        _bot_review(31, "evil-bulbul-review[bot]"),
+    ]
+
+    eligible = eligible_reviewer_ids(
+        _RequestFixture(_no_permission_lookup),
+        reviews,
+        author_id=10,
+        allowlisted_bot_reviewers=ALLOWLISTED_BOT_REVIEWERS,
+    )
+
+    assert eligible == frozenset({348999126})
+
+
+@pytest.mark.parametrize(
+    ("user_type", "author_id"), [("User", 10), ("Organization", 10), ("Bot", 348999126)]
+)
+def test_listed_bot_login_needs_bot_type_and_must_not_be_the_author(
+    user_type: str, author_id: int
+) -> None:
+    reviews = [_bot_review(348999126, "bulbul-review[bot]", user_type=user_type)]
+
+    eligible = eligible_reviewer_ids(
+        _RequestFixture(_no_permission_lookup),
+        reviews,
+        author_id=author_id,
+        allowlisted_bot_reviewers=ALLOWLISTED_BOT_REVIEWERS,
+    )
+
+    assert eligible == frozenset()
+
+
+def test_latest_reviews_mark_listed_bot_and_drop_unlisted_bots() -> None:
+    reviews = [_bot_review(348999126, "bulbul-review[bot]"), _bot_review(30, "other-bot[bot]")]
+
+    latest = latest_human_reviews(
+        reviews,
+        author_id=10,
+        eligible_ids=frozenset({348999126, 30}),
+        allowlisted_bot_reviewers=ALLOWLISTED_BOT_REVIEWERS,
+    )
+
+    assert latest == (
+        {
+            "reviewer": "348999126:bulbul-review[bot]",
+            "state": "approved",
+            "commit_sha": "a" * 40,
+            "reviewer_is_bot": True,
+        },
+    )
 
 
 def test_complete_evidence_fingerprint_detects_body_drift() -> None:
@@ -857,6 +965,56 @@ def _receipt(earlier_approvals: list[dict[str, object]]) -> dict[str, object]:
         "provenance": {"evaluated_head": "a" * 40},
         "earlier_approvals": earlier_approvals,
     }
+
+
+def test_comment_names_allowlisted_bot_approvals_apart_from_human_ones() -> None:
+    receipt = _receipt(
+        [
+            {
+                "reviewer": "348999126:bulbul-review[bot]",
+                "commit_sha": "b" * 40,
+                "counted_lines_since_review": 900,
+                "carried_forward": False,
+                "allowlisted_bot": True,
+            }
+        ]
+    )
+    receipt["summary"] = {
+        "tier": 2,
+        "current_human_approvals": 1,
+        "current_allowlisted_bot_approvals": 1,
+        "allowlisted_bot_approvers": ["348999126:bulbul-review[bot]"],
+        "reasons": [],
+    }
+
+    comment = render_comment(
+        receipt,
+        final_passed=True,
+        lane_enabled=False,
+        operational_reason=None,
+        unavailable={},
+    )
+
+    assert (
+        "- Approvals: **1** current human approval(s), "
+        "**1** allowlisted bot approval(s) (`bulbul-review[bot]`)\n"
+    ) in comment
+    assert (
+        f"- Earlier allowlisted bot approval by @bulbul-review[bot] on `{'b' * 12}`: "
+        "900 counted lines since, **needs re-approval**\n"
+    ) in comment
+
+
+def test_comment_without_allowlisted_bot_approvals_keeps_the_human_count_line() -> None:
+    comment = render_comment(
+        _receipt([]),
+        final_passed=True,
+        lane_enabled=False,
+        operational_reason=None,
+        unavailable={},
+    )
+
+    assert "- Approvals: **1** current human approval(s)\n" in comment
 
 
 def test_comment_explains_each_earlier_approval() -> None:

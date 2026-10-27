@@ -38,6 +38,7 @@ _MERGE_GROUP_REF = re.compile(
 )
 GitHubUserId = NewType("GitHubUserId", int)
 GitHubRepositoryId = NewType("GitHubRepositoryId", int)
+type ReviewEvidence = dict[str, str | bool | None]
 
 
 class MergeGroupPullRequest(NamedTuple):
@@ -100,7 +101,7 @@ class CollectedEvidence:
     snapshot: PullRequestSnapshot
     checks: tuple[dict[str, str], ...]
     raw_reviews: tuple[object, ...]
-    reviews: tuple[dict[str, str | None], ...]
+    reviews: tuple[ReviewEvidence, ...]
     threads_resolved: bool
 
     def fingerprint(self) -> str:
@@ -357,7 +358,7 @@ def _run_reviewed_git(
 
 def fetch_reviewed_commits(
     root: Path,
-    reviews: Sequence[Mapping[str, str | None]],
+    reviews: Sequence[Mapping[str, str | bool | None]],
     *,
     head_sha: str,
     token: str,
@@ -369,7 +370,7 @@ def fetch_reviewed_commits(
             commit_sha
             for review in reviews
             if review.get("state") == "approved"
-            and (commit_sha := review.get("commit_sha")) is not None
+            and isinstance(commit_sha := review.get("commit_sha"), str)
             and commit_sha != head_sha
         }
     )
@@ -446,6 +447,30 @@ def trusted_manifest(
         raise ReconciliationError("trusted base manifest is not valid UTF-8 TOML") from error
     destination.write_bytes(content)
     return parsed
+
+
+def allowlisted_bot_reviewer_logins(manifest: Mapping[str, object]) -> frozenset[str]:
+    pull_request = _mapping(manifest.get("pull_request"), "manifest pull_request")
+    policy = _mapping(pull_request.get("review_policy"), "manifest pull_request.review_policy")
+    raw = _optional_array(policy.get("allowlisted_bot_reviewers", []))
+    logins = tuple(
+        item.casefold()
+        for item in raw or ()
+        if isinstance(item, str) and item.casefold().endswith("[bot]")
+    )
+    if raw is None or len(logins) != len(raw):
+        raise ReconciliationError(
+            "trusted review policy allowlisted_bot_reviewers must be an array of bot logins"
+        )
+    return frozenset(logins)
+
+
+def _is_bot(user_type: str, login: str) -> bool:
+    return user_type.casefold() == "bot" or login.casefold().endswith("[bot]")
+
+
+def _is_allowlisted_bot_reviewer(user_type: str, login: str, trusted: frozenset[str]) -> bool:
+    return user_type == "Bot" and login.casefold() in trusted
 
 
 def required_check_names(manifest: Mapping[str, object]) -> tuple[str, ...]:
@@ -546,8 +571,10 @@ def eligible_reviewer_ids(
     reviews: Sequence[object],
     *,
     author_id: int,
+    allowlisted_bot_reviewers: frozenset[str] = frozenset(),
 ) -> frozenset[int]:
     actors: dict[int, str] = {}
+    allowlisted_bot_ids: set[int] = set()
     for raw in reviews:
         review = _mapping(raw, "review")
         state = review.get("state")
@@ -561,35 +588,38 @@ def eligible_reviewer_ids(
         login = _string(user.get("login"), "review user login")
         user_id = _integer(user.get("id"), "review user id")
         user_type = _string(user.get("type"), "review user type")
-        if (
-            user_id == author_id
-            or user_type.casefold() == "bot"
-            or login.casefold().endswith("[bot]")
-        ):
+        allowlisted_bot = _is_allowlisted_bot_reviewer(user_type, login, allowlisted_bot_reviewers)
+        if user_id == author_id or (_is_bot(user_type, login) and not allowlisted_bot):
             continue
         existing = actors.get(user_id)
         if existing is not None and existing.casefold() != login.casefold():
             raise ReconciliationError("one reviewer ID was returned with multiple logins")
         actors[user_id] = login
+        if allowlisted_bot:
+            allowlisted_bot_ids.add(user_id)
 
-    eligible: set[int] = set()
-    for user_id, login in actors.items():
-        encoded_login = quote(login, safe="")
-        permission = _mapping(
-            client.request(
-                "GET",
-                f"/repos/{client.repository}/collaborators/{encoded_login}/permission",
-            ),
-            "collaborator permission",
-        )
-        resolved_user = _mapping(permission.get("user"), "collaborator permission user")
-        if _integer(resolved_user.get("id"), "collaborator permission user id") != user_id:
-            raise ReconciliationError("collaborator permission resolved a different user ID")
-        base_permission = permission.get("permission")
-        role_name = permission.get("role_name")
-        if base_permission in {"write", "admin"} or role_name in {"write", "maintain", "admin"}:
-            eligible.add(user_id)
-    return frozenset(eligible)
+    return frozenset(
+        user_id
+        for user_id, login in actors.items()
+        if user_id in allowlisted_bot_ids or _can_write(client, user_id=user_id, login=login)
+    )
+
+
+def _can_write(client: GitHubClient, *, user_id: int, login: str) -> bool:
+    encoded_login = quote(login, safe="")
+    permission = _mapping(
+        client.request(
+            "GET",
+            f"/repos/{client.repository}/collaborators/{encoded_login}/permission",
+        ),
+        "collaborator permission",
+    )
+    resolved_user = _mapping(permission.get("user"), "collaborator permission user")
+    if _integer(resolved_user.get("id"), "collaborator permission user id") != user_id:
+        raise ReconciliationError("collaborator permission resolved a different user ID")
+    base_permission = permission.get("permission")
+    role_name = permission.get("role_name")
+    return base_permission in {"write", "admin"} or role_name in {"write", "maintain", "admin"}
 
 
 def latest_human_reviews(
@@ -597,16 +627,24 @@ def latest_human_reviews(
     *,
     author_id: int,
     eligible_ids: frozenset[int],
-) -> tuple[dict[str, str | None], ...]:
-    latest: dict[int, tuple[tuple[str, int], dict[str, str | None]]] = {}
+    allowlisted_bot_reviewers: frozenset[str] = frozenset(),
+) -> tuple[ReviewEvidence, ...]:
+    latest: dict[int, tuple[tuple[str, int], ReviewEvidence]] = {}
     for raw in reviews:
         review = _mapping(raw, "review")
         user = _mapping(review.get("user"), "review user")
         login = _string(user.get("login"), "review user login")
         user_id = _integer(user.get("id"), "review user id")
         user_type = _string(user.get("type"), "review user type")
-        reviewer_is_bot = user_type.casefold() == "bot" or login.casefold().endswith("[bot]")
-        if user_id == author_id or reviewer_is_bot or user_id not in eligible_ids:
+        reviewer_is_bot = _is_bot(user_type, login)
+        if (
+            user_id == author_id
+            or user_id not in eligible_ids
+            or (
+                reviewer_is_bot
+                and not _is_allowlisted_bot_reviewer(user_type, login, allowlisted_bot_reviewers)
+            )
+        ):
             continue
         state_value = review.get("state")
         if not isinstance(state_value, str):
@@ -620,7 +658,12 @@ def latest_human_reviews(
         if not isinstance(review_id, int):
             raise ReconciliationError("review id must be an integer")
         commit_sha = _review_commit_sha(review.get("commit_id"))
-        value = {"reviewer": f"{user_id}:{login}", "state": state, "commit_sha": commit_sha}
+        value: ReviewEvidence = {
+            "reviewer": f"{user_id}:{login}",
+            "state": state,
+            "commit_sha": commit_sha,
+            "reviewer_is_bot": reviewer_is_bot,
+        }
         key = user_id
         ordering = (submitted_key, review_id)
         if key not in latest or ordering > latest[key][0]:
@@ -685,6 +728,7 @@ def collect_evidence(
     number: int,
     check_names: Sequence[str],
     required_check_app_id: int,
+    allowlisted_bot_reviewers: frozenset[str],
 ) -> CollectedEvidence:
     snapshot = pull_request_snapshot(client, number)
     checks = collect_required_checks(
@@ -694,11 +738,17 @@ def collect_evidence(
         required_app_id=required_check_app_id,
     )
     raw_reviews = tuple(client.rest_pages(f"/repos/{client.repository}/pulls/{number}/reviews"))
-    eligible_ids = eligible_reviewer_ids(client, raw_reviews, author_id=snapshot.author_id)
+    eligible_ids = eligible_reviewer_ids(
+        client,
+        raw_reviews,
+        author_id=snapshot.author_id,
+        allowlisted_bot_reviewers=allowlisted_bot_reviewers,
+    )
     reviews = latest_human_reviews(
         raw_reviews,
         author_id=snapshot.author_id,
         eligible_ids=eligible_ids,
+        allowlisted_bot_reviewers=allowlisted_bot_reviewers,
     )
     return CollectedEvidence(
         snapshot=snapshot,
@@ -799,8 +849,7 @@ def render_comment(
         "### Review policy\n\n"
         f"- Decision: **{'pass' if final_passed else 'blocked'}**\n"
         f"- Tier: **{tier}** human review(s) required\n"
-        f"- Approvals: **{summary.get('current_human_approvals', '?')}** "
-        "current human approval(s)\n"
+        f"{_approvals_line(summary)}"
         f"- Counted size: **{size.get('counted_lines', '?')}** lines "
         f"({size.get('excluded_lines', '?')} excluded)\n"
         f"{earlier_lines}"
@@ -809,6 +858,16 @@ def render_comment(
         f"- Reasons: `{reason_text}`\n\n"
         f"Evaluated head `{_evaluated_head(receipt)}`.\n"
     )
+
+
+def _approvals_line(summary: Mapping[str, object]) -> str:
+    human_approvals = summary.get("current_human_approvals", "?")
+    line = f"- Approvals: **{human_approvals}** current human approval(s)"
+    bots = _optional_array(summary.get("allowlisted_bot_approvers"))
+    if bots:
+        names = ", ".join(f"`{str(bot).rpartition(':')[2]}`" for bot in bots)
+        line += f", **{len(bots)}** allowlisted bot approval(s) ({names})"
+    return f"{line}\n"
 
 
 def _earlier_approval_line(approval: Mapping[str, object], unavailable: Mapping[str, str]) -> str:
@@ -824,7 +883,8 @@ def _earlier_approval_line(approval: Mapping[str, object], unavailable: Mapping[
     else:
         measured = f"{lines} counted lines since"
     outcome = "carried forward" if approval.get("carried_forward") is True else "needs re-approval"
-    return f"- Earlier approval by @{reviewer} on `{commit}`: {measured}, **{outcome}**\n"
+    kind = "allowlisted bot approval" if approval.get("allowlisted_bot") is True else "approval"
+    return f"- Earlier {kind} by @{reviewer} on `{commit}`: {measured}, **{outcome}**\n"
 
 
 def _evaluated_head(receipt: Mapping[str, object]) -> object:
@@ -1202,9 +1262,7 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
         description="Review policy reconciliation in progress",
         target_url=_workflow_url(),
     )
-    author_is_bot = snapshot.author_type.casefold() == "bot" or snapshot.author.casefold().endswith(
-        "[bot]"
-    )
+    author_is_bot = _is_bot(snapshot.author_type, snapshot.author)
     ensure_git_objects(root, snapshot)
 
     with tempfile.TemporaryDirectory(prefix="repo-standards-review-policy-") as raw_temp:
@@ -1217,11 +1275,13 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
             manifest_path=args.manifest_path,
         )
         check_names = required_check_names(manifest)
+        allowlisted_bot_reviewers = allowlisted_bot_reviewer_logins(manifest)
         collected = collect_evidence(
             client,
             number=args.pr_number,
             check_names=check_names,
             required_check_app_id=args.required_check_app_id,
+            allowlisted_bot_reviewers=allowlisted_bot_reviewers,
         )
         if collected.snapshot != snapshot:
             raise ReconciliationError("pull request changed before evidence collection completed")
@@ -1241,10 +1301,7 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
             "base_repository_id": snapshot.base_repository_id,
             "head_repository_id": snapshot.head_repository_id,
             "is_draft": snapshot.draft,
-            "author_is_bot": (
-                snapshot.author_type.casefold() == "bot"
-                or snapshot.author.casefold().endswith("[bot]")
-            ),
+            "author_is_bot": author_is_bot,
             "author_login": snapshot.author,
             "required_checks_complete": True,
             "required_checks": collected.checks,
@@ -1326,6 +1383,7 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
             number=args.pr_number,
             check_names=check_names,
             required_check_app_id=args.required_check_app_id,
+            allowlisted_bot_reviewers=allowlisted_bot_reviewers,
         )
         require_unchanged_evidence(
             collected,
