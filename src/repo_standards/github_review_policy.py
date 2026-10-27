@@ -1,5 +1,3 @@
-# pyright: reportAny=false, reportExplicitAny=false, reportUnannotatedClassAttribute=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportUnknownMemberType=false, reportUnknownVariableType=false
-
 from __future__ import annotations
 
 import argparse
@@ -15,7 +13,7 @@ import sys
 import tempfile
 import time
 import tomllib
-from typing import Any, Final, NamedTuple, NewType
+from typing import Final, NamedTuple, NewType, TypeGuard, final
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -54,6 +52,20 @@ class FinalPolicyDecision:
     reason: str | None
 
 
+@final
+class Arguments(argparse.Namespace):
+    def __init__(self) -> None:
+        super().__init__()
+        self.root = "."
+        self.manifest_path = ".repo-standards/repository.toml"
+        self.pr_number: int | None = None
+        self.merge_group_head_sha: str | None = None
+        self.merge_group_head_ref: str | None = None
+        self.required_check_app_id = 15368
+        self.policy_workflow_path = ".github/workflows/review-policy.yml"
+        self.review_optional_enabled = False
+
+
 class ReconciliationError(RuntimeError):
     """Provider evidence could not be collected or reconciled completely."""
 
@@ -79,7 +91,7 @@ class PullRequestSnapshot:
 @dataclass(frozen=True, slots=True)
 class CommandResult:
     returncode: int
-    receipt: Mapping[str, Any]
+    receipt: Mapping[str, object]
     stdout: str
 
 
@@ -87,7 +99,7 @@ class CommandResult:
 class CollectedEvidence:
     snapshot: PullRequestSnapshot
     checks: tuple[dict[str, str], ...]
-    raw_reviews: tuple[Any, ...]
+    raw_reviews: tuple[object, ...]
     reviews: tuple[dict[str, str | None], ...]
     threads_resolved: bool
 
@@ -132,8 +144,8 @@ class GitHubClient:
         method: str,
         path: str,
         *,
-        payload: Mapping[str, Any] | None = None,
-    ) -> Any:
+        payload: Mapping[str, object] | None = None,
+    ) -> object:
         url = path if path.startswith("https://") else f"{self.api_url}{path}"
         data = None if payload is None else json.dumps(payload).encode()
         request = Request(
@@ -148,8 +160,8 @@ class GitHubClient:
             },
         )
         try:
-            with urlopen(request, timeout=30) as response:
-                raw = response.read()
+            with urlopen(request, timeout=30) as response:  # pyright: ignore[reportAny] -- urllib types the opened response as Any
+                raw: bytes = response.read()  # pyright: ignore[reportAny] -- the HTTP response body is bytes
         except HTTPError as error:
             detail = error.read().decode(errors="replace")[:1000]
             raise ReconciliationError(
@@ -160,29 +172,25 @@ class GitHubClient:
         if not raw:
             return None
         try:
-            return json.loads(raw)
+            parsed: object = json.loads(raw)  # pyright: ignore[reportAny] -- JSON parser boundary; callers narrow every field
         except json.JSONDecodeError as error:
             raise ReconciliationError(
                 f"GitHub API {method} {path} returned invalid JSON"
             ) from error
+        return parsed
 
-    def rest_pages(self, path: str, *, collection_key: str | None = None) -> list[Any]:
-        items: list[Any] = []
+    def rest_pages(self, path: str, *, collection_key: str | None = None) -> list[object]:
+        items: list[object] = []
         separator = "&" if "?" in path else "?"
         for page in range(1, _MAX_PAGES + 1):
             payload = self.request("GET", f"{path}{separator}per_page=100&page={page}")
             if collection_key is not None:
-                if not isinstance(payload, dict) or not isinstance(
-                    payload.get(collection_key), list
-                ):
-                    raise ReconciliationError(
-                        f"GitHub API pagination response is missing {collection_key!r}"
-                    )
-                batch = payload[collection_key]
+                batch = _array(
+                    _mapping(payload, "GitHub API pagination response").get(collection_key),
+                    f"GitHub API pagination response {collection_key!r}",
+                )
             else:
-                if not isinstance(payload, list):
-                    raise ReconciliationError("GitHub API pagination response must be an array")
-                batch = payload
+                batch = _array(payload, "GitHub API pagination response")
             items.extend(batch)
             if len(items) > _MAX_ITEMS:
                 raise ReconciliationError("GitHub API evidence exceeds 10000 items")
@@ -190,32 +198,52 @@ class GitHubClient:
                 return items
         raise ReconciliationError("GitHub API pagination exceeded 100 pages")
 
-    def graphql(self, query: str, variables: Mapping[str, Any]) -> Mapping[str, Any]:
-        payload = self.request("POST", "/graphql", payload={"query": query, "variables": variables})
-        if not isinstance(payload, dict):
-            raise ReconciliationError("GitHub GraphQL response must be an object")
+    def graphql(self, query: str, variables: Mapping[str, object]) -> Mapping[str, object]:
+        payload = _mapping(
+            self.request("POST", "/graphql", payload={"query": query, "variables": variables}),
+            "GitHub GraphQL response",
+        )
         errors = payload.get("errors")
         if errors:
             raise ReconciliationError(f"GitHub GraphQL returned errors: {errors!r}")
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            raise ReconciliationError("GitHub GraphQL response is missing data")
-        return data
+        return _mapping(payload.get("data"), "GitHub GraphQL response data")
 
 
-def _mapping(value: Any, context: str) -> Mapping[str, Any]:
-    if not isinstance(value, dict):
+def _is_json_object(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_json_array(value: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(value, list)
+
+
+def _mapping(value: object, context: str) -> Mapping[str, object]:
+    if not _is_json_object(value):
         raise ReconciliationError(f"{context} must be an object")
     return value
 
 
-def _string(value: Any, context: str) -> str:
+def _array(value: object, context: str) -> Sequence[object]:
+    if not _is_json_array(value):
+        raise ReconciliationError(f"{context} must be an array")
+    return value
+
+
+def _optional_mapping(value: object) -> Mapping[str, object] | None:
+    return value if _is_json_object(value) else None
+
+
+def _optional_array(value: object) -> Sequence[object] | None:
+    return value if _is_json_array(value) else None
+
+
+def _string(value: object, context: str) -> str:
     if not isinstance(value, str) or not value:
         raise ReconciliationError(f"{context} must be a non-empty string")
     return value
 
 
-def _integer(value: Any, context: str) -> int:
+def _integer(value: object, context: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ReconciliationError(f"{context} must be a positive integer")
     return value
@@ -254,32 +282,27 @@ def pull_request_snapshot(client: GitHubClient, number: int) -> PullRequestSnaps
     )
 
 
-def _boolean(value: Any, context: str) -> bool:
+def _boolean(value: object, context: str) -> bool:
     if not isinstance(value, bool):
         raise ReconciliationError(f"{context} must be a boolean")
     return value
 
 
-def _run_git(root: Path, *arguments: str, text: bool = True) -> str | bytes:
+def _run_git(root: Path, *arguments: str) -> bytes:
     process = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed executable and controlled arguments
         ("git", "-C", str(root), *arguments),
         check=False,
         capture_output=True,
-        text=text,
         timeout=_COMMAND_TIMEOUT_SECONDS,
     )
     if process.returncode != 0:
-        stderr = (
-            process.stderr
-            if isinstance(process.stderr, str)
-            else process.stderr.decode(errors="replace")
-        )
+        stderr = process.stderr.decode(errors="replace")
         raise ReconciliationError(f"git {' '.join(arguments[:2])} failed: {stderr.strip()}")
     return process.stdout
 
 
 def ensure_git_objects(root: Path, snapshot: PullRequestSnapshot) -> None:
-    missing = []
+    missing: list[str] = []
     for revision in (snapshot.base_sha, snapshot.head_sha):
         process = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed executable and exact provider SHA
             ("git", "-C", str(root), "cat-file", "-e", f"{revision}^{{commit}}"),
@@ -407,7 +430,7 @@ def trusted_manifest(
     destination: Path,
     *,
     manifest_path: str = ".repo-standards/repository.toml",
-) -> Mapping[str, Any]:
+) -> Mapping[str, object]:
     pure_path = PurePosixPath(manifest_path)
     if (
         not manifest_path
@@ -416,14 +439,7 @@ def trusted_manifest(
         or pure_path.as_posix() != manifest_path
     ):
         raise ReconciliationError("manifest-path must be a normalized repository-relative path")
-    content = _run_git(
-        root,
-        "show",
-        f"{base_sha}:{manifest_path}",
-        text=False,
-    )
-    if not isinstance(content, bytes):
-        raise ReconciliationError("git returned text for a binary manifest request")
+    content = _run_git(root, "show", f"{base_sha}:{manifest_path}")
     try:
         parsed = tomllib.loads(content.decode())
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
@@ -432,23 +448,19 @@ def trusted_manifest(
     return parsed
 
 
-def required_check_names(manifest: Mapping[str, Any]) -> tuple[str, ...]:
+def required_check_names(manifest: Mapping[str, object]) -> tuple[str, ...]:
     pull_request = _mapping(manifest.get("pull_request"), "manifest pull_request")
     policy = _mapping(pull_request.get("review_policy"), "manifest pull_request.review_policy")
-    raw = policy.get("required_checks")
-    if (
-        not isinstance(raw, list)
-        or not raw
-        or not all(isinstance(item, str) and item for item in raw)
-    ):
+    raw = _optional_array(policy.get("required_checks")) or ()
+    names = tuple(item for item in raw if isinstance(item, str) and item)
+    if not names or len(names) != len(raw):
         raise ReconciliationError("trusted review policy required_checks must be a non-empty array")
-    names = tuple(raw)
     if len(names) != len(set(names)):
         raise ReconciliationError("trusted review policy required_checks must be unique")
     return names
 
 
-def check_conclusion(check: Mapping[str, Any]) -> str:
+def check_conclusion(check: Mapping[str, object]) -> str:
     if check.get("status") != "completed":
         return "pending"
     conclusion = check.get("conclusion")
@@ -481,7 +493,7 @@ def collect_required_checks(
     )
     result: list[dict[str, str]] = []
     for name in names:
-        candidates = []
+        candidates: list[Mapping[str, object]] = []
         for raw in runs:
             check = _mapping(raw, "check run")
             if check.get("name") != name:
@@ -492,7 +504,9 @@ def collect_required_checks(
         if not candidates:
             result.append({"name": name, "conclusion": "missing", "head_sha": head_sha})
             continue
-        latest = max(candidates, key=lambda item: int(item.get("id", 0)))
+        latest = max(
+            candidates, key=lambda item: _integer(item.get("id"), "configured check run id")
+        )
         actual_head_sha = _string(latest.get("head_sha"), "configured check run head SHA")
         if actual_head_sha != head_sha:
             raise ReconciliationError(f"configured check {name!r} reported a different head SHA")
@@ -529,7 +543,7 @@ def _actions_run_id(target_url: str, *, repository: str) -> int:
 
 def eligible_reviewer_ids(
     client: GitHubClient,
-    reviews: Sequence[Any],
+    reviews: Sequence[object],
     *,
     author_id: int,
 ) -> frozenset[int]:
@@ -579,7 +593,7 @@ def eligible_reviewer_ids(
 
 
 def latest_human_reviews(
-    reviews: Sequence[Any],
+    reviews: Sequence[object],
     *,
     author_id: int,
     eligible_ids: frozenset[int],
@@ -645,9 +659,7 @@ def collect_threads_resolved(client: GitHubClient, number: int) -> bool:
         repository = _mapping(data.get("repository"), "GraphQL repository")
         pull_request = _mapping(repository.get("pullRequest"), "GraphQL pull request")
         threads = _mapping(pull_request.get("reviewThreads"), "GraphQL review threads")
-        nodes = threads.get("nodes")
-        if not isinstance(nodes, list):
-            raise ReconciliationError("GraphQL review thread nodes must be an array")
+        nodes = _array(threads.get("nodes"), "GraphQL review thread nodes")
         for raw in nodes:
             node = _mapping(raw, "GraphQL review thread")
             if not isinstance(node.get("isResolved"), bool):
@@ -742,13 +754,13 @@ def run_policy_cli(
         timeout=_COMMAND_TIMEOUT_SECONDS,
     )
     try:
-        receipt = json.loads(process.stdout)
+        receipt: object = json.loads(process.stdout)  # pyright: ignore[reportAny] -- JSON parser boundary; the receipt is narrowed below
     except json.JSONDecodeError as error:
         raise ReconciliationError(
             f"review policy CLI returned invalid JSON (exit {process.returncode}): "
             f"{process.stderr[:1000]}"
         ) from error
-    if not isinstance(receipt, dict) or process.returncode not in {0, 1, 2}:
+    if not _is_json_object(receipt) or process.returncode not in {0, 1, 2}:
         raise ReconciliationError(
             f"review policy CLI failed unexpectedly with exit {process.returncode}: "
             f"{process.stderr[:1000]}"
@@ -756,12 +768,12 @@ def run_policy_cli(
     return CommandResult(process.returncode, receipt, process.stdout)
 
 
-def _summary(receipt: Mapping[str, Any]) -> Mapping[str, Any]:
+def _summary(receipt: Mapping[str, object]) -> Mapping[str, object]:
     return _mapping(receipt.get("summary"), "review policy receipt summary")
 
 
 def render_comment(
-    receipt: Mapping[str, Any],
+    receipt: Mapping[str, object],
     *,
     final_passed: bool,
     lane_enabled: bool,
@@ -771,8 +783,8 @@ def render_comment(
     summary = _summary(receipt)
     size = _mapping(receipt.get("size"), "review policy receipt size")
     tier = summary.get("tier", "?")
-    reasons = summary.get("reasons")
-    reason_items = [str(item) for item in reasons] if isinstance(reasons, list) else ["unknown"]
+    reasons = _optional_array(summary.get("reasons"))
+    reason_items = ["unknown"] if reasons is None else [str(item) for item in reasons]
     if operational_reason is not None:
         reason_items.append(operational_reason)
     reason_text = ", ".join(reason_items)
@@ -780,7 +792,7 @@ def render_comment(
     earlier = receipt.get("earlier_approvals")
     earlier_lines = "".join(
         _earlier_approval_line(_mapping(item, "earlier approval"), unavailable)
-        for item in (earlier if isinstance(earlier, list) else ())
+        for item in _optional_array(earlier) or ()
     )
     return (
         f"{_COMMENT_MARKER}\n"
@@ -795,7 +807,7 @@ def render_comment(
         f"- Migration: **{'yes' if summary.get('touches_migration') else 'no'}**\n"
         f"- Review-optional lane: **{lane}**\n"
         f"- Reasons: `{reason_text}`\n\n"
-        f"Evaluated head `{receipt.get('provenance', {}).get('evaluated_head', 'unknown')}`.\n"
+        f"Evaluated head `{_evaluated_head(receipt)}`.\n"
     )
 
 
@@ -815,8 +827,13 @@ def _earlier_approval_line(approval: Mapping[str, object], unavailable: Mapping[
     return f"- Earlier approval by @{reviewer} on `{commit}`: {measured}, **{outcome}**\n"
 
 
-def render_incomplete_comment(receipt: Mapping[str, Any]) -> str:
-    issue_count = len(receipt.get("issues", ())) if isinstance(receipt.get("issues"), list) else 0
+def _evaluated_head(receipt: Mapping[str, object]) -> object:
+    provenance = _optional_mapping(receipt.get("provenance"))
+    return "unknown" if provenance is None else provenance.get("evaluated_head", "unknown")
+
+
+def render_incomplete_comment(receipt: Mapping[str, object]) -> str:
+    issue_count = len(_optional_array(receipt.get("issues")) or ())
     return (
         f"{_COMMENT_MARKER}\n"
         "### Review policy\n\n"
@@ -829,11 +846,9 @@ def render_incomplete_comment(receipt: Mapping[str, Any]) -> str:
 def upsert_comment(client: GitHubClient, number: int, body: str) -> None:
     comments = client.rest_pages(f"/repos/{client.repository}/issues/{number}/comments")
     matching = [
-        _mapping(item, "issue comment")
-        for item in comments
-        if isinstance(item, dict)
-        and isinstance(item.get("body"), str)
-        and _COMMENT_MARKER in item["body"]
+        comment
+        for comment in map(_optional_mapping, comments)
+        if comment is not None and _COMMENT_MARKER in str(comment.get("body", ""))
     ]
     if len(matching) > 1:
         raise ReconciliationError("multiple review-policy marker comments exist")
@@ -862,7 +877,7 @@ def post_status(
     description: str,
     target_url: str | None,
 ) -> None:
-    payload: dict[str, Any] = {
+    payload: dict[str, object] = {
         "state": state,
         "context": _STATUS_CONTEXT,
         "description": description[:140],
@@ -878,13 +893,13 @@ def post_status(
 
 def review_policy_status_passed(
     client: GitHubClient,
-    statuses: Sequence[Any],
+    statuses: Sequence[object],
     *,
     workflow_path: str,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> bool:
-    matching: list[Mapping[str, Any]] = []
+    matching: list[Mapping[str, object]] = []
     for raw in statuses:
         status = _mapping(raw, "commit status")
         # The statuses endpoint is scoped to the exact commit; its items omit "sha".
@@ -921,7 +936,7 @@ def _completed_run(
     *,
     clock: Callable[[], float],
     sleep: Callable[[float], None],
-) -> Mapping[str, Any]:
+) -> Mapping[str, object]:
     deadline = clock() + _RUN_COMPLETION_TIMEOUT_SECONDS
     while True:
         run = _mapping(
@@ -976,10 +991,8 @@ def queued_pull_request_at(
         "GET",
         f"/repos/{client.repository}/git/matching-refs/heads/gh-readonly-queue/{quote(base_ref)}/",
     )
-    if not isinstance(refs, list):
-        raise ReconciliationError("merge queue refs response must be an array")
     matches: list[MergeGroupPullRequest] = []
-    for raw in refs:
+    for raw in _array(refs, "merge queue refs response"):
         ref = _mapping(raw, "merge queue ref")
         target = _mapping(ref.get("object"), "merge queue ref object")
         if target.get("sha") != sha:
@@ -1058,8 +1071,8 @@ def reconcile_merge_group(
     )
     if commit.get("sha") != head_sha:
         raise ReconciliationError("merge group commit lookup returned a different SHA")
-    parents = commit.get("parents")
-    if not isinstance(parents, list) or not parents:
+    parents = _array(commit.get("parents"), "merge group commit parents")
+    if not parents:
         raise ReconciliationError("merge group commit must have at least one parent")
     parent_shas = {
         _string(_mapping(parent, "merge group parent").get("sha"), "merge group parent SHA")
@@ -1167,14 +1180,14 @@ def final_policy_decision(
     return FinalPolicyDecision(passed=True, reason=None)
 
 
-def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-statements] - orchestration stays linear and auditable
+def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - orchestration stays linear and auditable
     root = Path(args.root).resolve(strict=True)
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
     github_token = os.environ.get("GITHUB_TOKEN", "")
     client = GitHubClient(token=github_token, repository=repository, api_url=api_url)
     if args.merge_group_head_sha:
-        return _reconcile_merge_group_args(args, client)
+        return _reconcile_merge_group_args(args, client, head_sha=args.merge_group_head_sha)
     if args.merge_group_head_ref is not None:
         raise ReconciliationError("merge-group-head-ref requires merge-group-head-sha")
     if args.pr_number is None:
@@ -1344,14 +1357,14 @@ def reconcile(args: argparse.Namespace) -> int:  # ruff: ignore[too-many-stateme
     return 0 if final_passed else 1
 
 
-def _reconcile_merge_group_args(args: argparse.Namespace, client: GitHubClient) -> int:
+def _reconcile_merge_group_args(args: Arguments, client: GitHubClient, *, head_sha: str) -> int:
     if args.pr_number is not None:
         raise ReconciliationError("pr-number and merge-group-head-sha are mutually exclusive")
     if args.merge_group_head_ref is None:
         raise ReconciliationError("merge-group-head-ref is required in merge-group mode")
     return reconcile_merge_group(
         client=client,
-        head_sha=args.merge_group_head_sha,
+        head_sha=head_sha,
         head_ref=args.merge_group_head_ref,
         workflow_path=args.policy_workflow_path,
     )
@@ -1366,7 +1379,7 @@ def _write_step_summary(comment: str) -> None:
 
 def main() -> None:
     try:
-        raise SystemExit(reconcile(_parser().parse_args()))
+        raise SystemExit(reconcile(_parser().parse_args(namespace=Arguments())))
     except (ReconciliationError, OSError, subprocess.TimeoutExpired) as error:
         print(f"review policy reconciliation incomplete: {error}", file=sys.stderr)
         raise SystemExit(2) from error
