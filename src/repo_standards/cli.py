@@ -96,7 +96,7 @@ from repo_standards.pull_request._inputs import (
     resolve_github_pull_request_inputs,
     resolve_local_pull_request_inputs,
 )
-from repo_standards.repository.comparison import with_makefile_comparison
+from repo_standards.repository.comparison import with_makefile_comparison, with_migration_comparison
 from repo_standards.rest import (
     InstrumentationDetectionReport,
     TrackedFile as RestTrackedFile,
@@ -1841,9 +1841,7 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
     as_of: Annotated[str | None, typer.Option(help="Deterministic YYYY-MM-DD")] = None,
     base: Annotated[
         str | None,
-        typer.Option(
-            "--base", help="Compare Makefile paths and lines to this commit; staged uses HEAD."
-        ),
+        typer.Option("--base", help="Base for Makefiles and new SQL migrations; staged uses HEAD."),
     ] = None,
     staged: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - Typer option
         bool,
@@ -1967,7 +1965,7 @@ def report_command(  # ruff: ignore[too-many-arguments,too-many-positional-argum
     as_of: Annotated[str | None, typer.Option(help="Deterministic YYYY-MM-DD")] = None,
     base: Annotated[
         str | None,
-        typer.Option("--base", help="Compare Makefile paths and lines to this commit."),
+        typer.Option("--base", help="Compare Makefiles and new SQL migrations to this commit."),
     ] = None,
     enable_rule: Annotated[
         list[str] | None,
@@ -2114,6 +2112,9 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         enabled_rules=enabled_rules,
         base_revision=base_revision,
         as_of=evaluation_date,
+    )
+    snapshot = with_migration_comparison(
+        resolved_root, snapshot, enabled_rules=enabled_rules, base_revision=base_revision
     )
     repository_diagnostics = (
         policy.evaluate_repository(snapshot) if isinstance(policy, RepositoryPolicy) else ()

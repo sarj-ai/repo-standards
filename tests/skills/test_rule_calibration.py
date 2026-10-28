@@ -102,7 +102,7 @@ def _run(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str
     )
 
 
-def test_calibration_isolated_worker_redacts_private_report(  # ruff: ignore[too-many-locals]
+def test_calibration_isolated_worker_redacts_private_report(  # ruff: ignore[too-many-locals] -- both private and public outputs are checked before and after labeling.
     tmp_path: Path,
 ) -> None:
     repository, corpus = _fixture(tmp_path)
@@ -246,3 +246,35 @@ def test_makefile_calibration_keeps_distinct_source_findings(tmp_path: Path) -> 
         assert findings[0]["path"] == "Makefile"
         finding_ids.append(str(findings[0]["finding_id"]))
     assert finding_ids[0] != finding_ids[1]
+
+
+def test_migration_calibration_uses_the_exact_commit_comparison(tmp_path: Path) -> None:
+    repository, _corpus = _fixture(tmp_path)
+    (repository / "migrations").mkdir()
+    for name in ("001.sql", "002.sql"):
+        (repository / "migrations" / name).write_text("SELECT 1;\n")
+    _git(repository, "add", ".")
+    _git(
+        repository,
+        "-c",
+        "user.name=Rule Calibration",
+        "-c",
+        "user.email=rule-calibration@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "new migrations",
+    )
+    result = _run(
+        "_worker",
+        "--root",
+        str(repository),
+        "--manifest",
+        str(tmp_path / "sidecar.toml"),
+        "--rule",
+        "repository/artifacts/migration-consolidation",
+    )
+    payload = _JSON_OBJECT.validate_json(result.stdout)
+    findings = _JSON_OBJECTS.validate_python(payload["findings"])
+    assert len(findings) == 1
+    assert findings[0]["path"] == "migrations/001.sql"

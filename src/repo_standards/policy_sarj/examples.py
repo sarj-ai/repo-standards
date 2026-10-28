@@ -12,6 +12,7 @@ from repo_standards.core.models import (
     MakefileComparison,
     MakefileMetric,
     Manifest,
+    MigrationComparison,
     PullRequestCommitHistoryConfig,
     PullRequestConfig,
     PullRequestReviewPolicyConfig,
@@ -27,6 +28,7 @@ from repo_standards.core.parser import parse_manifest_bytes
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID
 from .local_residue import LOCAL_RESIDUE_RULE_ID
 from .makefiles import MAKEFILE_GROWTH_RULE_ID
+from .migrations import MIGRATION_CONSOLIDATION_RULE_ID, migration_roots
 from .policy import RULES, SarjPolicy
 from .pull_request_templates import PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID
 
@@ -36,6 +38,13 @@ class _MakefileExampleSource(BaseModel):
 
     base: dict[str, Annotated[int, Field(ge=0)]]
     head: dict[str, Annotated[int, Field(ge=0)]]
+
+
+class _MigrationExampleSource(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", strict=True)
+
+    base: tuple[str, ...]
+    head: tuple[str, ...]
 
 
 class _PullRequestTemplateExampleSource(BaseModel):
@@ -82,6 +91,18 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
         raise ValueError(message)
     if case.rule_id == MAKEFILE_GROWTH_RULE_ID:
         return _run_makefile_comparison(source)
+    if case.rule_id == MIGRATION_CONSOLIDATION_RULE_ID:
+        context = _MigrationExampleSource.model_validate_json(source)
+        manifest = Manifest(repository_id=RepositoryId("example-repository"), components=())
+        return _run_snapshot(
+            context.head,
+            manifest=manifest,
+            migration_comparison=MigrationComparison(
+                roots=migration_roots(manifest, (*context.base, *context.head)),
+                base_files=tuple(TrackedFileEvidence(path, "f" * 40) for path in context.base),
+                head_files=tuple(TrackedFileEvidence(path, "a" * 40) for path in context.head),
+            ),
+        )
     if case.rule_id == PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID:
         return _run_pull_request_template(source)
     if case.rule_id in {
@@ -149,6 +170,7 @@ def _run_snapshot(
     comparison: MakefileComparison | None = None,
     manifest: Manifest | None = None,
     templates: tuple[PullRequestTemplate, ...] = (),
+    migration_comparison: MigrationComparison | None = None,
 ) -> RuleExampleResult:
     snapshot = RepositorySnapshot(
         manifest=manifest
@@ -179,6 +201,7 @@ def _run_snapshot(
         ),
         makefile_comparison=comparison,
         pull_request_templates=templates,
+        migration_comparison=migration_comparison,
     )
     diagnostics = SarjPolicy.evaluate_repository(snapshot)
     return RuleExampleResult(

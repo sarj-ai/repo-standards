@@ -413,6 +413,13 @@ class MakefileComparison:
 
 
 @dataclass(frozen=True, slots=True)
+class MigrationComparison:
+    roots: tuple[str, ...]
+    base_files: tuple[TrackedFileEvidence, ...]
+    head_files: tuple[TrackedFileEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RepositoryInspection:
     completion: Literal["complete", "incomplete"]
     source_revision: str
@@ -443,6 +450,7 @@ class RepositorySnapshot:
     provenance: InputProvenance
     makefile_comparison: MakefileComparison | None = None
     pull_request_templates: tuple[PullRequestTemplate, ...] = ()
+    migration_comparison: MigrationComparison | None = None
 
 
 @runtime_checkable

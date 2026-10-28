@@ -16,7 +16,7 @@ import typer
 from repo_standards.core.inspection import load_calibration_snapshot
 from repo_standards.core.rule_reviews import RuleVersion
 from repo_standards.policy_sarj.policy import SarjPolicy
-from repo_standards.repository.comparison import with_makefile_comparison
+from repo_standards.repository.comparison import with_makefile_comparison, with_migration_comparison
 
 
 _PRIVATE_MODE = 0o600
@@ -130,16 +130,20 @@ def _finding_id(rule_id: str, path: str, anchor: str, revision: str) -> str:
 
 def _worker(root: Path, manifest_path: Path, rule_id: str) -> int:
     snapshot = load_calibration_snapshot(root, manifest_path.read_bytes())
+    enabled_rules = frozenset(
+        RuleVersion(rule.rule_id, rule.version)
+        for rule in SarjPolicy.rules()
+        if rule.rule_id == rule_id
+    )
     snapshot = with_makefile_comparison(
         root,
         snapshot,
-        enabled_rules=frozenset(
-            RuleVersion(rule.rule_id, rule.version)
-            for rule in SarjPolicy.rules()
-            if rule.rule_id == rule_id
-        ),
+        enabled_rules=enabled_rules,
         base_revision=None,
         as_of=None,
+    )
+    snapshot = with_migration_comparison(
+        root, snapshot, enabled_rules=enabled_rules, base_revision=None
     )
     diagnostics = SarjPolicy.evaluate_repository(snapshot)
     selected = [item for item in diagnostics if item.rule_id == rule_id]
