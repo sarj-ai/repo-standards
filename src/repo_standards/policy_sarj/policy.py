@@ -37,6 +37,7 @@ from repo_standards.core.taxonomy import (
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics
 from .local_residue import LOCAL_RESIDUE_RULE_ID, local_residue_diagnostics
 from .makefiles import MAKEFILE_GROWTH_RULE_ID, makefile_diagnostics
+from .migrations import MIGRATION_CONSOLIDATION_RULE_ID, migration_diagnostics
 from .pull_request_templates import (
     PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
     pull_request_template_diagnostics,
@@ -199,6 +200,46 @@ def _tracked_files_example(*paths: str) -> str:
 
 
 RULES = (
+    Rule(
+        rule_id=MIGRATION_CONSOLIDATION_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Consolidate compatible new SQL migrations in one pull request",
+        description=(
+            "A Git comparison adding multiple logical SQL revisions in one migration stream "
+            "needs consolidation review. Conventional migrations directories, migration-set "
+            "components and configured review-policy migration roots identify separate streams. "
+            "Automatic discovery excludes test, fixture, example, vendor and generated paths; "
+            "explicit manifest roots remain authoritative. "
+            "Base stream roots retain their ownership: head changes cannot remove them or "
+            "split them into child streams. New roots outside those streams remain independent."
+        ),
+        why=(
+            "Separate unapplied migrations from one change add needless history and execution "
+            "boundaries. Required transaction, rollback and deployment boundaries can still "
+            "justify multiple revisions, so filenames alone support a warning rather than "
+            "proving that concatenation is safe."
+        ),
+        fix=(
+            "Combine compatible new revisions in their original statement order, preserve "
+            "framework metadata and rollback contracts, and rerun against the pull-request "
+            "base. Do not rewrite applied history. Retain necessary boundaries with an exact "
+            "reviewed exception. No automatic rewrite is offered. Direct SQL files, up/down "
+            "pairs, Flyway V/U versions and Prisma revision directories are recognized; "
+            "repeatable Flyway R__ scripts and other nested layouts are outside this rule."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-migration-consolidation",
+                title="One new logical SQL revision per stream",
+                language="json",
+                before='{"base":[],"head":["db/migrations/001.sql","db/migrations/002.sql"]}',
+                after='{"base":[],"head":["db/migrations/001.sql"]}',
+                expected_severity="warning",
+            ),
+        ),
+    ),
     Rule(
         rule_id=LOCAL_RESIDUE_RULE_ID,
         version=1,
@@ -603,6 +644,7 @@ RULES = (
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
     {
+        MIGRATION_CONSOLIDATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
         UNTYPED_JAVASCRIPT_RULE_ID: RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
@@ -617,6 +659,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
     {
+        MIGRATION_CONSOLIDATION_RULE_ID: 53,
         LOCAL_RESIDUE_RULE_ID: 51,
         UNTYPED_JAVASCRIPT_RULE_ID: 49,
         RuleId("repository/artifacts/terraform-examples"): 40,
@@ -674,7 +717,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=28,
+    policy_version=29,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1334,6 +1377,7 @@ class SarjPolicy:
             else enabled_rule_ids
         )
         separate_rules = {
+            MIGRATION_CONSOLIDATION_RULE_ID,
             PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
             UNTYPED_JAVASCRIPT_RULE_ID,
             LOCAL_RESIDUE_RULE_ID,
@@ -1341,6 +1385,7 @@ class SarjPolicy:
         }
         diagnostics = _repository_artifact_diagnostics(snapshot) if enabled - separate_rules else ()
         for rule_id, evaluate in (
+            (MIGRATION_CONSOLIDATION_RULE_ID, migration_diagnostics),
             (PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID, pull_request_template_diagnostics),
             (UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics),
             (LOCAL_RESIDUE_RULE_ID, local_residue_diagnostics),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 from repo_standards.core.errors import ConfigurationError
@@ -11,11 +11,22 @@ from repo_standards.core.inspection import (
     read_tracked_blob_contents,
     tracked_files_for_identity,
 )
-from repo_standards.core.models import MakefileComparison, MakefileMetric
+from repo_standards.core.models import (
+    MakefileComparison,
+    MakefileMetric,
+    MigrationComparison,
+    TrackedFileEvidence,
+)
+from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.policy_sarj.makefiles import (
     MAKEFILE_GROWTH_RULE_ID,
     is_makefile_path,
     physical_lines,
+)
+from repo_standards.policy_sarj.migrations import (
+    MIGRATION_CONSOLIDATION_RULE_ID,
+    migration_roots,
+    protected_roots,
 )
 
 
@@ -25,6 +36,12 @@ if TYPE_CHECKING:
 
     from repo_standards.core.models import RepositorySnapshot
     from repo_standards.core.rule_reviews import RuleVersion
+
+
+@dataclass(frozen=True, slots=True)
+class _ComparisonBase:
+    identity: GitIdentity | None
+    basis: Literal["explicit", "last-commit", "staged", "empty"]
 
 
 def with_makefile_comparison(
@@ -41,27 +58,13 @@ def with_makefile_comparison(
     if provenance.mode == "worktree":
         ConfigurationError.fail("Makefile comparison requires an exact Git tree or index")
     head = GitIdentity(provenance.source_revision, provenance.tree_digest, provenance.mode)
-    basis: Literal["explicit", "last-commit", "staged", "empty"]
-    if head.mode == "git-index":
-        base = (
-            None
-            if head.source_revision == "0" * 40
-            else git_revision_identity(root, head.source_revision)
-        )
-        basis = "staged"
-    elif base_revision is not None:
-        base = (
-            None if _empty_revision(base_revision) else git_revision_identity(root, base_revision)
-        )
-        basis = "empty" if base is None else "explicit"
-    else:
-        base = git_parent_identity(root, head)
-        basis = "empty" if base is None else "last-commit"
+    comparison_base = _comparison_base(root, head, base_revision)
+    base = comparison_base.identity
     head_files = _metrics(root, head)
     comparison = MakefileComparison(
         base_revision=base.source_revision if base else "0" * len(head.source_revision),
         base_tree_digest=base.tree_digest if base else "0" * len(head.source_revision),
-        basis=basis,
+        basis=comparison_base.basis,
         base_files=_metrics(root, base, frozenset(item.path for item in head_files), head_files)
         if base
         else (),
@@ -78,6 +81,78 @@ def with_makefile_comparison(
             comparison_basis=comparison.basis,
         ),
     )
+
+
+def with_migration_comparison(
+    root: Path,
+    snapshot: RepositorySnapshot,
+    *,
+    enabled_rules: frozenset[RuleVersion],
+    base_revision: str | None,
+) -> RepositorySnapshot:
+    if not any(item.rule_id == MIGRATION_CONSOLIDATION_RULE_ID for item in enabled_rules):
+        return snapshot
+    provenance = snapshot.provenance
+    if provenance.mode == "worktree":
+        ConfigurationError.fail("Migration comparison requires an exact Git tree or index")
+    head = GitIdentity(provenance.source_revision, provenance.tree_digest, provenance.mode)
+    if provenance.comparison_basis is not None:
+        base_revision = provenance.comparison_base_revision
+    comparison_base = _comparison_base(root, head, base_revision)
+    base = comparison_base.identity
+    base_files = (
+        tuple(
+            TrackedFileEvidence(item.path, item.object_id)
+            for item in tracked_files_for_identity(root, base)
+        )
+        if base is not None
+        else ()
+    )
+    head_files = snapshot.inspection.tracked_files
+    head_roots = migration_roots(snapshot.manifest, tuple(item.path for item in head_files))
+    base_paths = tuple(item.path for item in base_files)
+    if base is not None and provenance.manifest_path in base_paths:
+        manifest_blob = read_tracked_blob_contents(
+            root, (provenance.manifest_path,), identity=base
+        )[0]
+        base_roots = migration_roots(parse_manifest_bytes(manifest_blob.content), base_paths)
+    else:
+        base_roots = migration_roots(None, base_paths)
+    return replace(
+        snapshot,
+        migration_comparison=MigrationComparison(
+            protected_roots(base_roots, head_roots),
+            base_files,
+            head_files,
+        ),
+        provenance=replace(
+            provenance,
+            comparison_base_revision=(
+                base.source_revision if base else "0" * len(head.source_revision)
+            ),
+            comparison_base_tree_digest=(
+                base.tree_digest if base else "0" * len(head.source_revision)
+            ),
+            comparison_basis=provenance.comparison_basis or comparison_base.basis,
+        ),
+    )
+
+
+def _comparison_base(root: Path, head: GitIdentity, base_revision: str | None) -> _ComparisonBase:
+    if head.mode == "git-index":
+        return _ComparisonBase(
+            None
+            if _empty_revision(head.source_revision)
+            else git_revision_identity(root, head.source_revision),
+            "staged",
+        )
+    if base_revision is not None:
+        base = (
+            None if _empty_revision(base_revision) else git_revision_identity(root, base_revision)
+        )
+        return _ComparisonBase(base, "empty" if base is None else "explicit")
+    base = git_parent_identity(root, head)
+    return _ComparisonBase(base, "empty" if base is None else "last-commit")
 
 
 def _empty_revision(revision: str) -> bool:

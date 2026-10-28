@@ -18,7 +18,7 @@ from repo_standards.core.models import (
 from repo_standards.core.rule_reviews import RuleVersion, activated_rule_ids
 from repo_standards.policy_sarj import SarjPolicy
 
-from .comparison import with_makefile_comparison
+from .comparison import with_makefile_comparison, with_migration_comparison
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -73,6 +73,9 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         enabled_rules=enabled_rules,
         base_revision=request.base_revision,
         as_of=request.as_of,
+    )
+    snapshot = with_migration_comparison(
+        root, snapshot, enabled_rules=enabled_rules, base_revision=request.base_revision
     )
     repository_diagnostics = policy.evaluate_repository(
         snapshot, enabled_rule_ids=frozenset(item.rule_id for item in enabled_rules)
