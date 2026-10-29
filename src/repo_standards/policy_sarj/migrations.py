@@ -47,7 +47,7 @@ _AUTO_ROOT_EXCLUDED = frozenset(
 )
 
 
-def migration_roots(manifest: Manifest | None, paths: tuple[str, ...]) -> tuple[str, ...]:
+def explicit_migration_roots(manifest: Manifest | None) -> tuple[str, ...]:
     roots = (
         {item.path for item in manifest.components if item.kind == "migration-set"}
         if manifest is not None
@@ -59,6 +59,11 @@ def migration_roots(manifest: Manifest | None, paths: tuple[str, ...]) -> tuple[
         and manifest.pull_request.review_policy is not None
     ):
         roots.update(manifest.pull_request.review_policy.migration_roots)
+    return tuple(sorted(roots))
+
+
+def migration_roots(manifest: Manifest | None, paths: tuple[str, ...]) -> tuple[str, ...]:
+    roots = set(explicit_migration_roots(manifest))
     for path in paths:
         parts = PurePosixPath(path).parts
         if any(part.casefold() in _AUTO_ROOT_EXCLUDED for part in parts[:-1]):
@@ -135,8 +140,8 @@ def _new_revisions(snapshot: RepositorySnapshot) -> dict[str, tuple[TrackedFileE
     comparison = snapshot.migration_comparison
     if comparison is None:
         return {}
-    base = _revisions(comparison.base_files, comparison.roots)
-    head = _revisions(comparison.head_files, comparison.roots)
+    base = _revisions(comparison.base_files, comparison.roots, comparison.explicit_roots)
+    head = _revisions(comparison.head_files, comparison.roots, comparison.explicit_roots)
     removed = Counter(
         tuple(sorted(item.object_id for item in files))
         for revision, files in base.items()
@@ -154,17 +159,25 @@ def _new_revisions(snapshot: RepositorySnapshot) -> dict[str, tuple[TrackedFileE
 
 
 def _revisions(
-    files: tuple[TrackedFileEvidence, ...], roots: tuple[str, ...]
+    files: tuple[TrackedFileEvidence, ...],
+    roots: tuple[str, ...],
+    explicit_roots: tuple[str, ...] = (),
 ) -> dict[tuple[str, str], tuple[TrackedFileEvidence, ...]]:
     selected = frozenset(roots)
+    explicit = frozenset(explicit_roots)
     grouped: dict[tuple[str, str], list[TrackedFileEvidence]] = defaultdict(list)
     for item in files:
-        ancestors = (parent.as_posix() for parent in PurePosixPath(item.path).parents)
+        path = PurePosixPath(item.path)
+        ancestors = (parent.as_posix() for parent in path.parents)
         root = next(
             (parent for parent in ancestors if parent in selected),
             None,
         )
         if root is None:
+            continue
+        if any(part.casefold() in _AUTO_ROOT_EXCLUDED for part in path.parts[:-1]) and not any(
+            parent.as_posix() in explicit for parent in path.parents
+        ):
             continue
         revision = _revision(item.path, root)
         if revision is not None:

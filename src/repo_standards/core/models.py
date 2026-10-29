@@ -417,6 +417,7 @@ class MigrationComparison:
     roots: tuple[str, ...]
     base_files: tuple[TrackedFileEvidence, ...]
     head_files: tuple[TrackedFileEvidence, ...]
+    explicit_roots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

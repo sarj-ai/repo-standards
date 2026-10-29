@@ -25,6 +25,7 @@ from repo_standards.policy_sarj.makefiles import (
 )
 from repo_standards.policy_sarj.migrations import (
     MIGRATION_CONSOLIDATION_RULE_ID,
+    explicit_migration_roots,
     migration_roots,
     protected_roots,
 )
@@ -115,15 +116,23 @@ def with_migration_comparison(
         manifest_blob = read_tracked_blob_contents(
             root, (provenance.manifest_path,), identity=base
         )[0]
-        base_roots = migration_roots(parse_manifest_bytes(manifest_blob.content), base_paths)
+        base_manifest = parse_manifest_bytes(manifest_blob.content)
     else:
-        base_roots = migration_roots(None, base_paths)
+        base_manifest = None
+    base_roots = migration_roots(base_manifest, base_paths)
+    explicit_roots = tuple(
+        sorted(
+            set(explicit_migration_roots(base_manifest))
+            | set(explicit_migration_roots(snapshot.manifest))
+        )
+    )
     return replace(
         snapshot,
         migration_comparison=MigrationComparison(
             protected_roots(base_roots, head_roots),
             base_files,
             head_files,
+            explicit_roots=explicit_roots,
         ),
         provenance=replace(
             provenance,
