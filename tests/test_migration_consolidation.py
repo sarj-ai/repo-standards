@@ -314,3 +314,96 @@ def test_root_commit_and_unborn_index_use_an_empty_base(tmp_path: Path) -> None:
     committed = analyze_repository(RepositoryAnalysisRequest(root=tmp_path))
     assert committed.completion == "complete"
     assert len(committed.diagnostics) == 1
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "test",
+        "tests",
+        "testing",
+        "__tests__",
+        "fixture",
+        "fixtures",
+        "__fixtures__",
+        "testdata",
+        "example",
+        "examples",
+        "vendor",
+        "node_modules",
+        "generated",
+        "FIXTURES",
+    ],
+)
+def test_auto_root_exclusions_also_apply_inside_discovered_stream(
+    repository: Path, prefix: str
+) -> None:
+    base = _git(repository, "rev-parse", "HEAD")
+    for path in ("migrations/001/migration.sql", f"migrations/{prefix}/migration.sql"):
+        _write(repository, path)
+    _commit(repository)
+    automatic = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert automatic.completion == "complete"
+    assert automatic.diagnostics == ()
+
+    manifest = _MANIFEST.replace("components = []", "") + (
+        '\n[[components]]\nid = "db"\nkind = "migration-set"\n'
+        'path = "migrations"\nowner = "@example/database"\n'
+    )
+    _write(repository, ".repo-standards/repository.toml", manifest)
+    _commit(repository)
+    explicit = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert explicit.completion == "complete"
+    assert len(explicit.diagnostics) == 1
+    assert explicit.diagnostics[0].observed_value == 2
+
+
+@pytest.mark.parametrize("head_root", [None, "database/changes"])
+def test_base_explicit_root_keeps_excluded_descendants_authoritative(
+    repository: Path, head_root: str | None
+) -> None:
+    manifest = _MANIFEST.replace("components = []", "") + (
+        '\n[[components]]\nid = "db"\nkind = "migration-set"\n'
+        'path = "migrations"\nowner = "@example/database"\n'
+    )
+    _write(repository, ".repo-standards/repository.toml", manifest)
+    base = _commit(repository)
+    head_manifest = (
+        _MANIFEST
+        if head_root is None
+        else manifest.replace('path = "migrations"', f'path = "{head_root}"')
+    )
+    _write(repository, ".repo-standards/repository.toml", head_manifest)
+    for path in ("migrations/001/migration.sql", "migrations/fixtures/migration.sql"):
+        _write(repository, path)
+    _commit(repository)
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert report.completion == "complete"
+    assert len(report.diagnostics) == 1
+    assert report.diagnostics[0].observed_value == 2
+    assert report.diagnostics[0].manifest_anchor == "migration_streams.migrations"
+
+
+def test_nested_explicit_authority_does_not_split_a_trusted_automatic_root(
+    repository: Path,
+) -> None:
+    _write(repository, "migrations/000.sql")
+    base = _commit(repository)
+    for path in ("migrations/001/migration.sql", "migrations/fixtures/migration.sql"):
+        _write(repository, path)
+    _commit(repository)
+    automatic = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert automatic.completion == "complete"
+    assert automatic.diagnostics == ()
+
+    manifest = _MANIFEST.replace("components = []", "") + (
+        '\n[[components]]\nid = "db"\nkind = "migration-set"\n'
+        'path = "migrations/fixtures"\nowner = "@example/database"\n'
+    )
+    _write(repository, ".repo-standards/repository.toml", manifest)
+    _commit(repository)
+    explicit = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert explicit.completion == "complete"
+    assert len(explicit.diagnostics) == 1
+    assert explicit.diagnostics[0].observed_value == 2
+    assert explicit.diagnostics[0].manifest_anchor == "migration_streams.migrations"
