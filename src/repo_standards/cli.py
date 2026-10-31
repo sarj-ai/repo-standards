@@ -1212,10 +1212,17 @@ def _resolve_pull_request_commits_request(  # ruff: ignore[too-many-arguments] -
         )
         if not event_name:
             ConfigurationError.fail("GITHUB_EVENT_NAME is required with --github-event")
+        github_workspace = os.environ.get(  # ruff: ignore[banned-api] - scope runner evidence to its workspace
+            "GITHUB_WORKSPACE"
+        )
         inputs = resolve_github_pull_request_inputs(
             root,
             github_event,
             event_name=event_name,
+            github_sha=os.environ.get(  # ruff: ignore[banned-api] - GitHub supplies the tested merge identity
+                "GITHUB_SHA", ""
+            ),
+            github_workspace=Path(github_workspace) if github_workspace else None,
         )
         if isinstance(inputs, NotApplicable):
             return inputs
