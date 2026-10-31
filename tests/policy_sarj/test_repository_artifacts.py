@@ -129,12 +129,15 @@ def _with_insubstantive_path(
 
 
 def _rule_ids(snapshot: RepositorySnapshot) -> list[RuleId]:
-    # These assertions isolate the existing artifact ownership rules. The JavaScript
-    # warning's domain, declarations and additive overlaps have dedicated contract cases.
+    # Declaration rules have dedicated domain, ownership and overlap cases.
     return [
         item.rule_id
         for item in SarjPolicy.evaluate_repository(snapshot)
-        if item.rule_id != "repository/artifacts/untyped-javascript"
+        if item.rule_id
+        not in {
+            "repository/artifacts/untyped-javascript",
+            "repository/artifacts/undeclared-images",
+        }
     ]
 
 

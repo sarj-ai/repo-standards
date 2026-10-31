@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from ._json import parse_json_object
 from .canonical import canonical_path
 from .errors import ConfigurationError
+from .images import is_image_path
 from .javascript import is_javascript_path
 from .models import (
     MAX_REPOSITORY_INPUT_BYTES,
@@ -18,6 +19,8 @@ from .models import (
     ComponentId,
     DocumentationConfig,
     ExceptionRecord,
+    ImageArtifact,
+    ImageArtifactKind,
     JavaScriptArtifact,
     JavaScriptArtifactKind,
     MakefileException,
@@ -578,6 +581,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         "commit_message",
         "makefiles",
         "javascript",
+        "images",
     }
     required = {"repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
@@ -612,7 +616,39 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         javascript_artifacts=_javascript_artifacts(data["javascript"])
         if "javascript" in data
         else (),
+        image_artifacts=_image_artifacts(data["images"]) if "images" in data else (),
     )
+
+
+def _image_artifacts(value: object) -> tuple[ImageArtifact, ...]:
+    data = _mapping(value, "images")
+    _strict_keys(data, {"artifacts"}, set(), "images")
+    records = _list(data.get("artifacts", []), "images.artifacts")
+    if len(records) > _MAX_EXCEPTIONS:
+        ConfigurationError.fail(f"images may contain at most {_MAX_EXCEPTIONS} artifacts")
+    artifacts = tuple(_image_artifact(item, index) for index, item in enumerate(records))
+    paths = tuple(item.path for item in artifacts)
+    if len(paths) != len(set(paths)):
+        ConfigurationError.fail("images.artifacts contains duplicate paths")
+    return artifacts
+
+
+def _image_artifact(value: object, index: int) -> ImageArtifact:
+    context = f"images.artifacts[{index}]"
+    data = _mapping(value, context)
+    fields = {"path", "kind", "reason"}
+    _strict_keys(data, fields, fields, context)
+    path = _exact_artifact_path(_string(data, "path", context), f"{context}.path")
+    if not is_image_path(path):
+        ConfigurationError.fail(f"{context}.path must name a supported image file")
+    try:
+        kind = ImageArtifactKind(_string(data, "kind", context))
+    except ValueError:
+        ConfigurationError.fail(f"{context}.kind must be application, documentation or fixture")
+    reason = _string(data, "reason", context)
+    if not any(character.isprintable() and not character.isspace() for character in reason):
+        ConfigurationError.fail(f"{context}.reason must contain text")
+    return ImageArtifact(path=path, kind=kind, reason=reason)
 
 
 def _javascript_artifacts(value: object) -> tuple[JavaScriptArtifact, ...]:

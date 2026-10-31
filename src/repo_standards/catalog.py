@@ -84,6 +84,7 @@ _RULE_SLUGS = types.MappingProxyType(
         "repository/artifacts/migration-consolidation": "migration-consolidation",
         "repository/artifacts/local-residue": "local-residue",
         "repository/artifacts/untyped-javascript": "untyped-javascript",
+        "repository/artifacts/undeclared-images": "undeclared-images",
         "repository/artifacts/terraform-examples": "terraform-examples",
         "repository/artifacts/schema-derived-config-examples": "schema-derived-config-examples",
         "repository/artifacts/bespoke-iac-verifiers": "bespoke-iac-verifiers",

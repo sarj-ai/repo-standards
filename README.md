@@ -22,6 +22,25 @@ enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]
 The locked Repo Standards release supplies the current reviewed implementation. Manifests and
 one-off `--enable-rule` checks select current rules by stable, versionless ID.
 
+### Image assets
+
+Activate `repository/artifacts/undeclared-images` to require reviewed ownership for tracked
+image files. Keep PR screenshots and transient QA evidence in review attachments or external
+storage. Declare durable application assets, documentation illustrations and real image fixtures:
+
+```toml
+[[images.artifacts]]
+path = "public/logo.svg"
+kind = "application" # application, documentation or fixture
+reason = "The application renders this brand mark."
+```
+
+Each declaration names one exact, tracked regular file and needs a visible reason. Patterns never
+expand; directories, size, generated output and LFS pointers grant no exemption. Declarations follow
+the selected Git tree or staged index and are bound to baseline scope. Enabling the rule is separate
+from declaring assets. The rule identifies missing declarations, not image quality or intent; it
+does not decode content, recognize extensionless images, or automatically delete files.
+
 ## Run it
 
 Sarj repositories should use the single Code Standards setup path. It installs the canonical

@@ -34,6 +34,7 @@ from repo_standards.core.taxonomy import (
     taxonomy,
 )
 
+from .images import UNDECLARED_IMAGES_RULE_ID, image_diagnostics
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics
 from .local_residue import LOCAL_RESIDUE_RULE_ID, local_residue_diagnostics
 from .makefiles import MAKEFILE_GROWTH_RULE_ID, makefile_diagnostics
@@ -190,11 +191,13 @@ def _example(  # ruff: ignore[too-many-arguments] - keyword-only declarative fix
     )
 
 
-def _tracked_files_example(*paths: str) -> str:
+def _tracked_files_example(*paths: str, manifest: str | None = None) -> str:
     return canonical_json(
         {
             "tracked": paths,
-            "manifest": 'repository_id = "example-repository"\ncomponents = []\n',
+            "manifest": manifest
+            if manifest is not None
+            else 'repository_id = "example-repository"\ncomponents = []\n',
         }
     )
 
@@ -288,8 +291,8 @@ RULES = (
                 example_id="sarj-artifact-local-residue-desktop-metadata",
                 title="Retain the asset and untrack desktop thumbnail metadata",
                 language="json",
-                before=_tracked_files_example("assets/thumbnail.png", "assets/Thumbs.db"),
-                after=_tracked_files_example("assets/thumbnail.png"),
+                before=_tracked_files_example("assets/theme.css", "assets/Thumbs.db"),
+                after=_tracked_files_example("assets/theme.css"),
                 expected_severity="warning",
             ),
             _example(
@@ -306,6 +309,70 @@ RULES = (
                 language="json",
                 before=_tracked_files_example(".coveragerc", ".coverage"),
                 after=_tracked_files_example(".coveragerc"),
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=UNDECLARED_IMAGES_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Declare durable image assets and keep review evidence out of Git",
+        description=(
+            "Tracked PNG, JPEG, GIF, WebP, AVIF, SVG, SVGZ, ICO, BMP, TIFF, APNG, HEIC, "
+            "HEIF and JXL paths require an exact images.artifacts declaration with an "
+            "application, documentation or fixture purpose and a nonblank reason. "
+            "The rule is explicitly activated by a consumer; directories and file size "
+            "do not grant exemptions."
+        ),
+        why=(
+            "PR screenshots and transient QA output add binary history without being "
+            "application assets or maintained test inputs. Legitimate logos, icons, "
+            "documentation illustrations and image fixtures remain valid through "
+            "reviewed declarations. Paths establish missing ownership, not image quality "
+            "or author intent."
+        ),
+        fix=(
+            "Attach PR evidence to its review or retain it externally, then untrack the "
+            "review-only file. For a durable asset, declare its exact tracked path, "
+            "purpose and reason. Glob-looking characters are literal and declarations "
+            "must match regular files in the selected Git tree or index. No automatic "
+            "deletion, content decoding or recognition of extensionless images is offered."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-image-review-evidence",
+                title="Attach review screenshots instead of tracking them",
+                language="json",
+                before=_tracked_files_example("docs/review/before.png"),
+                after=_tracked_files_example(),
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-image-application-asset",
+                title="Declare an application image without deleting it",
+                language="json",
+                before=_tracked_files_example("public/logo.svg"),
+                after=_tracked_files_example(
+                    "public/logo.svg",
+                    manifest='repository_id = "example-repository"\ncomponents = []\n'
+                    '[[images.artifacts]]\npath = "public/logo.svg"\n'
+                    'kind = "application"\nreason = "Application brand mark."\n',
+                ),
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-image-fixture",
+                title="Retain image bytes required by a real test",
+                language="json",
+                before=_tracked_files_example("tests/fixtures/input.png"),
+                after=_tracked_files_example(
+                    "tests/fixtures/input.png",
+                    manifest='repository_id = "example-repository"\ncomponents = []\n'
+                    '[[images.artifacts]]\npath = "tests/fixtures/input.png"\n'
+                    'kind = "fixture"\nreason = "Decoder regression input."\n',
+                ),
                 expected_severity="warning",
             ),
         ),
@@ -647,6 +714,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         MIGRATION_CONSOLIDATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
         UNTYPED_JAVASCRIPT_RULE_ID: RuleClassification.JUDGMENT,
+        UNDECLARED_IMAGES_RULE_ID: RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/schema-derived-config-examples"): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
@@ -662,6 +730,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         MIGRATION_CONSOLIDATION_RULE_ID: 53,
         LOCAL_RESIDUE_RULE_ID: 51,
         UNTYPED_JAVASCRIPT_RULE_ID: 49,
+        UNDECLARED_IMAGES_RULE_ID: 54,
         RuleId("repository/artifacts/terraform-examples"): 40,
         RuleId("repository/artifacts/schema-derived-config-examples"): 44,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
@@ -708,7 +777,11 @@ RULE_GOVERNANCE = tuple(
         ),
         classification=_RULE_CLASSIFICATION[rule.rule_id],
         evidence=_RULE_EVIDENCE[rule.rule_id],
-        upstream=_UPSTREAM_BY_CLASSIFICATION[_RULE_CLASSIFICATION[rule.rule_id]],
+        upstream=(
+            ("Git tracked-tree inventory", "repository image declarations")
+            if rule.rule_id == UNDECLARED_IMAGES_RULE_ID
+            else _UPSTREAM_BY_CLASSIFICATION[_RULE_CLASSIFICATION[rule.rule_id]]
+        ),
         precedence=_RULE_PRECEDENCE[rule.rule_id],
     )
     for rule in RULES
@@ -717,7 +790,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=30,
+    policy_version=31,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1380,6 +1453,7 @@ class SarjPolicy:
             MIGRATION_CONSOLIDATION_RULE_ID,
             PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
             UNTYPED_JAVASCRIPT_RULE_ID,
+            UNDECLARED_IMAGES_RULE_ID,
             LOCAL_RESIDUE_RULE_ID,
             MAKEFILE_GROWTH_RULE_ID,
         }
@@ -1388,6 +1462,7 @@ class SarjPolicy:
             (MIGRATION_CONSOLIDATION_RULE_ID, migration_diagnostics),
             (PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID, pull_request_template_diagnostics),
             (UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics),
+            (UNDECLARED_IMAGES_RULE_ID, image_diagnostics),
             (LOCAL_RESIDUE_RULE_ID, local_residue_diagnostics),
         ):
             if rule_id in enabled:

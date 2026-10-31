@@ -104,6 +104,21 @@ class JavaScriptArtifact:
     source: str | None = None
 
 
+class ImageArtifactKind(StrEnum):
+    """Durable use of a tracked image, independent of its directory or format."""
+
+    APPLICATION = "application"
+    DOCUMENTATION = "documentation"
+    FIXTURE = "fixture"
+
+
+@dataclass(frozen=True, slots=True)
+class ImageArtifact:
+    path: str
+    kind: ImageArtifactKind
+    reason: str
+
+
 @dataclass(frozen=True, slots=True)
 class DocumentationConfig:
     entrypoints: tuple[str, ...]
@@ -171,6 +186,7 @@ class Manifest:
     commit_message: CommitMessageConfig = field(default_factory=CommitMessageConfig)
     makefile_exceptions: tuple[MakefileException, ...] = ()
     javascript_artifacts: tuple[JavaScriptArtifact, ...] = ()
+    image_artifacts: tuple[ImageArtifact, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
