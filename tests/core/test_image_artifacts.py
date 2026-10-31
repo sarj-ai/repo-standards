@@ -7,7 +7,9 @@ import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
+from typer.testing import CliRunner
 
+from repo_standards.cli import app
 from repo_standards.core.canonical import scope_digest
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import git_index_identity, load_repository_snapshot
@@ -115,8 +117,8 @@ def test_undeclared_images_have_no_directory_or_case_exemptions(path: str) -> No
     finding = findings[0]
     assert (finding.rule_id, finding.rule_version, finding.severity, finding.path) == (
         _RULE_ID,
-        1,
-        "warning",
+        2,
+        "error",
         path,
     )
     assert finding.evidence_level == "verified"
@@ -255,7 +257,7 @@ def test_rule_activation_is_explicit(tmp_path: Path) -> None:
     )
     assert disabled.diagnostics == ()
     assert [(item.rule_id, item.severity, item.path) for item in enabled.diagnostics] == [
-        (_RULE_ID, "warning", "public/logo.png")
+        (_RULE_ID, "error", "public/logo.png")
     ]
 
 
@@ -339,3 +341,15 @@ def test_staged_manifest_and_images_ignore_unstaged_permissions_and_untracked_im
     _git(root, "add", "public/review.png")
     staged = load_repository_snapshot(root, identity=git_index_identity(root))
     assert [item.path for item in SarjPolicy.evaluate_repository(staged)] == ["public/review.png"]
+
+
+@pytest.mark.parametrize("declared", [False, True])
+def test_activated_image_rule_blocks_undeclared_assets_at_the_cli(
+    tmp_path: Path, *, declared: bool
+) -> None:
+    root = _repository(tmp_path, records=_artifact() if declared else "", enabled=True)
+
+    result = CliRunner().invoke(app, ["check", str(root)])
+
+    assert result.exit_code == (0 if declared else 1)
+    assert (str(_RULE_ID) in result.stdout) is not declared

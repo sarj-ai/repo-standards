@@ -315,8 +315,8 @@ RULES = (
     ),
     Rule(
         rule_id=UNDECLARED_IMAGES_RULE_ID,
-        version=1,
-        default_severity="warning",
+        version=2,
+        default_severity="error",
         title="Declare durable image assets and keep review evidence out of Git",
         description=(
             "Tracked PNG, JPEG, GIF, WebP, AVIF, SVG, SVGZ, ICO, BMP, TIFF, APNG, HEIC, "
@@ -347,7 +347,7 @@ RULES = (
                 language="json",
                 before=_tracked_files_example("docs/review/before.png"),
                 after=_tracked_files_example(),
-                expected_severity="warning",
+                expected_severity="error",
             ),
             _example(
                 example_id="sarj-image-application-asset",
@@ -360,7 +360,7 @@ RULES = (
                     '[[images.artifacts]]\npath = "public/logo.svg"\n'
                     'kind = "application"\nreason = "Application brand mark."\n',
                 ),
-                expected_severity="warning",
+                expected_severity="error",
             ),
             _example(
                 example_id="sarj-image-fixture",
@@ -373,7 +373,7 @@ RULES = (
                     '[[images.artifacts]]\npath = "tests/fixtures/input.png"\n'
                     'kind = "fixture"\nreason = "Decoder regression input."\n',
                 ),
-                expected_severity="warning",
+                expected_severity="error",
             ),
         ),
     ),
@@ -790,7 +790,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=31,
+    policy_version=32,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
