@@ -26,6 +26,7 @@ from repo_standards._git_environment import GIT_ENVIRONMENT
 from ._json import parse_json_object
 from .canonical import canonical_path
 from .errors import ConfigurationError, ManifestAbsentError
+from .images import validate_image_artifacts
 from .javascript import validate_javascript_artifacts
 from .models import (
     GitObjectId,
@@ -252,6 +253,7 @@ def load_repository_snapshot(
     manifest = parse_manifest_bytes(manifest_content)
     _validate_documentation_entrypoints(manifest, by_path)
     validate_javascript_artifacts(manifest.javascript_artifacts, frozenset(by_path))
+    validate_image_artifacts(manifest.image_artifacts, frozenset(by_path))
     inspection = _inspection_from_blobs(resolved, identity, blobs)
     if inspection.completion != "complete":
         ConfigurationError.fail("repository inspection is incomplete")
@@ -295,6 +297,7 @@ def load_calibration_snapshot(
     validate_javascript_artifacts(
         manifest.javascript_artifacts, frozenset(blob.path for blob in blobs)
     )
+    validate_image_artifacts(manifest.image_artifacts, frozenset(blob.path for blob in blobs))
     inspection = _inspection_from_blobs(resolved, identity, blobs)
     if inspection.completion != "complete":
         ConfigurationError.fail("repository inspection is incomplete")

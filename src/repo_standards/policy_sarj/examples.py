@@ -25,6 +25,7 @@ from repo_standards.core.models import (
 )
 from repo_standards.core.parser import parse_manifest_bytes
 
+from .images import UNDECLARED_IMAGES_RULE_ID
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID
 from .local_residue import LOCAL_RESIDUE_RULE_ID
 from .makefiles import MAKEFILE_GROWTH_RULE_ID
@@ -107,6 +108,7 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
         return _run_pull_request_template(source)
     if case.rule_id in {
         UNTYPED_JAVASCRIPT_RULE_ID,
+        UNDECLARED_IMAGES_RULE_ID,
         LOCAL_RESIDUE_RULE_ID,
     } and source.lstrip().startswith("{"):
         context = _TrackedFilesExampleSource.model_validate_json(source)

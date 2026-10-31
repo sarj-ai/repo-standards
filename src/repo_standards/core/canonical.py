@@ -175,4 +175,9 @@ def scope_digest(manifest: Manifest) -> str:
             }
             for artifact in sorted(manifest.javascript_artifacts, key=lambda item: item.path)
         ]
+    if manifest.image_artifacts:
+        payload["images"] = [
+            {"path": artifact.path, "kind": artifact.kind.value, "reason": artifact.reason}
+            for artifact in sorted(manifest.image_artifacts, key=lambda item: item.path)
+        ]
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()
