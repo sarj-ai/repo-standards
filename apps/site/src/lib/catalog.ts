@@ -1,9 +1,25 @@
 import rawCatalogJson from '../generated/catalog.json?raw';
+import { resolve } from 'node:path';
+import { readFile, readdir } from 'node:fs/promises';
 import { generatedCatalog } from '../generated/catalog.generated';
 import { siteHref } from './site';
+import { ruleIntroductions, type RuleIntroduction } from './rule-introductions';
 
 export const catalog = generatedCatalog;
 export const catalogJson = rawCatalogJson;
+const repositoryDirectory = resolve(process.cwd(), '../..');
+const policyDirectory = 'src/repo_standards/policy_sarj';
+const definitions = await Promise.all((await readdir(resolve(repositoryDirectory, policyDirectory)))
+  .filter((name) => name.endsWith('.py'))
+  .map(async (name) => {
+    const path = `${policyDirectory}/${name}`;
+    return { path, source: await readFile(resolve(repositoryDirectory, path), 'utf8') };
+  }));
+const introductions = await ruleIntroductions(repositoryDirectory, catalog.rules.flatMap((rule) => {
+  const id = rule["rule_id"];
+  const paths = new Set([rule.source.path, ...definitions.filter((file) => file.source.includes(id)).map((file) => file.path)]);
+  return [...paths].map((path) => ({ id, path, marker: id }));
+}));
 export type Rule = Catalog['rules'][number];
 export type Parameter = Command['options'][number] | Command['arguments'][number];
 
@@ -16,6 +32,7 @@ export interface RuleView {
   readonly rule: Rule;
   readonly href: string;
   readonly category: string;
+  readonly introduction: RuleIntroduction | null;
 }
 
 interface TopicView {
@@ -54,6 +71,7 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
             rule,
             href: ruleHref(rule),
             category: categoryValue.label,
+            introduction: introductions.get(rule["rule_id"]) ?? null,
           }));
         if (rules.length === 0) throw new TypeError(`Rule topic has no rules: ${topicValue["topic_id"]}`);
         return { topic: topicValue, rules };
