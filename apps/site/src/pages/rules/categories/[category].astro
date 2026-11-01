@@ -2,8 +2,8 @@
 import Breadcrumbs from '@sarj/design/Breadcrumbs.astro';
 
 import ReferencePage from '../../../components/ReferencePage.astro';
+import RuleDirectory from '../../../components/RuleDirectory.astro';
 import { referenceCatalog, type CategoryView } from '../../../lib/catalog';
-import { ruleDescription } from '../../../lib/rule-view';
 
 export function getStaticPaths() {
   return referenceCatalog.map((category) => ({
@@ -14,7 +14,7 @@ export function getStaticPaths() {
 
 interface Props { category: CategoryView }
 const { category } = Astro.props;
-const topics = category.topics;
+const rows = category.topics.flatMap((topic) => topic.rules);
 const ruleCount = category.ruleCount;
 ---
 
@@ -22,22 +22,6 @@ const ruleCount = category.ruleCount;
   <Breadcrumbs ancestors={[{ label: 'Rules', href: '/rules/' }]} current={category.category.label} />
   <h1 class="sarj-visually-hidden">{category.category.label}</h1>
   <div class="rule-catalog" data-category-id={category.category["category_id"]}>
-    {topics.map(({ topic, rules }) => {
-      return (
-        <section class="rule-topic" aria-labelledby={`topic-${topic["topic_id"]}`}>
-          <h2 id={`topic-${topic["topic_id"]}`}>{topic.label}</h2>
-          <div class="rule-list">
-            {rules.map(({ rule, href }) => (
-              <a class="rule-row" href={href} data-rule-id={rule["rule_id"]}>
-                <strong>{rule.title}</strong>
-                <span>{ruleDescription(rule)}</span>
-                <code>{rule["rule_id"]}</code>
-                <span class:list={['severity', `severity--${rule["default_severity"]}`]}>{rule["default_severity"]}</span>
-              </a>
-            ))}
-          </div>
-        </section>
-      );
-    })}
+    <RuleDirectory rows={rows} />
   </div>
 </ReferencePage>

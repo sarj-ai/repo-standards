@@ -119,6 +119,11 @@ h2 { margin-top: 1.5rem; }
 .not-found { padding: 4rem 0; }
 
 .rule-directory { max-width: 68rem; padding-top: .75rem; }
+.directory-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .75rem; }
+.directory-toolbar > p { margin: 0; color: var(--sl-color-gray-2); font: .75rem/1.4 var(--sl-font-mono); }
+.directory-toolbar label { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font: .75rem/1.4 var(--sl-font-mono); }
+.directory-toolbar select { min-height: 44px; padding: .4rem .6rem; border: 1px solid var(--sarj-color-rule); border-radius: .3rem; background: var(--sl-color-black); color: var(--sl-color-white); font: inherit; }
+.rule-row__introduced { color: var(--sl-color-gray-2); font: .68rem/1.4 var(--sl-font-mono); }
 .directory-empty, .directory-empty-state { color: var(--sl-color-gray-2); }
 .rule-table { margin: 0; padding: 0; border: 1px solid var(--sarj-color-rule); border-bottom: 0; list-style: none; }
 .rule-table .rule-row {

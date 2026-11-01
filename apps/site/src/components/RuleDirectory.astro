@@ -1,23 +1,34 @@
 ---
 import type { RuleView } from '../lib/catalog';
 import RuleTypeMark from './RuleTypeMark.astro';
+import { compareRules } from '../lib/rule-sort';
 
 interface Props {
   rows: readonly RuleView[];
 }
 
 const { rows } = Astro.props;
+const orderedRows = rows.toSorted((left, right) => compareRules(
+  { name: left.rule.title, key: left.rule["rule_id"], introducedAt: left.introduction?.introducedAt ?? null },
+  { name: right.rule.title, key: right.rule["rule_id"], introducedAt: right.introduction?.introducedAt ?? null },
+  'name',
+));
 ---
 
 <div class="rule-directory">
-  <ul class="rule-table">
-    {rows.map(({ rule, href, category }) => (
-      <li>
+  <div class="directory-toolbar">
+    <p>{rows.length} {rows.length === 1 ? 'rule' : 'rules'}</p>
+    <label>Sort by<select data-rule-sort><option value="name">Rule name</option><option value="newest">Introduced: newest first</option><option value="oldest">Introduced: oldest first</option></select></label>
+  </div>
+  <ul class="rule-table" data-rule-list>
+    {orderedRows.map(({ rule, href, category, introduction }) => (
+      <li data-rule-key={rule["rule_id"]} data-rule-name={rule.title} data-introduced-at={introduction?.introducedAt}>
         <a class="rule-row" href={href} data-rule-id={rule["rule_id"]}>
           <RuleTypeMark categoryId={rule["category_id"]} label={category} />
           <span class="rule-row__main">
             <strong>{rule.title}</strong>
             <span>{rule.description}</span>
+            <small class="rule-row__introduced">Introduced {introduction ? <time datetime={introduction.introducedAt}>{introduction.introducedAt.slice(0, 10)}</time> : 'date unavailable'}</small>
           </span>
           <code>{rule.slug}</code>
           <span class:list={['severity', `severity--${rule["default_severity"]}`]}>{rule["default_severity"]}</span>
@@ -26,3 +37,27 @@ const { rows } = Astro.props;
     ))}
   </ul>
 </div>
+
+<script>
+  import { compareRules, ruleSort } from '../lib/rule-sort';
+
+  for (const directory of document.querySelectorAll('.rule-directory')) {
+    if (!(directory instanceof HTMLElement) || directory.dataset.sortReady === 'true') continue;
+    directory.dataset.sortReady = 'true';
+    const select = directory.querySelector('[data-rule-sort]');
+    const list = directory.querySelector('[data-rule-list]');
+    if (!(select instanceof HTMLSelectElement) || !(list instanceof HTMLUListElement)) continue;
+    const rows = [...list.children].filter((row): row is HTMLLIElement => row instanceof HTMLLIElement);
+    select.value = ruleSort(new URLSearchParams(location.search).get('sort'));
+    const apply = () => {
+      const selected = ruleSort(select.value);
+      const key = (row: HTMLLIElement) => ({ name: row.dataset.ruleName ?? '', key: row.dataset.ruleKey ?? '', introducedAt: row.dataset.introducedAt ?? null });
+      list.append(...rows.toSorted((left, right) => compareRules(key(left), key(right), selected)));
+      const next = new URL(location.href);
+      selected !== 'name' ? next.searchParams.set('sort', selected) : next.searchParams.delete('sort');
+      history.replaceState(null, '', next);
+    };
+    select.addEventListener('change', apply);
+    apply();
+  }
+</script>
