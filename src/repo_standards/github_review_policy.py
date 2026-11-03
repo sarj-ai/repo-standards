@@ -969,19 +969,14 @@ def review_policy_status_passed(
     client: GitHubClient,
     statuses: Sequence[object],
     *,
+    head_sha: str,
     workflow_path: str,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> bool:
-    matching: list[Mapping[str, object]] = []
-    for raw in statuses:
-        status = _mapping(raw, "commit status")
-        # The statuses endpoint is scoped to the exact commit; its items omit "sha".
-        if status.get("context") == _STATUS_CONTEXT:
-            matching.append(status)
-    if not matching:
+    latest = _latest_review_policy_status(statuses)
+    if latest is None:
         return False
-    latest = max(matching, key=lambda item: _integer(item.get("id"), "commit status id"))
     creator = _mapping(latest.get("creator"), "commit status creator")
     if not (
         latest.get("state") == "success"
@@ -995,13 +990,31 @@ def review_policy_status_passed(
     )
     run = _completed_run(client, run_id, clock=clock, sleep=sleep)
     run_path = _string(run.get("path"), "review policy workflow path").split("@", 1)[0]
-    return (
+    if not (
         run_path == workflow_path
         and run.get("status") == "completed"
         and run.get("conclusion") == "success"
         and run.get("event")
         in {"pull_request_target", "workflow_run", "schedule", "workflow_dispatch"}
+    ):
+        return False
+    # Another reconciliation may supersede this receipt while its Actions run finishes.
+    refreshed = _latest_review_policy_status(
+        client.rest_pages(f"/repos/{client.repository}/commits/{head_sha}/statuses")
     )
+    return refreshed is not None and refreshed.get("id") == latest.get("id")
+
+
+def _latest_review_policy_status(statuses: Sequence[object]) -> Mapping[str, object] | None:
+    matching: list[Mapping[str, object]] = []
+    for raw in statuses:
+        status = _mapping(raw, "commit status")
+        # The statuses endpoint is scoped to the exact commit; its items omit "sha".
+        if status.get("context") == _STATUS_CONTEXT:
+            matching.append(status)
+    if not matching:
+        return None
+    return max(matching, key=lambda item: _integer(item.get("id"), "commit status id"))
 
 
 def _completed_run(
@@ -1112,7 +1125,9 @@ def queued_stack_block_reason(  # ruff: ignore[too-many-return-statements] - eac
         statuses = client.rest_pages(
             f"/repos/{client.repository}/commits/{parent.head_sha}/statuses"
         )
-        if not review_policy_status_passed(client, statuses, workflow_path=workflow_path):
+        if not review_policy_status_passed(
+            client, statuses, head_sha=parent.head_sha, workflow_path=workflow_path
+        ):
             return f"base pull request #{parent.number} has no passing review policy receipt"
         child, parent_sha = parent, entry.parent_sha
     return f"pull request stack is deeper than {_MAX_STACK_DEPTH}"
@@ -1179,6 +1194,7 @@ def reconcile_merge_group(
     passed = stack_block is None and review_policy_status_passed(
         client,
         statuses,
+        head_sha=snapshot.head_sha,
         workflow_path=workflow_path,
     )
     refreshed = pull_request_snapshot(client, snapshot.number)

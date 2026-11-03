@@ -712,6 +712,7 @@ def test_merge_group_requires_latest_actions_status_for_exact_head() -> None:
     assert not review_policy_status_passed(
         client,
         statuses,
+        head_sha="b" * 40,
         workflow_path=".github/workflows/review-policy.yml",
     )
 
@@ -730,11 +731,13 @@ def test_merge_group_rejects_spoofed_success_status() -> None:
     assert not review_policy_status_passed(
         client,
         statuses,
+        head_sha="b" * 40,
         workflow_path=".github/workflows/review-policy.yml",
     )
 
 
 def test_merge_group_accepts_configured_successful_actions_run() -> None:
+    pull_head = "b" * 40
     statuses = [
         {
             "id": 1,
@@ -747,7 +750,9 @@ def test_merge_group_accepts_configured_successful_actions_run() -> None:
 
     def request(method: str, path: str) -> object:
         assert method == "GET"
-        assert path.startswith("/repos/owner/repo/")
+        if path == f"/repos/owner/repo/commits/{pull_head}/statuses?per_page=100&page=1":
+            return statuses
+        assert path == "/repos/owner/repo/actions/runs/123"
         return {
             "path": ".github/workflows/review-policy.yml@refs/heads/dev",
             "status": "completed",
@@ -760,6 +765,7 @@ def test_merge_group_accepts_configured_successful_actions_run() -> None:
     assert review_policy_status_passed(
         client,
         statuses,
+        head_sha=pull_head,
         workflow_path=".github/workflows/review-policy.yml",
     )
 
@@ -785,6 +791,7 @@ def _successful_status() -> list[dict[str, object]]:
     ],
 )
 def test_merge_group_waits_for_the_status_run_to_complete(conclusion: str, expected: bool) -> None:
+    pull_head = "b" * 40
     runs = iter(
         [
             {"status": "in_progress", "conclusion": None},
@@ -795,7 +802,9 @@ def test_merge_group_waits_for_the_status_run_to_complete(conclusion: str, expec
 
     def request(method: str, path: str) -> object:
         assert method == "GET"
-        assert path.startswith("/repos/owner/repo/")
+        if path == f"/repos/owner/repo/commits/{pull_head}/statuses?per_page=100&page=1":
+            return _successful_status()
+        assert path == "/repos/owner/repo/actions/runs/123"
         return {
             "path": ".github/workflows/review-policy.yml@refs/heads/dev",
             "event": "workflow_run",
@@ -808,6 +817,7 @@ def test_merge_group_waits_for_the_status_run_to_complete(conclusion: str, expec
         review_policy_status_passed(
             client,
             _successful_status(),
+            head_sha=pull_head,
             workflow_path=".github/workflows/review-policy.yml",
             clock=lambda: 0.0,
             sleep=sleeps.append,
@@ -817,13 +827,68 @@ def test_merge_group_waits_for_the_status_run_to_complete(conclusion: str, expec
     assert sleeps == [5]
 
 
+@pytest.mark.parametrize(
+    ("context", "state", "expected"),
+    [
+        pytest.param("Review Policy", "pending", False, id="pending-receipt"),
+        pytest.param("Review Policy", "failure", False, id="failed-receipt"),
+        pytest.param("Review Policy", "success", False, id="new-successful-receipt"),
+        pytest.param("CI", "failure", True, id="unrelated-context"),
+    ],
+)
+def test_merge_group_rechecks_latest_receipt_after_waiting(
+    context: str, state: str, expected: bool
+) -> None:
+    pull_head = "b" * 40
+    run_path = "/repos/owner/repo/actions/runs/123"
+    statuses_path = f"/repos/owner/repo/commits/{pull_head}/statuses?per_page=100&page=1"
+    statuses = _successful_status()
+    current_statuses: list[object] = list(statuses)
+    calls: list[str] = []
+    runs = iter(
+        [
+            {"status": "in_progress", "conclusion": None},
+            {"status": "completed", "conclusion": "success"},
+        ]
+    )
+
+    def request(method: str, path: str) -> object:
+        assert method == "GET"
+        calls.append(path)
+        if path == statuses_path:
+            return current_statuses
+        assert path == run_path
+        return {
+            "path": ".github/workflows/review-policy.yml@refs/heads/dev",
+            "event": "workflow_run",
+            **next(runs),
+        }
+
+    def sleep(seconds: float) -> None:
+        assert seconds == 5
+        current_statuses.insert(0, {**statuses[0], "id": 2, "context": context, "state": state})
+
+    assert (
+        review_policy_status_passed(
+            _RequestFixture(request),
+            statuses,
+            head_sha=pull_head,
+            workflow_path=".github/workflows/review-policy.yml",
+            clock=lambda: 0.0,
+            sleep=sleep,
+        )
+        is expected
+    )
+    assert calls == [run_path, run_path, statuses_path]
+
+
 def test_merge_group_rejects_a_status_run_that_never_completes() -> None:
     clock = iter([0.0, 100.0, 200.0, 300.0])
     sleeps: list[float] = []
 
     def request(method: str, path: str) -> object:
         assert method == "GET"
-        assert path.startswith("/repos/owner/repo/")
+        assert path == "/repos/owner/repo/actions/runs/123"
         return {
             "path": ".github/workflows/review-policy.yml@refs/heads/dev",
             "status": "in_progress",
@@ -836,6 +901,7 @@ def test_merge_group_rejects_a_status_run_that_never_completes() -> None:
     assert not review_policy_status_passed(
         client,
         _successful_status(),
+        head_sha="b" * 40,
         workflow_path=".github/workflows/review-policy.yml",
         clock=lambda: next(clock),
         sleep=sleeps.append,
