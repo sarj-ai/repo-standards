@@ -164,6 +164,39 @@ def test_analysis_report_variants_reject_empty_required_payloads() -> None:
     assert passed.conclusion == "passed"
 
 
+@pytest.mark.parametrize(
+    "fingerprints",
+    [pytest.param((), id="empty-baseline"), pytest.param(("f" * 64,), id="nonempty-baseline")],
+)
+def test_baseline_comparison_rejects_incomplete_evidence(
+    fingerprints: tuple[str, ...],
+) -> None:
+    common: _ReportArguments = {
+        "mode": Mode.RATCHET,
+        "repository_id": RepositoryId("example-repository"),
+        "policy_id": PolicyId("example"),
+        "policy_version": 1,
+        "scope_digest": "a" * 64,
+    }
+    report = IncompleteReport(execution_issues=(_execution_issue(),), **common)
+    baseline = Baseline(
+        repository_id=report.repository_id,
+        policy_id=report.policy_id,
+        policy_version=report.policy_version,
+        scope_digest=report.scope_digest,
+        fingerprints=fingerprints,
+    )
+    with pytest.raises(ConfigurationError, match="incomplete analysis"):
+        classify_baseline(report, baseline)
+    with pytest.raises(ConfigurationError, match="incomplete analysis"):
+        check_baseline(report, baseline)
+
+    completed = PassedReport(**common)
+    empty = replace(baseline, fingerprints=())
+    assert classify_baseline(completed, empty).entries == ()
+    assert check_baseline(completed, empty) == ()
+
+
 def test_canonical_json_rejects_non_finite_numbers() -> None:
     with pytest.raises(ConfigurationError, match="canonical JSON"):
         canonical_json({"value": float("nan")})

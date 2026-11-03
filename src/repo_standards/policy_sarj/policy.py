@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 from repo_standards.core.canonical import (
     ComponentIndex,
     canonical_json,
-    nearest_component,
     workspace_pattern_matches,
 )
 from repo_standards.core.models import (
@@ -803,8 +802,9 @@ POLICY_SPEC = PolicySpec(
 def _repository_artifact_diagnostics(
     snapshot: RepositorySnapshot,
 ) -> tuple[Diagnostic, ...]:
-    package_test_roots = _owned_package_roots(snapshot)
+    components = ComponentIndex(snapshot.manifest.components)
     tracked_files = {item.path: item.substantive for item in snapshot.inspection.tracked_files}
+    package_test_roots = _owned_package_roots(snapshot, components, tracked_files)
     standalone_package_roots = frozenset(
         _parent_path(project.path)
         for project in snapshot.inspection.packages
@@ -817,7 +817,6 @@ def _repository_artifact_diagnostics(
         frozenset(snapshot.inspection.terraform_modules),
     )
     diagnostics: list[Diagnostic] = []
-    components = ComponentIndex(snapshot.manifest.components)
     for tracked in snapshot.inspection.tracked_files:
         diagnostics.extend(
             _tracked_artifact_diagnostics(
@@ -1095,23 +1094,27 @@ def _markdown_path_is_owned(
     )
 
 
-def _owned_package_roots(snapshot: RepositorySnapshot) -> frozenset[str]:
+def _owned_package_roots(
+    snapshot: RepositorySnapshot, components: ComponentIndex, tracked_files: dict[str, bool]
+) -> frozenset[str]:
     roots: set[str] = set()
-    tracked_files = {item.path: item.substantive for item in snapshot.inspection.tracked_files}
     for project in snapshot.inspection.packages:
-        root = _owned_package_root(snapshot, project, tracked_files)
+        root = _owned_package_root(snapshot, project, tracked_files, components)
         if root is not None:
             roots.add(root)
     return frozenset(roots)
 
 
 def _owned_package_root(
-    snapshot: RepositorySnapshot, project: PackageEvidence, tracked_files: dict[str, bool]
+    snapshot: RepositorySnapshot,
+    project: PackageEvidence,
+    tracked_files: dict[str, bool],
+    components: ComponentIndex,
 ) -> str | None:
     root = _parent_path(project.path)
     if not project.name:
         return None
-    component = nearest_component(root, snapshot.manifest.components)
+    component = components.nearest(root)
     explicitly_owned = (
         component is not None
         and component.path == root

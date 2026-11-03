@@ -5,10 +5,12 @@ from datetime import date
 from pathlib import Path
 
 from repo_standards.core.engine import analyze, check_baseline, classify_baseline
-from repo_standards.core.errors import ConfigurationError, ManifestAbsentError
+from repo_standards.core.errors import BaselineError, ConfigurationError, ManifestAbsentError
 from repo_standards.core.inspection import git_index_identity, load_repository_snapshot
 from repo_standards.core.models import (
     AnalysisReport,
+    Baseline,
+    Diagnostic,
     ExecutionIssue,
     IncompleteReport,
     Mode,
@@ -34,10 +36,17 @@ class RepositoryAnalysisRequest:
     include_warnings: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class RepositoryAnalysis:
+    report: AnalysisReport
+    baseline: Baseline | None
+    regressions: tuple[Diagnostic, ...] = ()
+
+
 def analyze_repository(request: RepositoryAnalysisRequest) -> AnalysisReport:
     policy = SarjPolicy()
     try:
-        return _analyze(request, policy)
+        return complete_repository_analysis(request, policy=policy).report
     except ManifestAbsentError as error:
         return _incomplete(
             policy.policy_id,
@@ -49,12 +58,17 @@ def analyze_repository(request: RepositoryAnalysisRequest) -> AnalysisReport:
         return _incomplete(policy.policy_id, request.mode, str(error))
 
 
-def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> AnalysisReport:
+def complete_repository_analysis(
+    request: RepositoryAnalysisRequest, *, policy: SarjPolicy
+) -> RepositoryAnalysis:
     if request.include_warnings and request.mode is not Mode.RATCHET:
         ConfigurationError.fail("include_warnings requires ratchet analysis mode")
-    root = request.root.resolve(strict=True)
+    try:
+        root = request.root.resolve(strict=True)
+    except OSError:
+        ConfigurationError.fail(f"repository root is unavailable: {request.root}")
     if request.mode is Mode.RATCHET and request.baseline_path is None:
-        ConfigurationError.fail("ratchet analysis requires a baseline_path")
+        BaselineError.fail("ratchet analysis requires a baseline_path")
     snapshot = load_repository_snapshot(
         root,
         manifest_path=request.manifest_path,
@@ -89,16 +103,22 @@ def _analyze(request: RepositoryAnalysisRequest, policy: SarjPolicy) -> Analysis
         enabled_rules=enabled_rules,
     )
     report = replace(report, input_provenance=snapshot.provenance)
+    regressions: tuple[Diagnostic, ...] = ()
     if request.mode is Mode.RATCHET:
         baseline = snapshot.baseline
         if baseline is None:
-            ConfigurationError.fail("selected ratchet baseline was not loaded")
-        check_baseline(report, baseline, include_warnings=request.include_warnings)
+            BaselineError.fail("selected ratchet baseline was not loaded")
+        try:
+            regressions = check_baseline(
+                report, baseline, include_warnings=request.include_warnings
+            )
+        except ConfigurationError as error:
+            raise BaselineError(str(error)) from error
         report = replace(
             report,
             ratchet=classify_baseline(report, baseline, include_warnings=request.include_warnings),
         )
-    return report
+    return RepositoryAnalysis(report, snapshot.baseline, regressions)
 
 
 def _incomplete(

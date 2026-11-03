@@ -9,18 +9,18 @@ import pytest
 
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import GitObjectId
-from repo_standards.pull_request._context import NotApplicable  # ruff: ignore[import-private-name]
-from repo_standards.pull_request._github import (  # ruff: ignore[import-private-name]
+from repo_standards.pull_request._context import NotApplicable  # ruff: ignore[import-private-name] -- Assert the provider adapter's explicit not-applicable result.
+from repo_standards.pull_request._github import (  # ruff: ignore[import-private-name] -- Exercise internal provider event decoding without a live API.
     MAXIMUM_EVENT_BYTES,
     load_github_pull_request_context,
 )
-from repo_standards.pull_request._inputs import (  # ruff: ignore[import-private-name]
+from repo_standards.pull_request._inputs import (  # ruff: ignore[import-private-name] -- Exercise trusted base selection through provider orchestration.
     resolve_github_pull_request_inputs,
 )
-from repo_standards.pull_request._local import (  # ruff: ignore[import-private-name]
+from repo_standards.pull_request._local import (  # ruff: ignore[import-private-name] -- Exercise local Git-ref resolution without provider state.
     resolve_local_advisory_context,
 )
-from repo_standards.pull_request._trusted_manifest import (  # ruff: ignore[import-private-name]
+from repo_standards.pull_request._trusted_manifest import (  # ruff: ignore[import-private-name] -- Exercise exact-base policy loading and missing-object refusal.
     load_trusted_base_manifest,
 )
 
@@ -65,7 +65,7 @@ def _object(value: object) -> dict[str, object]:
     assert isinstance(value, dict)
     return {
         key: item
-        for key, item in value.items()  # pyright: ignore[reportUnknownVariableType]
+        for key, item in value.items()  # pyright: ignore[reportUnknownVariableType] -- Parsed provider keys are narrowed to strings by the comprehension guard.
         if isinstance(key, str)
     }
 
@@ -215,6 +215,33 @@ def test_trusted_manifest_is_loaded_from_exact_base_not_worktree(tmp_path: Path)
     assert trusted.base_sha == base
     assert trusted.manifest is not None
     assert trusted.manifest.repository_id == "trusted-base"
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    assert load_trusted_base_manifest(nested, GitObjectId(base)).manifest == trusted.manifest
+
+
+def test_trusted_manifest_absence_is_proven_from_the_base_tree(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    (tmp_path / "README.md").write_text("Policy has not been adopted.\n", encoding="utf-8")
+    base = _commit(tmp_path, "base without policy")
+
+    assert load_trusted_base_manifest(tmp_path, GitObjectId(base)).manifest is None
+
+
+def test_unavailable_trusted_manifest_blob_is_not_absent_policy(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet", "--object-format=sha1")
+    manifest_path = tmp_path / ".repo-standards" / "repository.toml"
+    manifest_path.parent.mkdir()
+    manifest_path.write_text(_manifest("trusted-base"), encoding="utf-8")
+    base = _commit(tmp_path, "base policy")
+    assert load_trusted_base_manifest(tmp_path, GitObjectId(base)).manifest is not None
+
+    object_id = _git(tmp_path, "rev-parse", f"{base}:.repo-standards/repository.toml")
+    (tmp_path / ".git" / "objects" / object_id[:2] / object_id[2:]).unlink()
+    assert ".repo-standards/repository.toml" in _git(tmp_path, "ls-tree", "-r", base)
+
+    with pytest.raises(ConfigurationError, match="could not load trusted pull-request policy"):
+        load_trusted_base_manifest(tmp_path, GitObjectId(base))
 
 
 @pytest.mark.parametrize("marker", ["schema_version = 6\n", "schema_version = 6 # v5 manifest\n"])

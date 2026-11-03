@@ -22,19 +22,12 @@ from repo_standards._machine import (
 )
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.commit_message import CommitMessageResult, check_local_commit_message_file
-from repo_standards.core.engine import (
-    analyze,
-    baseline_from_report,
-    check_baseline,
-    ratchet_findings,
-)
-from repo_standards.core.errors import ConfigurationError
+from repo_standards.core.engine import baseline_from_report
+from repo_standards.core.errors import BaselineError, ConfigurationError
 from repo_standards.core.inspection import (
     GitIdentity,
     git_identity,
-    git_index_identity,
     inspect_repository,
-    load_repository_snapshot,
     read_tracked_blob_contents,
 )
 from repo_standards.core.models import (
@@ -42,7 +35,6 @@ from repo_standards.core.models import (
     Baseline,
     Diagnostic,
     ExecutionIssue,
-    FindingsReport,
     GitObjectId,
     IncompleteReport,
     Mode,
@@ -52,9 +44,7 @@ from repo_standards.core.models import (
     PullRequestReviewPolicyConfig,
     RepositoryId,
     RepositoryInspection,
-    RepositoryPolicy,
     Rule,
-    RuleId,
 )
 from repo_standards.core.parser import load_manifest
 from repo_standards.core.pull_request_body import missing_required_body_sections
@@ -88,7 +78,6 @@ from repo_standards.core.review_policy import (
     SinceReviewEvidence,
     evaluate_review_policy,
 )
-from repo_standards.core.rule_reviews import RuleVersion, activated_rule_ids
 from repo_standards.policy_sarj import SarjPolicy
 from repo_standards.pull_request._context import NotApplicable
 from repo_standards.pull_request._inputs import (
@@ -96,7 +85,10 @@ from repo_standards.pull_request._inputs import (
     resolve_github_pull_request_inputs,
     resolve_local_pull_request_inputs,
 )
-from repo_standards.repository.comparison import with_makefile_comparison, with_migration_comparison
+from repo_standards.repository.analysis import (
+    RepositoryAnalysisRequest,
+    complete_repository_analysis,
+)
 from repo_standards.rest import (
     InstrumentationDetectionReport,
     TrackedFile as RestTrackedFile,
@@ -157,10 +149,6 @@ class RequestError(ValueError):
     @classmethod
     def fail(cls, message: str) -> NoReturn:
         raise cls(message)
-
-
-class BaselineError(ConfigurationError):
-    """One baseline-specific input failure for explicit ratchet reporting."""
 
 
 class _TransitionExemptionInput(BaseModel):
@@ -2083,7 +2071,7 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     root: Path,
     manifest_path: str,
     baseline_path: str,
-    policy: Policy,
+    policy: SarjPolicy,
     mode: Mode,
     as_of: str | None,
     staged: bool,
@@ -2091,50 +2079,21 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
     base_revision: str | None,
     include_warnings: bool = False,
 ) -> _CompletedAnalysis:
-    try:
-        resolved_root = root.resolve(strict=True)
-    except OSError:
-        ConfigurationError.fail(f"repository root is unavailable: {root}")
-    try:
-        snapshot = load_repository_snapshot(
-            resolved_root,
+    completed = complete_repository_analysis(
+        RepositoryAnalysisRequest(
+            root=root,
             manifest_path=manifest_path,
-            baseline_path=baseline_path if mode is Mode.RATCHET else None,
-            identity=git_index_identity(resolved_root) if staged else None,
-        )
-    except ConfigurationError as error:
-        if mode is Mode.RATCHET and "baseline" in str(error):
-            raise BaselineError(str(error)) from error
-        raise
-    if snapshot.manifest.enabled_rules and enabled_rule_ids:
-        ConfigurationError.fail("manifest enabled_rules cannot be combined with --enable-rule")
-    enabled_rules = activated_rule_ids(
-        snapshot.manifest.enabled_rules or enabled_rule_ids,
-        current_rules=frozenset(RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()),
+            baseline_path=baseline_path,
+            mode=mode,
+            as_of=_parse_date(as_of),
+            staged=staged,
+            enabled_rule_ids=enabled_rule_ids,
+            base_revision=base_revision,
+            include_warnings=include_warnings,
+        ),
+        policy=policy,
     )
-    evaluation_date = _parse_date(as_of)
-    snapshot = with_makefile_comparison(
-        resolved_root,
-        snapshot,
-        enabled_rules=enabled_rules,
-        base_revision=base_revision,
-        as_of=evaluation_date,
-    )
-    snapshot = with_migration_comparison(
-        resolved_root, snapshot, enabled_rules=enabled_rules, base_revision=base_revision
-    )
-    repository_diagnostics = (
-        policy.evaluate_repository(snapshot) if isinstance(policy, RepositoryPolicy) else ()
-    )
-    report = analyze(
-        snapshot.manifest,
-        policy,
-        mode=mode,
-        as_of=evaluation_date,
-        additional_diagnostics=repository_diagnostics,
-        enabled_rules=enabled_rules,
-    )
-    report = replace(report, input_provenance=snapshot.provenance)
+    report = completed.report
     if mode is not Mode.RATCHET:
         return _CompletedAnalysis(
             report,
@@ -2142,11 +2101,15 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
             {"status": "not-requested", "path": None},
             {"status": "not-requested"},
         )
-    if snapshot.baseline is None:
+    if completed.baseline is None:
         message = "baseline is absent from the selected Git tree"
         raise BaselineError(message)
     return _complete_ratchet_analysis(
-        report, snapshot.baseline, baseline_path, include_warnings=include_warnings
+        report,
+        completed.baseline,
+        baseline_path,
+        regressions=completed.regressions,
+        include_warnings=include_warnings,
     )
 
 
@@ -2155,39 +2118,22 @@ def _complete_ratchet_analysis(
     baseline: Baseline,
     baseline_path: str,
     *,
+    regressions: tuple[Diagnostic, ...],
     include_warnings: bool = False,
 ) -> _CompletedAnalysis:
-    try:
-        regressions = check_baseline(report, baseline, include_warnings=include_warnings)
-    except ConfigurationError as error:
-        raise BaselineError(str(error)) from error
-    stale_rule = RuleId("core/baseline/stale-entry")
-    stale = tuple(item for item in regressions if item.rule_id == stale_rule)
-    new_count = len(regressions) - len(stale)
-    active_count = len(ratchet_findings(report, include_warnings=include_warnings))
+    comparison = report.ratchet
+    if comparison is None:
+        BaselineError.fail("selected ratchet comparison was not completed")
+    new_count = len(regressions)
+    active_count = len(comparison.entries)
     ratchet_summary = {
         **report.summary,
         "ratchet_regressions": len(regressions),
         "ratchet_new": new_count,
-        "ratchet_stale": len(stale),
+        "ratchet_stale": 0,
         "ratchet_known": max(active_count - new_count, 0),
     }
-    if stale:
-        report = FindingsReport(
-            mode=report.mode,
-            repository_id=report.repository_id,
-            policy_id=report.policy_id,
-            policy_version=report.policy_version,
-            scope_digest=report.scope_digest,
-            diagnostics=tuple(
-                sorted(report.diagnostics + stale, key=lambda item: item.fingerprint)
-            ),
-            summary=ratchet_summary,
-            input_provenance=report.input_provenance,
-            ratchet=report.ratchet,
-        )
-    else:
-        report = replace(report, summary=ratchet_summary)
+    report = replace(report, summary=ratchet_summary, ratchet=None)
     baseline_state: Mapping[str, object] = {
         "status": "verified",
         "path": baseline_path,
@@ -2199,7 +2145,7 @@ def _complete_ratchet_analysis(
         "status": "regressions" if regressions else "clean",
         "known": max(active_count - new_count, 0),
         "new": new_count,
-        "stale": len(stale),
+        "stale": 0,
         "regressions": len(regressions),
         "include_warnings": include_warnings,
     }
@@ -2218,7 +2164,7 @@ def _parse_date(value: str | None) -> date | None:
     return parsed
 
 
-def _policy() -> Policy:
+def _policy() -> SarjPolicy:
     return SarjPolicy()
 
 

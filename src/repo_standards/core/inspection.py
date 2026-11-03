@@ -25,10 +25,11 @@ from repo_standards._git_environment import GIT_ENVIRONMENT
 
 from ._json import parse_json_object
 from .canonical import canonical_path
-from .errors import ConfigurationError, ManifestAbsentError
+from .errors import BaselineError, ConfigurationError, ManifestAbsentError
 from .images import validate_image_artifacts
 from .javascript import validate_javascript_artifacts
 from .models import (
+    Baseline,
     GitObjectId,
     InputProvenance,
     InventoryKind,
@@ -122,6 +123,19 @@ class _MetadataEvidence:
     packages: tuple[PackageEvidence, ...]
     workspaces: tuple[WorkspaceEvidence, ...]
     issues: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _MetadataProjection:
+    project: ProjectCoordinate | None = None
+    workspace: WorkspaceEvidence | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _PythonMetadata:
+    name: str | None
+    workspace_root: bool
+    workspace: object
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,7 +255,7 @@ def load_repository_snapshot(
         canonical_baseline = canonical_path(baseline_path)
         baseline_blob = by_path.get(canonical_baseline)
         if baseline_blob is None:
-            ConfigurationError.fail("baseline is absent from the selected Git tree")
+            BaselineError.fail("baseline is absent from the selected Git tree")
         selected.append(baseline_blob)
     contents, issues = _read_metadata_batch(resolved, tuple(selected))
     if issues:
@@ -259,7 +273,7 @@ def load_repository_snapshot(
         ConfigurationError.fail("repository inspection is incomplete")
     return RepositorySnapshot(
         manifest=manifest,
-        baseline=(parse_baseline_bytes(baseline_content) if baseline_content is not None else None),
+        baseline=(_snapshot_baseline(baseline_content) if baseline_content is not None else None),
         inspection=inspection,
         pull_request_templates=_pull_request_templates(resolved, manifest, blobs),
         provenance=InputProvenance(
@@ -278,6 +292,13 @@ def load_repository_snapshot(
             ),
         ),
     )
+
+
+def _snapshot_baseline(content: bytes) -> Baseline:
+    try:
+        return parse_baseline_bytes(content)
+    except ConfigurationError as error:
+        raise BaselineError(str(error)) from error
 
 
 def load_calibration_snapshot(
@@ -433,13 +454,11 @@ def _metadata_evidence(root: Path, blobs: tuple[TrackedBlob, ...]) -> _MetadataE
     workspaces: list[WorkspaceEvidence] = []
     for blob in metadata_blobs:
         content = contents.get(blob.object_id)
-        if blob.path.rpartition("/")[2] != "pnpm-workspace.yaml":
-            project = _inspect_project(blob, content, issues)
-            if project is not None:
-                packages.append(project)
-        workspace = _inspect_workspace(blob, content, issues)
-        if workspace is not None:
-            workspaces.append(workspace)
+        projection = _inspect_metadata(blob, content, issues)
+        if projection.project is not None:
+            packages.append(projection.project)
+        if projection.workspace is not None:
+            workspaces.append(projection.workspace)
     return _MetadataEvidence(tuple(packages), tuple(workspaces), tuple(issues))
 
 
@@ -822,21 +841,36 @@ def _bounded_git_payload(
     return bytes(output)
 
 
-def _inspect_project(
+def _inspect_metadata(
     blob: TrackedBlob, content: bytes | None, issues: list[str]
-) -> ProjectCoordinate | None:
+) -> _MetadataProjection:
     relative = blob.path
     if content is None:
-        return None
+        return _MetadataProjection()
+    if relative.endswith("pnpm-workspace.yaml"):
+        return _MetadataProjection(workspace=_inspect_workspace(blob, content, issues))
     try:
-        return replace(
-            parse_project_metadata(relative, content),
-            object_id=blob.object_id,
-            content_digest=_content_digest(content),
-        )
+        document = _project_document(relative, content)
     except ConfigurationError:
         issues.append(f"metadata is malformed: {relative}")
-        return None
+        return _MetadataProjection()
+    digest = _content_digest(content)
+    project = replace(
+        _project_evidence(relative, document), object_id=blob.object_id, content_digest=digest
+    )
+    try:
+        workspace = _workspace_evidence(relative, document)
+    except ConfigurationError:
+        issues.append(f"metadata is malformed: {relative}")
+        return _MetadataProjection(project=project)
+    return _MetadataProjection(
+        project=project,
+        workspace=(
+            replace(workspace, object_id=blob.object_id, content_digest=digest)
+            if workspace is not None
+            else None
+        ),
+    )
 
 
 def _inspect_workspace(
@@ -860,11 +894,15 @@ def _inspect_workspace(
 
 
 def parse_project_metadata(relative: str, content: bytes) -> ProjectCoordinate:
+    return _project_evidence(relative, _project_document(relative, content))
+
+
+def _project_document(relative: str, content: bytes) -> _NpmPackage | _PythonMetadata:
     try:
         if relative.endswith("package.json"):
-            return _npm_project(relative, content)
+            return _NpmPackage.model_validate(parse_json_object(content))
         if relative.endswith("pyproject.toml"):
-            return _python_project(relative, content)
+            return _python_metadata(content)
     except (
         ConfigurationError,
         RecursionError,
@@ -876,14 +914,26 @@ def parse_project_metadata(relative: str, content: bytes) -> ProjectCoordinate:
     return ConfigurationError.fail(f"unsupported project metadata: {relative}")
 
 
+def _project_evidence(relative: str, document: _NpmPackage | _PythonMetadata) -> ProjectCoordinate:
+    if isinstance(document, _NpmPackage):
+        return _npm_project(relative, document)
+    return _python_project(relative, document)
+
+
+def _workspace_evidence(
+    relative: str, document: _NpmPackage | _PythonMetadata
+) -> WorkspaceEvidence | None:
+    if isinstance(document, _NpmPackage):
+        return _npm_workspace(relative, document)
+    return _python_workspace(relative, document)
+
+
 def parse_workspace_metadata(relative: str, content: bytes) -> WorkspaceEvidence | None:
     try:
-        if relative.endswith("package.json"):
-            return _npm_workspace(relative, content)
+        if relative.endswith(("package.json", "pyproject.toml")):
+            return _workspace_evidence(relative, _project_document(relative, content))
         if relative.endswith("pnpm-workspace.yaml"):
             return _pnpm_workspace(relative, content)
-        if relative.endswith("pyproject.toml"):
-            return _python_workspace(relative, content)
     except (
         ConfigurationError,
         RecursionError,
@@ -1184,8 +1234,7 @@ def _parse_batch_contents(
     return contents
 
 
-def _npm_project(relative: str, content: bytes) -> ProjectCoordinate:
-    package = _NpmPackage.model_validate(parse_json_object(content))
+def _npm_project(relative: str, package: _NpmPackage) -> ProjectCoordinate:
     return ProjectCoordinate(
         ecosystem="npm",
         path=relative,
@@ -1195,8 +1244,8 @@ def _npm_project(relative: str, content: bytes) -> ProjectCoordinate:
     )
 
 
-def _npm_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None:
-    workspaces = _NpmPackage.model_validate(parse_json_object(content)).workspaces
+def _npm_workspace(relative: str, package: _NpmPackage) -> WorkspaceEvidence | None:
+    workspaces = package.workspaces
     if workspaces is None:
         return None
     match workspaces:
@@ -1217,10 +1266,10 @@ def _npm_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None:
     )
 
 
-def _python_project(relative: str, content: bytes) -> ProjectCoordinate:
+def _python_metadata(content: bytes) -> _PythonMetadata:
     raw = _erase_parser_type(tomllib.loads(content.decode("utf-8")))
     if not isinstance(raw, dict):
-        ConfigurationError.fail(f"Python metadata must be a table: {relative}")
+        ConfigurationError.fail("Python metadata must be a table")
     project = raw.get("project")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
     tool = raw.get("tool")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
     name: str | None = None
@@ -1228,31 +1277,29 @@ def _python_project(relative: str, content: bytes) -> ProjectCoordinate:
         observed = project.get("name")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
         name = observed if isinstance(observed, str) else None
     workspace_root = False
+    workspace: object = None
     if isinstance(tool, dict):
         uv = tool.get("uv")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
         workspace_root = isinstance(uv, dict) and "workspace" in uv
+        if isinstance(uv, dict):
+            workspace = _erase_parser_type(
+                uv.get("workspace")  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType] -- Parsed TOML workspace is validated by its projection.
+            )
+    return _PythonMetadata(name, workspace_root, workspace)
+
+
+def _python_project(relative: str, metadata: _PythonMetadata) -> ProjectCoordinate:
     return ProjectCoordinate(
         ecosystem="python",
         path=relative,
-        name=name,
+        name=metadata.name,
         private=None,
-        workspace_root=workspace_root,
+        workspace_root=metadata.workspace_root,
     )
 
 
-def _python_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None:
-    raw = _erase_parser_type(tomllib.loads(content.decode("utf-8")))
-    if not isinstance(raw, dict):
-        ConfigurationError.fail(f"Python metadata must be a table: {relative}")
-    tool = raw.get("tool")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
-    if not isinstance(tool, dict):
-        return None
-    uv = tool.get("uv")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
-    if not isinstance(uv, dict):
-        return None
-    workspace = uv.get(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
-        "workspace"
-    )
+def _python_workspace(relative: str, metadata: _PythonMetadata) -> WorkspaceEvidence | None:
+    workspace = metadata.workspace
     if workspace is None:
         return None
     if not isinstance(workspace, dict):

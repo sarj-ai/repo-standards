@@ -37,28 +37,47 @@ def load_trusted_base_manifest(root: Path, base_sha: GitObjectId) -> TrustedBase
     if not resolved.is_dir():
         ConfigurationError.fail("repository root must be a directory")
     _git(root=resolved, arguments=("cat-file", "-e", f"{base_sha}^{{commit}}"))
-    object_spec = f"{base_sha}:{MANIFEST_PATH}"
-    size_output = _git(
-        root=resolved,
-        arguments=("cat-file", "-s", object_spec),
-        absent_ok=True,
-    )
-    if size_output is None:
+    object_id = _manifest_object_id(resolved, base_sha)
+    if object_id is None:
         return TrustedBaseManifest(base_sha=base_sha, manifest=None)
+    size_output = _git(root=resolved, arguments=("cat-file", "-s", object_id))
     encoded_size = size_output.strip()
     if _SIZE.fullmatch(encoded_size) is None:
         ConfigurationError.fail("Git returned a malformed trusted manifest size")
     if int(encoded_size) > MAXIMUM_MANIFEST_BYTES:
         ConfigurationError.fail("trusted manifest exceeds the 1 MiB safety limit")
-    content = _git(root=resolved, arguments=("show", object_spec))
-    if content is None:
-        ConfigurationError.fail("trusted manifest disappeared during analysis")
+    content = _git(root=resolved, arguments=("cat-file", "blob", object_id))
     if len(content) > MAXIMUM_MANIFEST_BYTES:
         ConfigurationError.fail("trusted manifest exceeds the 1 MiB safety limit")
     return TrustedBaseManifest(
         base_sha=base_sha,
         manifest=parse_manifest_bytes(_without_v6_base_marker(content)),
     )
+
+
+def _manifest_object_id(root: Path, base_sha: GitObjectId) -> str | None:
+    payload = _git(
+        root=root, arguments=("ls-tree", "--full-tree", "-z", base_sha, "--", MANIFEST_PATH)
+    )
+    if not payload:
+        return None
+    record = payload.removesuffix(b"\0")
+    metadata, separator, path = record.partition(b"\t")
+    if not payload.endswith(b"\0") or b"\0" in record or separator != b"\t":
+        ConfigurationError.fail("Git returned malformed trusted manifest tree evidence")
+    try:
+        mode, kind, raw_object_id = metadata.split()
+        object_id = raw_object_id.decode("ascii")
+    except ValueError, UnicodeError:
+        ConfigurationError.fail("Git returned malformed trusted manifest tree evidence")
+    if (
+        mode not in {b"100644", b"100755"}
+        or kind != b"blob"
+        or path != MANIFEST_PATH.encode("utf-8")
+        or _OBJECT_ID.fullmatch(object_id) is None
+    ):
+        ConfigurationError.fail("trusted manifest must be a regular blob in the exact base tree")
+    return object_id
 
 
 def _without_v6_base_marker(content: bytes) -> bytes:
@@ -75,8 +94,7 @@ def _git(
     *,
     root: Path,
     arguments: tuple[str, ...],
-    absent_ok: bool = False,
-) -> bytes | None:
+) -> bytes:
     executable = shutil.which("git")
     if executable is None:
         ConfigurationError.fail("Git is required to load trusted pull-request policy")
@@ -99,7 +117,5 @@ def _git(
     except OSError, subprocess.TimeoutExpired:
         ConfigurationError.fail("Git could not load trusted pull-request policy")
     if completed.returncode != 0:
-        if absent_ok:
-            return None
-        ConfigurationError.fail("trusted manifest is absent from the exact base tree")
+        ConfigurationError.fail("Git could not load trusted pull-request policy")
     return completed.stdout

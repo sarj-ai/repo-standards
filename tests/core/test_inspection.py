@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import shlex
 import shutil
 import subprocess
 import sys
+import tomllib
 from typing import Literal
 
 from pydantic import RootModel
 import pytest
 
+from repo_standards.core import inspection as inspection_module
+from repo_standards.core._json import parse_json_object  # ruff: ignore[import-private-name] -- counts the real decoder used by snapshot inspection.
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import (
     git_index_identity,
@@ -20,7 +24,7 @@ from repo_standards.core.inspection import (
     parse_workspace_metadata,
     read_tracked_blob_contents,
 )
-from repo_standards.core.models import InventoryKind, RuleId
+from repo_standards.core.models import InventoryKind, JSONValue, RuleId
 from repo_standards.policy_sarj import SarjPolicy
 
 
@@ -186,6 +190,74 @@ def test_workspace_metadata_is_typed_without_expanding_globs() -> None:
     assert pnpm.member_patterns == ("packages/*",)
     assert pnpm.exclude_patterns == ("packages/retired",)
     assert parse_workspace_metadata("pnpm-workspace.yaml", b"catalog:\n  react: 19.0.0\n") is None
+
+
+def test_snapshot_parses_each_project_document_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = _committed_repository(tmp_path)
+    python_content = b'[project]\nname = "shared"\n[tool.uv.workspace]\nmembers = ["libraries/*"]\n'
+    (repository / "pyproject.toml").write_bytes(python_content)
+    _git(repository, "add", "pyproject.toml")
+    toml_parser = tomllib.loads
+    json_inputs: list[bytes] = []
+    toml_inputs: list[str] = []
+
+    def parse_json(content: bytes) -> dict[str, JSONValue]:
+        json_inputs.append(content)
+        return parse_json_object(content)
+
+    def parse_toml(content: str) -> object:
+        toml_inputs.append(content)
+        return toml_parser(content)
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Count JSON decode; keep real snapshot oracle.
+        inspection_module, "parse_json_object", parse_json
+    )
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Count TOML decode; keep real snapshot oracle.
+        tomllib, "loads", parse_toml
+    )
+    snapshot = load_repository_snapshot(repository, identity=git_index_identity(repository))
+
+    assert len(json_inputs) == 2
+    assert len(set(json_inputs)) == 2
+    assert toml_inputs.count(python_content.decode()) == 1
+    python_project = next(
+        item for item in snapshot.inspection.packages if item.ecosystem == "python"
+    )
+    python_workspace = next(
+        item for item in snapshot.inspection.workspaces if item.ecosystem == "python"
+    )
+    assert python_project.name == "shared"
+    assert python_workspace.member_patterns == ("libraries/*",)
+    assert python_project.object_id == python_workspace.object_id
+    assert python_project.content_digest == python_workspace.content_digest
+    assert python_project.content_digest == hashlib.sha256(python_content).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("path", "content"),
+    [
+        ("package.json", b'{"name":"fixture","workspaces":["../outside"]}'),
+        (
+            "pyproject.toml",
+            b'[project]\nname = "fixture"\n[tool.uv.workspace]\nmembers = ["../outside"]\n',
+        ),
+    ],
+)
+def test_malformed_workspace_preserves_independent_project_evidence(
+    tmp_path: Path, path: str, content: bytes
+) -> None:
+    repository = _committed_repository(tmp_path)
+    (repository / path).write_bytes(content)
+    _git(repository, "add", path)
+
+    inspection = inspect_repository(repository, identity=git_index_identity(repository))
+
+    assert inspection.completion == "incomplete"
+    assert inspection.issues == (f"metadata is malformed: {path}",)
+    assert next(item for item in inspection.packages if item.path == path).name == "fixture"
+    assert all(item.path != path for item in inspection.workspaces)
 
 
 @pytest.mark.parametrize(
