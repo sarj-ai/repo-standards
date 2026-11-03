@@ -31,6 +31,8 @@ _RUN_COMPLETION_TIMEOUT_SECONDS: Final = 300
 _RUN_COMPLETION_POLL_SECONDS: Final = 5
 _MAX_STACK_DEPTH: Final = 10
 _COMMAND_TIMEOUT_SECONDS: Final = 120
+_API_TIMEOUT_SECONDS: Final = 30
+_TRANSIENT_READ_STATUSES: Final = frozenset({500, 502, 503, 504})
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}\Z")
 _MERGE_GROUP_REF = re.compile(
     r"refs/heads/gh-readonly-queue/(?P<base_ref>.+)/"
@@ -160,16 +162,28 @@ class GitHubClient:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
-        try:
-            with urlopen(request, timeout=30) as response:  # pyright: ignore[reportAny] -- urllib types the opened response as Any
-                raw: bytes = response.read()  # pyright: ignore[reportAny] -- the HTTP response body is bytes
-        except HTTPError as error:
-            detail = error.read().decode(errors="replace")[:1000]
-            raise ReconciliationError(
-                f"GitHub API {method} {path} returned {error.code}: {detail}"
-            ) from error
-        except (TimeoutError, URLError) as error:
-            raise ReconciliationError(f"GitHub API {method} {path} failed: {error}") from error
+        deadline = time.monotonic() + _API_TIMEOUT_SECONDS
+        delays = iter((1, 2) if method == "GET" and payload is None else ())
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ReconciliationError(f"GitHub API {method} {path} exceeded its request budget")
+            try:
+                with urlopen(request, timeout=remaining) as response:  # pyright: ignore[reportAny] -- urllib types the opened response as Any
+                    raw: bytes = response.read()  # pyright: ignore[reportAny] -- the HTTP response body is bytes
+                break
+            except HTTPError as error:
+                with error:
+                    detail = error.read(1000).decode(errors="replace")
+                delay = next(delays, None) if error.code in _TRANSIENT_READ_STATUSES else None
+                if delay is not None and time.monotonic() + delay < deadline:
+                    time.sleep(delay)
+                    continue
+                raise ReconciliationError(
+                    f"GitHub API {method} {path} returned {error.code}: {detail}"
+                ) from error
+            except (TimeoutError, URLError) as error:
+                raise ReconciliationError(f"GitHub API {method} {path} failed: {error}") from error
         if not raw:
             return None
         try:
