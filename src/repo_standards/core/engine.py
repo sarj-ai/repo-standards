@@ -177,6 +177,10 @@ def check_baseline(
     report: AnalysisReport, baseline: Baseline, *, include_warnings: bool = False
 ) -> tuple[Diagnostic, ...]:
     comparison = classify_baseline(report, baseline, include_warnings=include_warnings)
+    return check_baseline_comparison(comparison)
+
+
+def check_baseline_comparison(comparison: RatchetComparison) -> tuple[Diagnostic, ...]:
     new = tuple(
         item.diagnostic
         for item in comparison.entries
