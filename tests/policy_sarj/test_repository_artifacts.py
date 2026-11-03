@@ -1840,6 +1840,54 @@ def test_rejected_artifact_uses_nearest_component_owner() -> None:
     assert diagnostic.evidence_level == "verified"
 
 
+@pytest.mark.parametrize(
+    ("children", "expected"),
+    [
+        pytest.param(
+            (("tools/platform", "tool"), ("tools/platform", "terraform-root")),
+            [],
+            id="duplicate-first-tool",
+        ),
+        pytest.param(
+            (("tools/platform", "terraform-root"), ("tools/platform", "tool")),
+            [RuleId("repository/artifacts/operational-script-tests")],
+            id="duplicate-first-operational",
+        ),
+        pytest.param(
+            (("tools/platform-extra", "tool"),),
+            [RuleId("repository/artifacts/operational-script-tests")],
+            id="component-segment-boundary",
+        ),
+    ],
+)
+def test_package_ownership_preserves_duplicate_and_segment_component_boundaries(
+    children: tuple[tuple[str, str], ...], expected: list[RuleId]
+) -> None:
+    components = (
+        Component(ComponentId("parent"), "terraform-root", "tools", "@example/team"),
+        *(
+            Component(ComponentId(f"child-{index}"), kind, path, "@example/team")
+            for index, (path, kind) in enumerate(children)
+        ),
+    )
+    snapshot = _snapshot(
+        "tools/platform/package.json",
+        "tools/platform/tests/test_deploy.py",
+        components=components,
+        packages=(
+            PackageEvidence(
+                ecosystem="npm",
+                path="tools/platform/package.json",
+                name="platform",
+                private=True,
+                workspace_root=False,
+            ),
+        ),
+    )
+
+    assert _rule_ids(snapshot) == expected
+
+
 def test_one_diagnostic_is_emitted_per_rejected_path() -> None:
     diagnostics = SarjPolicy.evaluate_repository(
         _snapshot("iac/delivery/README.md", "iac/delivery/terraform.tfvars.example")

@@ -9,3 +9,7 @@ class ConfigurationError(ValueError):
 
 class ManifestAbsentError(ConfigurationError):
     pass
+
+
+class BaselineError(ConfigurationError):
+    """A selected baseline input or comparison could not be accepted."""

@@ -13,8 +13,10 @@ import pytest
 from typer.testing import CliRunner
 
 from repo_standards.cli import app
-from repo_standards.core.models import RuleId
+from repo_standards.core.models import Diagnostic, RepositorySnapshot, RuleId
 from repo_standards.github_review_policy import trusted_manifest
+from repo_standards.policy_sarj import policy as sarj_policy
+from repo_standards.repository import RepositoryAnalysisRequest, analyze_repository
 
 
 runner = CliRunner()
@@ -1340,6 +1342,72 @@ def test_manifest_enabled_rules_are_the_single_activation_source(tmp_path: Path)
     assert paths == ["verify.mjs"]
     assert conflicting.exit_code == 2
     assert "cannot be combined" in conflicting.stdout
+
+
+def test_cli_and_api_skip_unselected_artifact_evaluation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = GOOD_MANIFEST.replace(
+        'repository_id = "example-repository"',
+        'repository_id = "example-repository"\n'
+        'enabled_rules = ["repository/artifacts/local-residue"]',
+    )
+    _manifest(tmp_path, manifest)
+    (tmp_path / "cache.pyc").write_bytes(b"inert tracked fixture")
+    _commit_changes(tmp_path)
+
+    def unselected_artifacts(_snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
+        pytest.fail("Unselected artifact traversal must not run.")
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Spy on unused evaluator; keep CLI/API oracle.
+        sarj_policy, "_repository_artifact_diagnostics", unselected_artifacts
+    )
+    api = analyze_repository(RepositoryAnalysisRequest(root=tmp_path))
+    checked = runner.invoke(app, ["check", str(tmp_path), "--format", "json"])
+
+    assert api.completion == "complete"
+    assert checked.exit_code == 0, checked.stdout
+    payload = _json_object(checked.stdout)
+    assert payload["completion"] == api.completion
+    assert payload["conclusion"] == api.conclusion
+    assert [item.path for item in api.diagnostics] == ["cache.pyc"]
+    assert [item["path"] for item in _object_list(payload["diagnostics"])] == ["cache.pyc"]
+
+
+def test_selected_rule_keeps_strict_repository_metadata_failures(tmp_path: Path) -> None:
+    manifest = GOOD_MANIFEST.replace(
+        'repository_id = "example-repository"',
+        'repository_id = "example-repository"\n'
+        'enabled_rules = ["repository/artifacts/local-residue"]',
+    )
+    _manifest(tmp_path, manifest)
+    (tmp_path / "package.json").write_text("malformed {", encoding="utf-8")
+    _commit_changes(tmp_path)
+
+    api = analyze_repository(RepositoryAnalysisRequest(root=tmp_path))
+    checked = runner.invoke(app, ["check", str(tmp_path), "--format", "json"])
+
+    assert api.completion == "incomplete"
+    assert checked.exit_code == 2
+    assert _json_object(checked.stdout)["completion"] == api.completion
+    assert "repository inspection is incomplete" in checked.stdout
+
+
+def test_manifest_field_named_baseline_is_not_a_baseline_failure(tmp_path: Path) -> None:
+    manifest = GOOD_MANIFEST.replace(
+        'repository_id = "example-repository"',
+        'repository_id = "example-repository"\nbaseline = "unknown field"',
+    )
+    _manifest(tmp_path, manifest)
+    (tmp_path / ".repo-standards/baseline.json").write_text("{}", encoding="utf-8")
+    _commit_changes(tmp_path)
+
+    checked = runner.invoke(app, ["check", str(tmp_path), "--mode", "ratchet", "--format", "json"])
+
+    assert checked.exit_code == 2
+    payload = _json_object(checked.stdout)
+    assert _object(payload["baseline"])["status"] == "not-evaluated"
+    assert "manifest has unknown fields: baseline" in checked.stdout
 
 
 def test_manifest_rejects_versioned_rule_selectors(tmp_path: Path) -> None:

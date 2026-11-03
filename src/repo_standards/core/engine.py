@@ -191,6 +191,8 @@ def check_baseline(
 def classify_baseline(
     report: AnalysisReport, baseline: Baseline, *, include_warnings: bool = False
 ) -> RatchetComparison:
+    if report.completion != "complete":
+        ConfigurationError.fail("cannot compare a baseline with incomplete analysis")
     if baseline.include_warnings is not include_warnings:
         ConfigurationError.fail("baseline include_warnings does not match the comparison setting")
     if baseline.repository_id != report.repository_id:
