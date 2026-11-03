@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 
-from repo_standards.core.engine import analyze, check_baseline, classify_baseline
+from repo_standards.core.engine import analyze, check_baseline_comparison, classify_baseline
 from repo_standards.core.errors import BaselineError, ConfigurationError, ManifestAbsentError
 from repo_standards.core.inspection import git_index_identity, load_repository_snapshot
 from repo_standards.core.models import (
@@ -109,15 +109,13 @@ def complete_repository_analysis(
         if baseline is None:
             BaselineError.fail("selected ratchet baseline was not loaded")
         try:
-            regressions = check_baseline(
+            comparison = classify_baseline(
                 report, baseline, include_warnings=request.include_warnings
             )
+            regressions = check_baseline_comparison(comparison)
         except ConfigurationError as error:
             raise BaselineError(str(error)) from error
-        report = replace(
-            report,
-            ratchet=classify_baseline(report, baseline, include_warnings=request.include_warnings),
-        )
+        report = replace(report, ratchet=comparison)
     return RepositoryAnalysis(report, snapshot.baseline, regressions)
 
 

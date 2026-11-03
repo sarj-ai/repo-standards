@@ -13,11 +13,13 @@ from typer.testing import CliRunner
 import yaml
 
 from repo_standards.cli import app
-from repo_standards.core.models import Mode
+from repo_standards.core import engine
+from repo_standards.core.models import AnalysisReport, Baseline, Mode, RatchetComparison
 from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.pull_request import analyze_pull_request_commits, analyze_pull_request_size
 from repo_standards.repository import (
     RepositoryAnalysisRequest,
+    analysis as repository_analysis,
     analyze_repository,
     inspect_repository,
 )
@@ -219,7 +221,9 @@ def test_repository_analysis_api_selects_committed_or_staged_tree(tmp_path: Path
     assert staged.input_provenance.mode == "git-index"
 
 
-def test_repository_analysis_api_classifies_a_selected_ratchet_baseline(tmp_path: Path) -> None:
+def test_repository_analysis_api_classifies_a_selected_ratchet_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     manifest = tmp_path / ".repo-standards" / "repository.toml"
     manifest.parent.mkdir()
     manifest.write_text(
@@ -275,6 +279,22 @@ def test_repository_analysis_api_classifies_a_selected_ratchet_baseline(tmp_path
         check=True,
     )
 
+    classifications: list[RatchetComparison] = []
+    classify = engine.classify_baseline
+
+    def counted(
+        report: AnalysisReport, baseline: Baseline, *, include_warnings: bool = False
+    ) -> RatchetComparison:
+        comparison = classify(report, baseline, include_warnings=include_warnings)
+        classifications.append(comparison)
+        return comparison
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- count calls to the real baseline classifier.
+        engine, "classify_baseline", counted
+    )
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- count calls through the service alias too.
+        repository_analysis, "classify_baseline", counted
+    )
     report = analyze_repository(
         RepositoryAnalysisRequest(
             root=tmp_path,
@@ -286,6 +306,8 @@ def test_repository_analysis_api_classifies_a_selected_ratchet_baseline(tmp_path
     assert report.completion == "complete"
     assert report.ratchet is not None
     assert report.ratchet.entries == ()
+    assert len(classifications) == 1
+    assert report.ratchet is classifications[0]
 
 
 def test_repository_analysis_api_requires_a_ratchet_baseline_path(tmp_path: Path) -> None:
