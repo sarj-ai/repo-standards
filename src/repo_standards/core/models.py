@@ -143,6 +143,17 @@ class PullRequestCommitHistoryConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class MigrationCouplingException:
+    reason: str
+    alternatives: str
+    paths: tuple[str, ...]
+
+
+DEFAULT_MAXIMUM_BODY_CHARACTERS = 2000
+MAXIMUM_BODY_CHARACTERS = 10000
+
+
+@dataclass(frozen=True, slots=True)
 class PullRequestReviewPolicyConfig:
     zero_review_below_counted_lines: int
     two_reviews_above_counted_lines: int
@@ -155,12 +166,15 @@ class PullRequestReviewPolicyConfig:
     allowlisted_bot_reviewers: tuple[str, ...] = ()
     accepted_check_conclusions: tuple[str, ...] = ("success",)
     require_resolved_threads: bool = True
+    maximum_body_characters: int = DEFAULT_MAXIMUM_BODY_CHARACTERS
+    domain_roots: tuple[str, ...] = ("domain", "domains")
 
 
 @dataclass(frozen=True, slots=True)
 class PullRequestConfig:
     commit_history: PullRequestCommitHistoryConfig
     review_policy: PullRequestReviewPolicyConfig | None = None
+    migration_exception: MigrationCouplingException | None = None
 
 
 class CommitMessageEnforcement(StrEnum):

@@ -11,7 +11,9 @@ from .errors import ConfigurationError
 from .images import is_image_path
 from .javascript import is_javascript_path
 from .models import (
+    DEFAULT_MAXIMUM_BODY_CHARACTERS,
     MAX_REPOSITORY_INPUT_BYTES,
+    MAXIMUM_BODY_CHARACTERS,
     Baseline,
     CommitMessageConfig,
     CommitMessageEnforcement,
@@ -25,6 +27,7 @@ from .models import (
     JavaScriptArtifactKind,
     MakefileException,
     Manifest,
+    MigrationCouplingException,
     PolicyId,
     PullRequestCommitHistoryConfig,
     PullRequestCommitHistoryTransition,
@@ -374,13 +377,14 @@ def parse_pull_request_review_policy(
         "allowlisted_bot_reviewers",
         "accepted_check_conclusions",
         "require_resolved_threads",
+        "maximum_body_characters",
+        "domain_roots",
     }
     required = {
         "zero_review_below_counted_lines",
         "two_reviews_above_counted_lines",
         "migration_roots",
         "required_checks",
-        "required_body_sections",
     }
     _strict_keys(data, fields, required, context)
     zero_review_below = _integer(
@@ -436,8 +440,6 @@ def parse_pull_request_review_policy(
     if not required_checks:
         ConfigurationError.fail(f"{context}.required_checks must not be empty")
     required_body_sections = policy_strings("required_body_sections")
-    if not required_body_sections:
-        ConfigurationError.fail(f"{context}.required_body_sections must not be empty")
     transition_exemptions = policy_strings("transition_exemptions")
     known_transition_ids = {transition.transition_id for transition in transitions}
     unknown_exemptions = sorted(set(transition_exemptions) - known_transition_ids)
@@ -472,7 +474,31 @@ def parse_pull_request_review_policy(
         ),
         accepted_check_conclusions=accepted_check_conclusions,
         require_resolved_threads=_boolean(data, "require_resolved_threads", context, default=True),
+        maximum_body_characters=_body_character_budget(data, context=context),
+        domain_roots=_domain_roots(policy_strings("domain_roots", default=["domain", "domains"])),
     )
+
+
+def _body_character_budget(data: dict[str, object], *, context: str) -> int:
+    maximum = _integer(
+        data, "maximum_body_characters", context, default=DEFAULT_MAXIMUM_BODY_CHARACTERS
+    )
+    if not 1 <= maximum <= MAXIMUM_BODY_CHARACTERS:
+        ConfigurationError.fail(
+            f"{context}.maximum_body_characters must be between 1 and {MAXIMUM_BODY_CHARACTERS}"
+        )
+    return maximum
+
+
+def _domain_roots(paths: tuple[str, ...]) -> tuple[str, ...]:
+    roots = tuple(canonical_path(path) for path in paths)
+    if any(any(character in root for character in "*?[") for root in roots):
+        ConfigurationError.fail(
+            "pull_request.review_policy.domain_roots must be exact repository paths"
+        )
+    if len(roots) != len(set(roots)):
+        ConfigurationError.fail("pull_request.review_policy.domain_roots must be unique")
+    return roots
 
 
 def _boolean(data: dict[str, object], key: str, context: str, *, default: bool) -> bool:
@@ -533,7 +559,7 @@ def parse_pull_request(value: object) -> PullRequestConfig:
     data = _mapping(value, "pull_request")
     _strict_keys(
         data,
-        {"commit_history", "review_policy"},
+        {"commit_history", "review_policy", "migration_exception"},
         {"commit_history"},
         "pull_request",
     )
@@ -546,7 +572,25 @@ def parse_pull_request(value: object) -> PullRequestConfig:
         )
         if "review_policy" in data
         else None,
+        migration_exception=_parse_migration_exception(data["migration_exception"])
+        if "migration_exception" in data
+        else None,
     )
+
+
+def _parse_migration_exception(value: object) -> MigrationCouplingException:
+    context = "pull_request.migration_exception"
+    data = _mapping(value, context)
+    fields = {"reason", "alternatives", "paths"}
+    _strict_keys(data, fields, fields, context)
+    reason = _string(data, "reason", context)
+    alternatives = _string(data, "alternatives", context)
+    if not reason.strip() or not alternatives.strip():
+        ConfigurationError.fail(f"{context} requires a reason and alternatives considered")
+    paths = tuple(canonical_path(path) for path in _string_list(data["paths"], f"{context}.paths"))
+    if not paths or len(paths) != len(set(paths)):
+        ConfigurationError.fail(f"{context}.paths must be non-empty and unique")
+    return MigrationCouplingException(reason=reason, alternatives=alternatives, paths=paths)
 
 
 def parse_commit_message(value: object) -> CommitMessageConfig:

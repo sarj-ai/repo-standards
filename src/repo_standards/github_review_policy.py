@@ -868,6 +868,8 @@ def render_comment(
         f"({size.get('excluded_lines', '?')} excluded)\n"
         f"{earlier_lines}"
         f"- Migration: **{'yes' if summary.get('touches_migration') else 'no'}**\n"
+        f"- Domain: **{'yes' if summary.get('touches_domain') else 'no'}**\n"
+        f"- Description: **{summary.get('body_characters', '?')}** characters\n"
         f"- Review-optional lane: **{lane}**\n"
         f"- Reasons: `{reason_text}`\n\n"
         f"Evaluated head `{_evaluated_head(receipt)}`.\n"
