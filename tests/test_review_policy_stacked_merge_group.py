@@ -126,6 +126,7 @@ class FakeQueue:
         }
 
     def pages(self, path: str, **_kwargs: object) -> list[object]:
+        self.calls.append(path)
         sha = path.removeprefix("/repos/owner/repo/commits/").removesuffix("/statuses")
         if not self.by_head(sha).receipt_passed:
             return []
@@ -184,6 +185,8 @@ def test_stacked_pull_request_merges_on_top_of_its_queued_base(depth: int) -> No
 
     assert queue.reconcile(top) == 0
     assert queue.final_status()["state"] == "success"
+    for pull in queue.pulls:
+        assert queue.calls.count(f"{REPO_PATH}commits/{pull.head_sha}/statuses") == 2
 
 
 def test_stacked_pull_request_needs_its_base_queued_directly_ahead() -> None:
@@ -256,4 +259,5 @@ def test_pull_request_targeting_the_queue_base_skips_stack_lookups() -> None:
 
     assert queue.reconcile(10) == 0
     assert queue.final_status()["state"] == "success"
+    assert queue.calls.count(f"{REPO_PATH}commits/{queue.pulls[0].head_sha}/statuses") == 2
     assert not any("/matching-refs/" in path or "/compare/" in path for path in queue.calls)
