@@ -219,7 +219,6 @@ def _revision(path: str, root: str) -> str | None:
 
 
 def is_non_consolidatable_migration(content: bytes) -> bool:
-    """Whether a dbmate file is a lone CONCURRENTLY index or a validate-only revision."""
     statements: dict[str, list[str]] = {"up": [], "down": []}
     section = None
     up_outside_transaction = False
@@ -229,10 +228,13 @@ def is_non_consolidatable_migration(content: bytes) -> bool:
             up_outside_transaction |= section == "up" and "transaction:false" in marker[2]
         elif section is not None:
             statements[section].append(line.partition("--")[0])
-    parsed = {
-        name: [item.strip() for item in "\n".join(lines).split(";") if item.strip()]
-        for name, lines in statements.items()
-    }
+    parsed: dict[str, list[str]] = {}
+    for name, lines in statements.items():
+        parsed[name] = []
+        for item in "\n".join(lines).split(";"):
+            statement = item.strip()
+            if statement:
+                parsed[name].append(statement)
     if not (up_outside_transaction and parsed["up"]):
         return False
     if all(_CONCURRENT_INDEX.match(item) for item in (*parsed["up"], *parsed["down"])):
