@@ -441,3 +441,53 @@ def test_lone_concurrent_index_revision_is_not_consolidatable(
     report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
     assert report.completion == "complete"
     assert len(report.diagnostics) == expected
+
+
+_VALIDATE_BODY = (
+    "BEGIN;\nSET LOCAL lock_timeout = '5s';\nSET LOCAL statement_timeout = '300s';\n\n"
+    "ALTER TABLE t VALIDATE CONSTRAINT t_c_fkey;\nALTER TABLE u VALIDATE CONSTRAINT u_c_fkey;\n"
+    "COMMIT;\n"
+)
+_VALIDATE_DOWN = (
+    "-- migrate:down\nSET LOCAL lock_timeout = '5s';\n"
+    "ALTER TABLE t DROP CONSTRAINT IF EXISTS t_c_fkey, "
+    "ADD CONSTRAINT t_c_fkey FOREIGN KEY (c) REFERENCES u (id) NOT VALID;\n"
+)
+_UP_HEAD = "-- migrate:up transaction:false\n"
+_UPDATE = "UPDATE t SET c = 1;\n\n"
+_VALIDATE_WITH_UPDATE = _UP_HEAD + _VALIDATE_BODY + _UPDATE + _VALIDATE_DOWN
+
+
+@pytest.mark.parametrize(
+    ("second", "expected"),
+    [
+        (f"-- migrate:up transaction:false\n{_VALIDATE_BODY}\n{_VALIDATE_DOWN}", 0),
+        (f"-- migrate:up\n{_VALIDATE_BODY}\n{_VALIDATE_DOWN}", 1),
+        (_VALIDATE_WITH_UPDATE, 1),
+    ],
+)
+def test_validate_only_revision_is_not_consolidatable(
+    repository: Path, second: str, expected: int
+) -> None:
+    base = _git(repository, "rev-parse", "HEAD")
+    _write(repository, "db/migrations/001_column.sql", _COLUMN)
+    _write(repository, "db/migrations/002_validate.sql", second)
+    _commit(repository)
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert report.completion == "complete"
+    assert len(report.diagnostics) == expected
+
+
+def test_index_and_validate_only_revisions_are_both_skipped(repository: Path) -> None:
+    base = _git(repository, "rev-parse", "HEAD")
+    _write(repository, "db/migrations/001_column.sql", _COLUMN)
+    _write(repository, "db/migrations/002_index.sql", _LONE_INDEX)
+    _write(
+        repository,
+        "db/migrations/003_validate.sql",
+        f"-- migrate:up transaction:false\n{_VALIDATE_BODY}\n{_VALIDATE_DOWN}",
+    )
+    _commit(repository)
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert report.completion == "complete"
+    assert len(report.diagnostics) == 0

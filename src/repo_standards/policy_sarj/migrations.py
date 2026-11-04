@@ -32,6 +32,11 @@ _DBMATE_MARKER = re.compile(r"--\s*migrate:(up|down)\b(.*)", re.IGNORECASE)
 _CONCURRENT_INDEX = re.compile(
     r"(?:CREATE\s+(?:UNIQUE\s+)?INDEX|DROP\s+INDEX)\s+CONCURRENTLY\b", re.IGNORECASE
 )
+_VALIDATE_ONLY = re.compile(
+    r"(?:BEGIN|COMMIT|SET\s+LOCAL\s+(?:lock|statement)_timeout\s*(?:=|TO)\s*[^;\s]+"
+    r"|ALTER\s+TABLE\s+\S+\s+VALIDATE\s+CONSTRAINT\s+\S+)\Z",
+    re.IGNORECASE,
+)
 _AUTO_ROOT_EXCLUDED = frozenset(
     {
         "test",
@@ -213,8 +218,8 @@ def _revision(path: str, root: str) -> str | None:
     return stem.rpartition(".")[0] if stem.endswith((".up", ".down")) else stem
 
 
-def is_lone_concurrent_index(content: bytes) -> bool:
-    """Whether a dbmate file only creates or drops indexes CONCURRENTLY, so it cannot merge."""
+def is_non_consolidatable_migration(content: bytes) -> bool:
+    """Whether a dbmate file is a lone CONCURRENTLY index or a validate-only revision."""
     statements: dict[str, list[str]] = {"up": [], "down": []}
     section = None
     up_outside_transaction = False
@@ -228,8 +233,11 @@ def is_lone_concurrent_index(content: bytes) -> bool:
         name: [item.strip() for item in "\n".join(lines).split(";") if item.strip()]
         for name, lines in statements.items()
     }
-    return (
-        up_outside_transaction
-        and bool(parsed["up"])
-        and all(_CONCURRENT_INDEX.match(item) for item in (*parsed["up"], *parsed["down"]))
+    if not (up_outside_transaction and parsed["up"]):
+        return False
+    if all(_CONCURRENT_INDEX.match(item) for item in (*parsed["up"], *parsed["down"])):
+        return True
+    up = [" ".join(item.split()) for item in parsed["up"]]
+    return all(_VALIDATE_ONLY.match(item) for item in up) and any(
+        item.upper().startswith("ALTER") for item in up
     )

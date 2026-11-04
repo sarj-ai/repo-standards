@@ -26,7 +26,7 @@ from repo_standards.policy_sarj.makefiles import (
 from repo_standards.policy_sarj.migrations import (
     MIGRATION_CONSOLIDATION_RULE_ID,
     explicit_migration_roots,
-    is_lone_concurrent_index,
+    is_non_consolidatable_migration,
     migration_roots,
     protected_roots,
 )
@@ -173,7 +173,7 @@ def _flag_lone_concurrent_indexes(
     flagged: set[str] = set()
     for start in range(0, len(paths), _BLOB_BATCH):
         blobs = read_tracked_blob_contents(root, paths[start : start + _BLOB_BATCH], identity=head)
-        flagged.update(item.path for item in blobs if is_lone_concurrent_index(item.content))
+        flagged.update(item.path for item in blobs if is_non_consolidatable_migration(item.content))
     return tuple(replace(item, non_consolidatable=item.path in flagged) for item in files)
 
 
