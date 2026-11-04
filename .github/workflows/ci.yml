@@ -109,6 +109,9 @@ jobs:
       - name: Self-test pull-request commit action
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         uses: ./pull-request-commits
+      - name: Self-test verified GitHub checkout action
+        if: github.event_name == 'pull_request'
+        uses: ./github-checkout
       - name: Self-test documentation budget action
         if: github.event_name == 'pull_request'
         uses: ./documentation

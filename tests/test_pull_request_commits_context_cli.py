@@ -2,19 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
+from pathlib import Path
 import shutil
 import subprocess
-from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 import pytest
 from typer.testing import CliRunner
 
 from repo_standards.cli import BaseRepositoryId, HeadRepositoryId, app
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 runner = CliRunner()
@@ -289,6 +286,100 @@ def github_merge_checkout(tmp_path: Path) -> GitHubMergeCheckout:
     _commit(tmp_path, "chore: target")
     _merge(tmp_path, "feature", "chore: tested merge")
     return GitHubMergeCheckout(base=base, head=head, merge_sha=_git(tmp_path, "rev-parse", "HEAD"))
+
+
+def _run_checkout_bootstrap(
+    root: Path,
+    checkout: GitHubMergeCheckout,
+    updates: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    event = root / "checkout-event.json"
+    output = root / "checkout.outputs"
+    _event(event, base=checkout.base, head=checkout.head)
+    output.touch()
+    environment = {
+        **os.environ,  # ruff: ignore[banned-api] - inherit the test runner's pinned command PATH
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+        "GITHUB_EVENT_NAME": "pull_request",
+        "GITHUB_EVENT_PATH": str(event),
+        "GITHUB_WORKSPACE": str(root),
+        "GITHUB_SHA": checkout.merge_sha,
+        "GITHUB_OUTPUT": str(output),
+        **(updates or {}),
+    }
+    return subprocess.run(
+        ["python3", "-P", "-S", "-m", "repo_standards.github_checkout"],
+        cwd=root,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+
+def test_checkout_bootstrap_uses_tested_source_for_a_diverged_event_head(
+    tmp_path: Path, github_merge_checkout: GitHubMergeCheckout
+) -> None:
+    # The workspace must not shadow the Action's immutable source package.
+    shadow = tmp_path / "repo_standards"
+    shadow.mkdir()
+    (shadow / "__init__.py").write_text('raise RuntimeError("workspace package imported")\n')
+
+    result = _run_checkout_bootstrap(tmp_path, github_merge_checkout)
+
+    assert result.returncode == 0, result.stderr
+    values = dict(
+        line.split("=", 1) for line in (tmp_path / "checkout.outputs").read_text().splitlines()
+    )
+    target = _git(tmp_path, "rev-parse", "HEAD^1")
+    assert values == {
+        "comparison-base": target,
+        "source-commit": github_merge_checkout.merge_sha,
+        "tree": _git(tmp_path, "rev-parse", "HEAD^{tree}"),
+        "event-head": github_merge_checkout.head,
+        "mode": "merge",
+    }
+    assert (
+        _git(tmp_path, "merge-base", target, github_merge_checkout.head)
+        == github_merge_checkout.base
+    )
+    assert (
+        _git(tmp_path, "merge-base", values["comparison-base"], values["source-commit"]) == target
+    )
+
+
+def test_checkout_bootstrap_preserves_head_checkout_event_base(
+    tmp_path: Path, github_merge_checkout: GitHubMergeCheckout
+) -> None:
+    _git(tmp_path, "checkout", "--quiet", github_merge_checkout.head)
+
+    result = _run_checkout_bootstrap(tmp_path, github_merge_checkout)
+
+    assert result.returncode == 0, result.stderr
+    values = dict(
+        line.split("=", 1) for line in (tmp_path / "checkout.outputs").read_text().splitlines()
+    )
+    assert values["comparison-base"] == github_merge_checkout.base
+    assert values["source-commit"] == github_merge_checkout.head
+    assert values["mode"] == "head"
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        pytest.param({"GITHUB_SHA": "0" * 40}, id="different-run-sha"),
+        pytest.param({"GITHUB_EVENT_NAME": "merge_group"}, id="unsupported-event"),
+        pytest.param({"GITHUB_WORKSPACE": ""}, id="missing-workspace"),
+    ],
+)
+def test_checkout_bootstrap_emits_no_labels_for_invalid_runner_context(
+    tmp_path: Path, github_merge_checkout: GitHubMergeCheckout, updates: dict[str, str]
+) -> None:
+    result = _run_checkout_bootstrap(tmp_path, github_merge_checkout, updates)
+
+    assert result.returncode != 0
+    assert not (tmp_path / "checkout.outputs").read_text()
 
 
 @pytest.mark.parametrize("case", ["different-sha", "missing-sha", "different-head", "linear"])

@@ -1,0 +1,35 @@
+name: Sarj verified GitHub checkout
+description: Resolve the tested PR base, source commit and tree without installing packages
+
+outputs:
+  comparison-base:
+    description: Genuine first parent of the tested merge, or the event base for a head checkout
+    value: ${{ steps.context.outputs.comparison-base }}
+  source-commit:
+    description: Verified commit actually checked out and tested
+    value: ${{ steps.context.outputs.source-commit }}
+  tree:
+    description: Git tree of the verified checkout
+    value: ${{ steps.context.outputs.tree }}
+  event-head:
+    description: PR head bound to the checkout or genuine second parent
+    value: ${{ steps.context.outputs.event-head }}
+  mode:
+    description: head or merge
+    value: ${{ steps.context.outputs.mode }}
+  pythonpath:
+    description: Immutable owner source for revalidating this job's checkout before proof emission
+    value: ${{ steps.context.outputs.pythonpath }}
+
+runs:
+  using: composite
+  steps:
+    - name: Verify the GitHub pull-request checkout
+      id: context
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}/../src
+      run: |
+        python3 -P -S -m repo_standards.github_checkout
+        printf 'pythonpath=%s\n' "$PYTHONPATH" >>"$GITHUB_OUTPUT"
