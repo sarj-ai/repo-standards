@@ -1,4 +1,8 @@
-from repo_standards.core.models import GitObjectId as GitObjectId, RepositoryId as RepositoryId
+from repo_standards.core.models import (
+    GitObjectId as GitObjectId,
+    MigrationCouplingException as MigrationCouplingException,
+    RepositoryId as RepositoryId,
+)
 from repo_standards.core.pull_request_commits import (
     DEFAULT_MAXIMUM_COMMITS as DEFAULT_MAXIMUM_COMMITS,
     MAXIMUM_ANALYZED_COMMITS as MAXIMUM_ANALYZED_COMMITS,

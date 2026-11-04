@@ -37,6 +37,7 @@ from repo_standards.core.models import (
     ExecutionIssue,
     GitObjectId,
     IncompleteReport,
+    MigrationCouplingException,
     Mode,
     Policy,
     PolicyId,
@@ -77,6 +78,7 @@ from repo_standards.core.review_policy import (
     ReviewState,
     SinceReviewEvidence,
     evaluate_review_policy,
+    migration_coupled_paths,
 )
 from repo_standards.policy_sarj import SarjPolicy
 from repo_standards.pull_request._context import NotApplicable
@@ -85,6 +87,7 @@ from repo_standards.pull_request._inputs import (
     resolve_github_pull_request_inputs,
     resolve_local_pull_request_inputs,
 )
+from repo_standards.pull_request._trusted_manifest import load_trusted_base_manifest
 from repo_standards.repository.analysis import (
     RepositoryAnalysisRequest,
     complete_repository_analysis,
@@ -603,11 +606,14 @@ def _render_pull_request_documentation(result: PullRequestDocumentation) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _trusted_review_policy(root: Path, manifest: Path | None) -> _TrustedReviewPolicy:
-    manifest_path = manifest or Path(".repo-standards/repository.toml")
-    if not manifest_path.is_absolute():
-        manifest_path = root / manifest_path
-    configured_pull_request = load_manifest(manifest_path).pull_request
+def _trusted_review_policy(
+    root: Path, manifest: Path | None, *, base: GitObjectId
+) -> _TrustedReviewPolicy:
+    if manifest is None:
+        configured = load_trusted_base_manifest(root, base).manifest
+    else:
+        configured = load_manifest(manifest if manifest.is_absolute() else root / manifest)
+    configured_pull_request = configured.pull_request if configured is not None else None
     if configured_pull_request is None or configured_pull_request.review_policy is None:
         ConfigurationError.fail("trusted manifest must define pull_request.review_policy")
     return _TrustedReviewPolicy(configured_pull_request, configured_pull_request.review_policy)
@@ -624,14 +630,21 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
     ] = None,
     manifest: Annotated[
         Path | None,
-        typer.Option(help="Trusted repository manifest."),
+        typer.Option(help="Explicit trusted manifest; defaults to the manifest in --base."),
     ] = None,
     generated_attribute: Annotated[
         str,
         typer.Option(help="Git attribute that marks repository-specific excluded artifacts."),
     ] = "pr-size-excluded",
 ) -> None:
-    """Evaluate the configured review tier from exact Git and provider evidence."""
+    """Require concise descriptions, isolated SQL migrations, and current human consensus.
+
+    Descriptions default to 2,000 characters, including Markdown and comments.
+    Migration-only PRs and declared domain roots need current human approval.
+    Coupling other files requires a tracked migration_exception with reason,
+    alternatives, and every coupled path, plus two human approvals on this head.
+    Trusted promotion exemptions preserve their existing scope behavior.
+    """
     if not re.fullmatch(r"[0-9a-f]{40}", base) or not re.fullmatch(r"[0-9a-f]{40}", head):
         _emit_command_error(
             "pull-request review-policy",
@@ -650,7 +663,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         )
     try:  # ruff: ignore[too-many-statements-in-try-clause] - one fail-closed evidence transaction
         resolved_root = root.resolve(strict=True)
-        trusted_policy = _trusted_review_policy(resolved_root, manifest)
+        trusted_policy = _trusted_review_policy(resolved_root, manifest, base=GitObjectId(base))
         configured_pull_request = trusted_policy.pull_request
         configured = trusted_policy.config
         provider = _load_review_policy_evidence(evidence)
@@ -721,6 +734,10 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                 latest_human_reviews=reviews,
                 threads_resolved=provider.threads_resolved,
                 author_is_bot=provider.author_is_bot,
+                body=provider.body,
+                migration_exception=_candidate_migration_exception(
+                    resolved_root, GitObjectId(head), changed_paths, configured.migration_roots
+                ),
             ),
             ReviewPolicyConfig(
                 zero_review_below_lines=configured.zero_review_below_counted_lines,
@@ -733,6 +750,8 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                     CheckConclusion(item) for item in configured.accepted_check_conclusions
                 ),
                 require_resolved_threads=configured.require_resolved_threads,
+                maximum_body_characters=configured.maximum_body_characters,
+                domain_roots=configured.domain_roots,
             ),
         )
     except (ConfigurationError, OSError, ValidationError, ValueError) as error:
@@ -764,6 +783,19 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         configured=configured,
     ):
         raise typer.Exit(1)
+
+
+def _candidate_migration_exception(
+    root: Path, head: GitObjectId, paths: tuple[str, ...], roots: tuple[str, ...]
+) -> MigrationCouplingException | None:
+    if not migration_coupled_paths(paths, roots):
+        return None
+    candidate = load_trusted_base_manifest(root, head).manifest
+    return (
+        candidate.pull_request.migration_exception
+        if candidate is not None and candidate.pull_request is not None
+        else None
+    )
 
 
 def _since_review_evidence(
@@ -947,6 +979,9 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             "accepted_check_conclusions": list(configured.accepted_check_conclusions),
             "require_resolved_threads": configured.require_resolved_threads,
             "required_body_sections": list(configured.required_body_sections),
+            "maximum_body_characters": configured.maximum_body_characters,
+            "domain_roots": list(configured.domain_roots),
+            "require_migration_isolation": True,
             "transition_exemptions": list(configured.transition_exemptions),
             "transition_actors": list(configured.transition_actors),
             "trusted_bot_authors": list(configured.trusted_bot_authors),
@@ -960,6 +995,10 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             "current_allowlisted_bot_approvals": len(result.allowlisted_bot_approvers),
             "allowlisted_bot_approvers": list(result.allowlisted_bot_approvers),
             "touches_migration": result.touches_migration,
+            "touches_domain": result.touches_domain,
+            "migration_coupled_paths": list(result.migration_coupled_paths),
+            "migration_exception_accepted": result.migration_exception_accepted,
+            "body_characters": len(provider.body),
             "transition_exemption": transition_exemption,
             "missing_body_sections": list(missing_sections),
             "reasons": reasons,

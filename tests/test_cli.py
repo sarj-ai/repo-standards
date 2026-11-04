@@ -421,6 +421,7 @@ def test_pull_request_review_policy_migration_floor_blocks_without_approval(
         "zero_review_threshold",
         "migration_review_floor",
         "approvals_missing",
+        "sensitive_approval_missing",
     ]
 
 
@@ -709,6 +710,89 @@ def _approvals(head: str, count: int) -> list[dict[str, object]]:
     return [
         {"reviewer": f"{index}:human-{index}", "state": "approved", "commit_sha": head}
         for index in range(count)
+    ]
+
+
+@pytest.mark.parametrize("explicit_manifest", [False, True])
+def test_review_policy_description_limit_cannot_be_relaxed_by_candidate(
+    tmp_path: Path, explicit_manifest: bool
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    policy = tmp_path / ".repo-standards" / "repository.toml"
+    trusted = tmp_path.parent / f"{tmp_path.name}-trusted.toml"
+    trusted.write_bytes(policy.read_bytes())
+    policy.write_text(policy.read_text() + "maximum_body_characters = 10000\n")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        body="## What & why\n" + "x" * 2001 + "\n\n## QA impact / blast radius\nNone.\n",
+    )
+
+    run = _invoke_review_policy(
+        tmp_path,
+        base=base,
+        head=head,
+        evidence=evidence,
+        manifest=trusted if explicit_manifest else None,
+    )
+
+    assert run.exit_code == 1
+    assert run.summary["reasons"] == ["zero_review_threshold", "body_too_long"]
+
+
+@pytest.mark.parametrize("review_count", [1, 2])
+def test_review_policy_reads_exception_from_exact_head_without_trusting_candidate_policy(
+    tmp_path: Path, review_count: int
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    policy = tmp_path / ".repo-standards" / "repository.toml"
+    trusted = tmp_path.parent / f"{tmp_path.name}-trusted.toml"
+    trusted.write_bytes(policy.read_bytes())
+    migration = tmp_path / "db" / "migrations" / "001.sql"
+    migration.parent.mkdir(parents=True)
+    migration.write_text("ALTER TABLE accounts ADD COLUMN codec integer;\n")
+    (tmp_path / "codec.py").write_text("CODEC_VERSION = 2\n")
+    policy.write_text(
+        policy.read_text()
+        + "\n[pull_request.migration_exception]\n"
+        + 'reason = "The runner imports the new codec during the transaction."\n'
+        + 'alternatives = "The old codec cannot decode values in the same transaction."\n'
+        + 'paths = [".repo-standards/repository.toml", "codec.py"]\n'
+    )
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(tmp_path, head=head, reviews=_approvals(head, review_count))
+    # An unstaged rewrite must never change the reviewed exception.
+    policy.write_text(policy.read_text().replace("paths = [", "unreviewed = true\npaths = ["))
+
+    run = _invoke_review_policy(tmp_path, base=base, head=head, evidence=evidence, manifest=trusted)
+
+    assert run.exit_code == (0 if review_count == 2 else 1)
+    assert run.summary["migration_exception_accepted"] == (review_count == 2)
+    assert run.summary["migration_coupled_paths"] == [".repo-standards/repository.toml", "codec.py"]
+
+
+def test_migration_isolation_sees_renames_and_excluded_tests(tmp_path: Path) -> None:
+    base = _review_policy_fixture(tmp_path)
+    migration = tmp_path / "db" / "migrations" / "001.sql"
+    migration.parent.mkdir(parents=True)
+    migration.write_text("SELECT 1;\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_schema.py").write_text("assert True\n")
+    (tmp_path / "README.md").rename(tmp_path / "renamed.txt")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(tmp_path, head=head, reviews=_approvals(head, 2))
+
+    run = _invoke_review_policy(tmp_path, base=base, head=head, evidence=evidence)
+
+    assert run.exit_code == 1
+    assert run.summary["migration_coupled_paths"] == [
+        "README.md",
+        "renamed.txt",
+        "tests/test_schema.py",
     ]
 
 

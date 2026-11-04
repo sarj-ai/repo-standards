@@ -2,18 +2,43 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import PurePosixPath
 import re
 from typing import Literal
 
 from .canonical import canonical_path
 from .errors import ConfigurationError
-from .models import GitObjectId
+from .models import (
+    DEFAULT_MAXIMUM_BODY_CHARACTERS,
+    MAXIMUM_BODY_CHARACTERS,
+    GitObjectId,
+    MigrationCouplingException,
+)
 
 
 ZERO_REVIEW_BELOW_LINES = 200
 ONE_REVIEW_MAXIMUM_LINES = 800
 MIGRATION_REVIEW_FLOOR = 1
 ALLOWLISTED_BOT_APPROVAL_LIMIT = 1
+MIGRATION_EXCEPTION_REVIEW_COUNT = 2
+
+_MIGRATION_DISCOVERY_EXCLUSIONS = frozenset(
+    {
+        "test",
+        "tests",
+        "testing",
+        "__tests__",
+        "fixture",
+        "fixtures",
+        "__fixtures__",
+        "testdata",
+        "example",
+        "examples",
+        "vendor",
+        "node_modules",
+        "generated",
+    }
+)
 
 RequiredReviewCount = Literal[0, 1, 2]
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}\Z")
@@ -66,6 +91,11 @@ class ReviewPolicyReason(StrEnum):
     APPROVALS_MISSING = "approvals_missing"
     THREAD_EVIDENCE_MISSING = "thread_evidence_missing"
     THREADS_UNRESOLVED = "threads_unresolved"
+    BODY_TOO_LONG = "body_too_long"
+    DOMAIN_REVIEW_FLOOR = "domain_review_floor"
+    SENSITIVE_APPROVAL_MISSING = "sensitive_approval_missing"
+    MIGRATION_CHANGES_MIXED = "migration_changes_mixed"
+    MIGRATION_EXCEPTION_ACCEPTED = "migration_exception_accepted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +107,8 @@ class ReviewPolicyConfig:
     author_review_floor: RequiredReviewCount = 0
     accepted_check_conclusions: frozenset[CheckConclusion] = frozenset({CheckConclusion.SUCCESS})
     require_resolved_threads: bool = True
+    maximum_body_characters: int = DEFAULT_MAXIMUM_BODY_CHARACTERS
+    domain_roots: tuple[str, ...] = ("domain", "domains")
 
     def __post_init__(self) -> None:
         if type(self.zero_review_below_lines) is not int or self.zero_review_below_lines <= 0:
@@ -96,6 +128,13 @@ class ReviewPolicyConfig:
                 message = f"{name} review floor must be 0, 1, or 2"
                 raise ValueError(message)
         _validate_paths(self.migration_roots, "migration root")
+        _validate_paths(self.domain_roots, "domain root")
+        if (
+            type(self.maximum_body_characters) is not int
+            or not 1 <= self.maximum_body_characters <= MAXIMUM_BODY_CHARACTERS
+        ):
+            message = "maximum body characters must be an integer between 1 and 10000"
+            raise ValueError(message)
         allowed = {
             CheckConclusion.SUCCESS,
             CheckConclusion.NEUTRAL,
@@ -156,6 +195,8 @@ class ReviewPolicyEvidence:
     latest_human_reviews: tuple[HumanReviewEvidence, ...] | None
     threads_resolved: bool | None
     author_is_bot: bool = False
+    body: str = ""
+    migration_exception: MigrationCouplingException | None = None
 
     def __post_init__(self) -> None:
         if type(self.counted_lines) is not int or self.counted_lines < 0:
@@ -171,6 +212,14 @@ class ReviewPolicyEvidence:
             message = "current head SHA must be a lowercase 40-character object ID"
             raise ValueError(message)
         _validate_paths(self.changed_paths, "changed path")
+        if self.migration_exception is not None:
+            _validate_paths(self.migration_exception.paths, "migration exception path")
+            if (
+                not self.migration_exception.reason.strip()
+                or not self.migration_exception.alternatives.strip()
+            ):
+                message = "migration exception requires a reason and alternatives considered"
+                raise ValueError(message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +231,9 @@ class ReviewPolicyResult:
     reasons: tuple[ReviewPolicyReason, ...]
     carried_forward_reviewers: tuple[str, ...] = ()
     allowlisted_bot_approvers: tuple[str, ...] = ()
+    touches_domain: bool = False
+    migration_coupled_paths: tuple[str, ...] = ()
+    migration_exception_accepted: bool = False
 
 
 def evaluate_review_policy(
@@ -201,6 +253,13 @@ def evaluate_review_policy(
     if touches_migration and required_reviews < config.migration_review_floor:
         required_reviews = config.migration_review_floor
         reasons.append(ReviewPolicyReason.MIGRATION_REVIEW_FLOOR)
+    touches_domain = any(_under_roots(path, config.domain_roots) for path in evidence.changed_paths)
+    if touches_domain and required_reviews < 1:
+        required_reviews = 1
+        reasons.append(ReviewPolicyReason.DOMAIN_REVIEW_FLOOR)
+    coupled_paths = migration_coupled_paths(evidence.changed_paths, config.migration_roots)
+    if coupled_paths:
+        required_reviews = 2
     if required_reviews < config.author_review_floor:
         required_reviews = config.author_review_floor
         reasons.append(ReviewPolicyReason.AUTHOR_REVIEW_FLOOR)
@@ -226,6 +285,7 @@ def evaluate_review_policy(
         config=config,
     )
     reasons.extend(review_assessment.reasons)
+    reasons.extend(_focus_reasons(evidence, config))
 
     if config.require_resolved_threads:
         if evidence.threads_resolved is None:
@@ -242,6 +302,8 @@ def evaluate_review_policy(
         ReviewPolicyReason.STALE_APPROVAL,
         ReviewPolicyReason.APPROVAL_CARRIED_FORWARD,
         ReviewPolicyReason.ALLOWLISTED_BOT_APPROVAL_NOT_COUNTED,
+        ReviewPolicyReason.DOMAIN_REVIEW_FLOOR,
+        ReviewPolicyReason.MIGRATION_EXCEPTION_ACCEPTED,
     }
     return ReviewPolicyResult(
         required_human_reviews=required_reviews,
@@ -251,7 +313,52 @@ def evaluate_review_policy(
         reasons=tuple(reasons),
         carried_forward_reviewers=review_assessment.carried_forward_reviewers,
         allowlisted_bot_approvers=review_assessment.allowlisted_bot_approvers,
+        touches_domain=touches_domain,
+        migration_coupled_paths=coupled_paths,
+        migration_exception_accepted=ReviewPolicyReason.MIGRATION_EXCEPTION_ACCEPTED in reasons,
     )
+
+
+def _focus_reasons(
+    evidence: ReviewPolicyEvidence, config: ReviewPolicyConfig
+) -> tuple[ReviewPolicyReason, ...]:
+    reasons: list[ReviewPolicyReason] = []
+    exact_humans = frozenset(
+        review.reviewer.casefold()
+        for review in evidence.latest_human_reviews or ()
+        if evidence.current_head_sha == evidence.evaluated_head_sha
+        and review.state is ReviewState.APPROVED
+        and review.commit_sha == evidence.evaluated_head_sha
+        and not review.allowlisted_bot
+    )
+    sensitive_floor = max(
+        config.migration_review_floor
+        if _touches_migration(
+            changed_paths=evidence.changed_paths, migration_roots=config.migration_roots
+        )
+        else 0,
+        int(any(_under_roots(path, config.domain_roots) for path in evidence.changed_paths)),
+    )
+    if len(exact_humans) < sensitive_floor:
+        reasons.append(ReviewPolicyReason.SENSITIVE_APPROVAL_MISSING)
+    coupled_paths = migration_coupled_paths(evidence.changed_paths, config.migration_roots)
+    exception = evidence.migration_exception
+    exception_accepted = bool(
+        coupled_paths
+        and exception is not None
+        and set(exception.paths) == set(coupled_paths)
+        and len(exact_humans) >= MIGRATION_EXCEPTION_REVIEW_COUNT
+    )
+    if coupled_paths:
+        reasons.append(
+            ReviewPolicyReason.MIGRATION_EXCEPTION_ACCEPTED
+            if exception_accepted
+            else ReviewPolicyReason.MIGRATION_CHANGES_MIXED
+        )
+    if len(evidence.body) > config.maximum_body_characters:
+        reasons.append(ReviewPolicyReason.BODY_TOO_LONG)
+
+    return tuple(reasons)
 
 
 def _validate_paths(paths: tuple[str, ...], kind: str) -> None:
@@ -291,9 +398,34 @@ def _threshold_reason(required_reviews: RequiredReviewCount) -> ReviewPolicyReas
 
 def _touches_migration(*, changed_paths: tuple[str, ...], migration_roots: tuple[str, ...]) -> bool:
     return any(
-        path == root or path.startswith(f"{root}/")
+        _under_roots(path, migration_roots) or _is_sql_migration(path, migration_roots)
         for path in changed_paths
-        for root in migration_roots
+    )
+
+
+def _under_roots(path: str, roots: tuple[str, ...]) -> bool:
+    return any(path == root or path.startswith(f"{root}/") for root in roots)
+
+
+def _is_sql_migration(path: str, roots: tuple[str, ...]) -> bool:
+    if not path.casefold().endswith(".sql"):
+        return False
+    if _under_roots(path, roots):
+        return True
+    directories = PurePosixPath(path).parts[:-1]
+
+    return "migrations" in directories and not any(
+        part.casefold() in _MIGRATION_DISCOVERY_EXCLUSIONS for part in directories
+    )
+
+
+def migration_coupled_paths(
+    changed_paths: tuple[str, ...], migration_roots: tuple[str, ...]
+) -> tuple[str, ...]:
+    if not any(_is_sql_migration(path, migration_roots) for path in changed_paths):
+        return ()
+    return tuple(
+        sorted(path for path in changed_paths if not _is_sql_migration(path, migration_roots))
     )
 
 
@@ -420,4 +552,5 @@ def _carries_forward(
             changed_paths=since_review.changed_paths,
             migration_roots=config.migration_roots,
         )
+        and not any(_under_roots(path, config.domain_roots) for path in since_review.changed_paths)
     )

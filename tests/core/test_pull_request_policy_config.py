@@ -305,6 +305,60 @@ def test_review_policy_requires_resolved_threads_by_default() -> None:
     assert manifest.pull_request is not None
     assert manifest.pull_request.review_policy is not None
     assert manifest.pull_request.review_policy.require_resolved_threads
+    assert manifest.pull_request.review_policy.maximum_body_characters == 2000
+    assert manifest.pull_request.review_policy.domain_roots == ("domain", "domains")
+
+
+@pytest.mark.parametrize("value", ["true", "0", "10001", '"2000"'])
+def test_review_policy_requires_bounded_description_budget(value: str) -> None:
+    configured = _REVIEW_POLICY + f"maximum_body_characters = {value}\n".encode()
+
+    with pytest.raises(ValueError, match="maximum_body_characters"):
+        parse_manifest_bytes(_manifest_with_review_policy(review_policy=configured))
+
+
+@pytest.mark.parametrize("sections", [b"required_body_sections = []", b""])
+def test_review_policy_allows_concise_prose_without_mandatory_headings(sections: bytes) -> None:
+    configured = (
+        _REVIEW_POLICY.replace(
+            b'required_body_sections = ["QA impact / blast radius", "Manual tests"]',
+            sections,
+        )
+        + b'domain_roots = ["src/domain"]\nmaximum_body_characters = 1000\n'
+    )
+
+    manifest = parse_manifest_bytes(_manifest_with_review_policy(review_policy=configured))
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.review_policy is not None
+    assert manifest.pull_request.review_policy.required_body_sections == ()
+    assert manifest.pull_request.review_policy.domain_roots == ("src/domain",)
+    assert manifest.pull_request.review_policy.maximum_body_characters == 1000
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        'reason = " "\nalternatives = "Split deployment considered"\npaths = ["src/app.py"]',
+        'reason = "Runner requires atomic deployment"\nalternatives = " "\npaths = ["src/app.py"]',
+        (
+            'reason = "Runner requires atomic deployment"\n'
+            'alternatives = "Split deployment considered"\npaths = []'
+        ),
+        (
+            'reason = "Runner requires atomic deployment"\n'
+            'alternatives = "Split deployment considered"\npaths = ["src/app.py", "src/app.py"]'
+        ),
+    ],
+)
+def test_migration_exception_rejects_unbounded_or_missing_justification(fields: str) -> None:
+    configured = (
+        _manifest_with_review_policy()
+        + f"\n[pull_request.migration_exception]\n{fields}\n".encode()
+    )
+
+    with pytest.raises(ValueError, match="migration_exception"):
+        parse_manifest_bytes(configured)
 
 
 def test_review_policy_can_stop_requiring_resolved_threads() -> None:
@@ -474,3 +528,21 @@ def test_review_policy_rejects_transition_actors_without_exemptions() -> None:
 
     with pytest.raises(ValueError, match="transition_actors requires transition_exemptions"):
         parse_manifest_bytes(content)
+
+
+def test_migration_exception_keeps_literal_route_path_characters() -> None:
+    configured = (
+        _manifest_with_review_policy()
+        + b"""
+[pull_request.migration_exception]
+reason = "The transaction imports the new route codec."
+alternatives = "Two deployment phases cannot decode the existing payload."
+paths = ["apps/web/[account]/page.tsx"]
+"""
+    )
+
+    manifest = parse_manifest_bytes(configured)
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.migration_exception is not None
+    assert manifest.pull_request.migration_exception.paths == ("apps/web/[account]/page.tsx",)
