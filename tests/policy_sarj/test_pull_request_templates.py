@@ -142,6 +142,22 @@ def test_required_sections_without_a_template_are_reported(tmp_path: Path) -> No
     assert diagnostic.path == ".github/pull_request_template.md"
 
 
+@pytest.mark.parametrize("sections", ["", "required_body_sections = []\n"])
+@pytest.mark.parametrize("template_present", [False, True])
+def test_optional_sections_need_no_template_evidence(
+    tmp_path: Path, sections: str, template_present: bool
+) -> None:
+    configured = _REVIEW_POLICY.replace(
+        'required_body_sections = ["What & why", "One-way or two-way door", "Test evidence"]\n',
+        sections,
+    )
+    files = {".github/pull_request_template.md": "x" * 1_048_577} if template_present else {}
+    repository = _repository(tmp_path, configured, files)
+
+    assert load_repository_snapshot(repository).pull_request_templates == ()
+    assert _template_diagnostics(repository) == ()
+
+
 def test_repository_without_review_policy_skips_the_template(tmp_path: Path) -> None:
     repository = _repository(
         tmp_path,

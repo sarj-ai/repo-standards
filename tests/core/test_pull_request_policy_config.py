@@ -306,14 +306,16 @@ def test_review_policy_requires_resolved_threads_by_default() -> None:
     assert manifest.pull_request.review_policy is not None
     assert manifest.pull_request.review_policy.require_resolved_threads
     assert manifest.pull_request.review_policy.maximum_body_characters == 2000
+    assert manifest.pull_request.review_policy.maximum_prose_characters == 500
     assert manifest.pull_request.review_policy.domain_roots == ("domain", "domains")
 
 
-@pytest.mark.parametrize("value", ["true", "0", "10001", '"2000"'])
-def test_review_policy_requires_bounded_description_budget(value: str) -> None:
-    configured = _REVIEW_POLICY + f"maximum_body_characters = {value}\n".encode()
+@pytest.mark.parametrize("field", ["maximum_body_characters", "maximum_prose_characters"])
+@pytest.mark.parametrize("value", ["true", "0", "10001", '"2000"', "500.0"])
+def test_review_policy_requires_bounded_description_budget(field: str, value: str) -> None:
+    configured = _REVIEW_POLICY + f"{field} = {value}\n".encode()
 
-    with pytest.raises(ValueError, match="maximum_body_characters"):
+    with pytest.raises(ValueError, match=field):
         parse_manifest_bytes(_manifest_with_review_policy(review_policy=configured))
 
 
@@ -546,3 +548,30 @@ paths = ["apps/web/[account]/page.tsx"]
     assert manifest.pull_request is not None
     assert manifest.pull_request.migration_exception is not None
     assert manifest.pull_request.migration_exception.paths == ("apps/web/[account]/page.tsx",)
+
+
+def test_review_roots_keep_literal_bracket_segments() -> None:
+    configured = (
+        _manifest_with_review_policy().replace(
+            b'migration_roots = ["db/migrations", "services/api/migrations"]',
+            b'migration_roots = ["apps/[tenant]/schema"]',
+        )
+        + b'domain_roots = ["apps/[tenant]/domain"]\n'
+    )
+
+    manifest = parse_manifest_bytes(configured)
+
+    assert manifest.pull_request is not None
+    assert manifest.pull_request.review_policy is not None
+    assert manifest.pull_request.review_policy.migration_roots == ("apps/[tenant]/schema",)
+    assert manifest.pull_request.review_policy.domain_roots == ("apps/[tenant]/domain",)
+
+
+@pytest.mark.parametrize("wildcard", ["*", "?"])
+def test_domain_roots_still_reject_wildcards(wildcard: str) -> None:
+    configured = (
+        _manifest_with_review_policy() + f'domain_roots = ["apps/{wildcard}/domain"]\n'.encode()
+    )
+
+    with pytest.raises(ValueError, match="domain_roots must be exact"):
+        parse_manifest_bytes(configured)

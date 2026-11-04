@@ -51,7 +51,7 @@ class _MigrationExampleSource(BaseModel):
 class _PullRequestTemplateExampleSource(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", strict=True)
 
-    required: tuple[str, ...] = Field(min_length=1)
+    required: tuple[str, ...]
     template: str | None
 
 

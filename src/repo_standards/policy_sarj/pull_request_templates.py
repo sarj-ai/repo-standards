@@ -24,6 +24,8 @@ def pull_request_template_diagnostics(
     if pull_request is None or pull_request.review_policy is None:
         return ()
     required = pull_request.review_policy.required_body_sections
+    if not required:
+        return ()
     if not snapshot.pull_request_templates:
         return (_absent_template_diagnostic(required, rule=rule),)
     return tuple(

@@ -33,6 +33,7 @@ from repo_standards.github_review_policy import (
     latest_human_reviews,
     merge_group_pull_request,
     merge_queue_head_sha,
+    pull_request_snapshot,
     reconcile_merge_group,
     render_comment,
     require_unchanged_evidence,
@@ -668,6 +669,44 @@ def test_latest_reviews_mark_listed_bot_and_drop_unlisted_bots() -> None:
     )
 
 
+def _pull_payload(body: object) -> dict[str, object]:
+    return {
+        "base": {"sha": "a" * 40, "ref": "dev", "repo": {"id": 1}},
+        "head": {
+            "sha": "b" * 40,
+            "ref": "feature",
+            "repo": {"id": 1, "full_name": "owner/repo"},
+        },
+        "user": {"id": 10, "login": "author", "type": "User"},
+        "body": body,
+        "draft": False,
+        "state": "open",
+    }
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(123, id="numeric-body"),
+        pytest.param(False, id="false-body"),
+        pytest.param([], id="empty-sequence-body"),
+        pytest.param({}, id="empty-object-body"),
+    ],
+)
+def test_pull_request_snapshot_rejects_non_text_body(body: object) -> None:
+    client = _RequestFixture(lambda _method, _path: _pull_payload(body))
+
+    with pytest.raises(ReconciliationError, match="body must be a string or null"):
+        pull_request_snapshot(client, 42)
+
+
+@pytest.mark.parametrize("body", [None, "", "Fix the behavior."])
+def test_pull_request_snapshot_preserves_nullable_text_body(body: str | None) -> None:
+    client = _RequestFixture(lambda _method, _path: _pull_payload(body))
+
+    assert pull_request_snapshot(client, 42).body == (body or "")
+
+
 def test_complete_evidence_fingerprint_detects_body_drift() -> None:
     snapshot = PullRequestSnapshot(
         number=1,
@@ -1069,6 +1108,48 @@ def test_comment_names_allowlisted_bot_approvals_apart_from_human_ones() -> None
         f"- Earlier allowlisted bot approval by @bulbul-review[bot] on `{'b' * 12}`: "
         "900 counted lines since, **needs re-approval**\n"
     ) in comment
+
+
+def test_comment_explains_prose_and_example_limits() -> None:
+    receipt = _receipt([])
+    receipt["policy"] = {"maximum_body_characters": 2000, "maximum_prose_characters": 500}
+    receipt["summary"] = {
+        "body_characters": 700,
+        "description": {
+            "prose_characters": 501,
+            "code_examples": 0,
+            "invalid_code_examples": 1,
+        },
+    }
+
+    comment = render_comment(
+        receipt,
+        final_passed=False,
+        lane_enabled=False,
+        operational_reason=None,
+        unavailable={},
+    )
+
+    assert "**501/500** prose characters" in comment
+    assert "**700/2000** total" in comment
+    assert "Use nonempty, closed code fences with a language tag." in comment
+
+
+def test_comment_shows_total_limit_when_raw_budget_prevents_parsing() -> None:
+    receipt = _receipt([])
+    receipt["policy"] = {"maximum_body_characters": 2000, "maximum_prose_characters": 500}
+    receipt["summary"] = {"body_characters": 2001, "description": None}
+
+    comment = render_comment(
+        receipt,
+        final_passed=False,
+        lane_enabled=False,
+        operational_reason=None,
+        unavailable={},
+    )
+
+    assert "**2001/2000** total characters" in comment
+    assert "prose characters" not in comment
 
 
 def test_comment_without_allowlisted_bot_approvals_keeps_the_human_count_line() -> None:

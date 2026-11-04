@@ -669,12 +669,13 @@ RULES = (
     ),
     Rule(
         rule_id=PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
-        version=1,
+        version=2,
         default_severity="warning",
         title="Keep the PR template in sync with required sections",
         description=(
             "Each required PR section needs a heading in the PR template. "
-            "Required sections are listed in required_body_sections."
+            "Required sections are listed in required_body_sections; "
+            "an empty list needs no template."
         ),
         why=(
             "People write PRs from the template. "
@@ -702,6 +703,14 @@ RULES = (
                 language="json",
                 before='{"required":["What & why"],"template":null}',
                 after='{"required":["What & why"],"template":"## What & why\\n"}',
+                expected_severity="warning",
+            ),
+            _example(
+                example_id="sarj-documentation-pull-request-template-optional",
+                title="No required headings need no template",
+                language="json",
+                before='{"required":["Test evidence"],"template":null}',
+                after='{"required":[],"template":null}',
                 expected_severity="warning",
             ),
         ),
@@ -789,7 +798,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=33,
+    policy_version=34,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),

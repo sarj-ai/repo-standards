@@ -742,6 +742,61 @@ def test_review_policy_description_limit_cannot_be_relaxed_by_candidate(
     assert run.summary["reasons"] == ["zero_review_threshold", "body_too_long"]
 
 
+@pytest.mark.parametrize("explicit_manifest", [False, True])
+def test_review_policy_prose_limit_cannot_be_relaxed_by_candidate(
+    tmp_path: Path, explicit_manifest: bool
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    policy = tmp_path / ".repo-standards" / "repository.toml"
+    trusted = tmp_path.parent / f"{tmp_path.name}-trusted.toml"
+    trusted.write_bytes(policy.read_bytes())
+    policy.write_text(policy.read_text() + "maximum_prose_characters = 2000\n")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        body="## What & why\n" + "x" * 501 + "\n\n## QA impact / blast radius\nN/A\n",
+    )
+
+    run = _invoke_review_policy(
+        tmp_path,
+        base=base,
+        head=head,
+        evidence=evidence,
+        manifest=trusted if explicit_manifest else None,
+    )
+
+    assert run.exit_code == 1
+    assert run.summary["reasons"] == ["zero_review_threshold", "body_prose_too_long"]
+    prose_characters = _object(run.summary["description"])["prose_characters"]
+    assert isinstance(prose_characters, int)
+    assert prose_characters > 500
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [("x" * 501, "body_prose_too_long"), ("```python\nvalue = 1", "body_code_example_invalid")],
+)
+def test_promotion_exemption_preserves_description_requirements(
+    tmp_path: Path, body: str, reason: str
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _promotion_evidence(tmp_path, head=head)
+    provider = _json_object(evidence.read_text())
+    provider["body"] = body
+    evidence.write_text(json.dumps(provider))
+
+    run = _invoke_review_policy(tmp_path, base=base, head=head, evidence=evidence)
+
+    assert run.exit_code == 1
+    assert run.summary["transition_exemption"] == "promote"
+    reasons = run.summary["reasons"]
+    assert isinstance(reasons, list)
+    assert reason in reasons
+
+
 @pytest.mark.parametrize("review_count", [1, 2])
 def test_review_policy_reads_exception_from_exact_head_without_trusting_candidate_policy(
     tmp_path: Path, review_count: int
