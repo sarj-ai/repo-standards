@@ -378,6 +378,7 @@ class TrackedFileEvidence:
     path: str
     object_id: str
     substantive: bool = True
+    non_consolidatable: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -28,6 +28,10 @@ if TYPE_CHECKING:
 MIGRATION_CONSOLIDATION_RULE_ID = RuleId("repository/artifacts/migration-consolidation")
 _FLYWAY_VERSION = re.compile(r"[VU]([0-9]+(?:[._][0-9]+)*)__[^/]+\.sql\Z")
 _NESTED_REVISION_PARTS = 2
+_DBMATE_MARKER = re.compile(r"--\s*migrate:(up|down)\b(.*)", re.IGNORECASE)
+_CONCURRENT_INDEX = re.compile(
+    r"(?:CREATE\s+(?:UNIQUE\s+)?INDEX|DROP\s+INDEX)\s+CONCURRENTLY\b", re.IGNORECASE
+)
 _AUTO_ROOT_EXCLUDED = frozenset(
     {
         "test",
@@ -153,7 +157,7 @@ def _new_revisions(snapshot: RepositorySnapshot) -> dict[str, tuple[TrackedFileE
         signature = tuple(sorted(item.object_id for item in files))
         if removed[signature]:
             removed[signature] -= 1
-        else:
+        elif not all(item.non_consolidatable for item in files):
             result[coordinate[0]].append(files[0])
     return {root: tuple(files) for root, files in result.items()}
 
@@ -207,3 +211,25 @@ def _revision(path: str, root: str) -> str | None:
         return f"flyway:{version}"
     stem = relative.removesuffix(".sql")
     return stem.rpartition(".")[0] if stem.endswith((".up", ".down")) else stem
+
+
+def is_lone_concurrent_index(content: bytes) -> bool:
+    """Whether a dbmate file only creates or drops indexes CONCURRENTLY, so it cannot merge."""
+    statements: dict[str, list[str]] = {"up": [], "down": []}
+    section = None
+    up_outside_transaction = False
+    for line in content.decode(errors="replace").splitlines():
+        if marker := _DBMATE_MARKER.match(line.strip()):
+            section = marker[1].lower()
+            up_outside_transaction |= section == "up" and "transaction:false" in marker[2]
+        elif section is not None:
+            statements[section].append(line.partition("--")[0])
+    parsed = {
+        name: [item.strip() for item in "\n".join(lines).split(";") if item.strip()]
+        for name, lines in statements.items()
+    }
+    return (
+        up_outside_transaction
+        and bool(parsed["up"])
+        and all(_CONCURRENT_INDEX.match(item) for item in (*parsed["up"], *parsed["down"]))
+    )

@@ -407,3 +407,37 @@ def test_nested_explicit_authority_does_not_split_a_trusted_automatic_root(
     assert len(explicit.diagnostics) == 1
     assert explicit.diagnostics[0].observed_value == 2
     assert explicit.diagnostics[0].manifest_anchor == "migration_streams.migrations"
+
+
+_COLUMN = (
+    "-- migrate:up\nALTER TABLE t ADD COLUMN c uuid;\n\n"
+    "-- migrate:down\nALTER TABLE t DROP COLUMN c;\n"
+)
+_INDEX_UP = "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_c ON t (c)\nWHERE c IS NOT NULL;\n"
+_INDEX_DOWN = "DROP INDEX CONCURRENTLY IF EXISTS idx_c;\n"
+_LONE_INDEX = (
+    f"-- migrate:up transaction:false\n-- why\n{_INDEX_UP}\n"
+    f"-- migrate:down transaction:false\n{_INDEX_DOWN}"
+)
+
+
+@pytest.mark.parametrize(
+    ("second", "expected"),
+    [
+        (_LONE_INDEX, 0),
+        (_COLUMN, 1),
+        (f"-- migrate:up transaction:false\n{_INDEX_UP}ANALYZE t;\n-- migrate:down\n", 1),
+        (f"-- migrate:up\n{_INDEX_UP}\n-- migrate:down\n{_INDEX_DOWN}", 1),
+        (f"-- migrate:up transaction:false\n{_INDEX_UP}\n-- migrate:down\nDROP TABLE t;\n", 1),
+    ],
+)
+def test_lone_concurrent_index_revision_is_not_consolidatable(
+    repository: Path, second: str, expected: int
+) -> None:
+    base = _git(repository, "rev-parse", "HEAD")
+    _write(repository, "db/migrations/001_column.sql", _COLUMN)
+    _write(repository, "db/migrations/002_index.sql", second)
+    _commit(repository)
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert report.completion == "complete"
+    assert len(report.diagnostics) == expected

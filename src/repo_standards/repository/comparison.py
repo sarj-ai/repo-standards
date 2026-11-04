@@ -26,6 +26,7 @@ from repo_standards.policy_sarj.makefiles import (
 from repo_standards.policy_sarj.migrations import (
     MIGRATION_CONSOLIDATION_RULE_ID,
     explicit_migration_roots,
+    is_lone_concurrent_index,
     migration_roots,
     protected_roots,
 )
@@ -37,6 +38,9 @@ if TYPE_CHECKING:
 
     from repo_standards.core.models import RepositorySnapshot
     from repo_standards.core.rule_reviews import RuleVersion
+
+
+_BLOB_BATCH = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,8 +113,12 @@ def with_migration_comparison(
         if base is not None
         else ()
     )
-    head_files = snapshot.inspection.tracked_files
-    head_roots = migration_roots(snapshot.manifest, tuple(item.path for item in head_files))
+    head_roots = migration_roots(
+        snapshot.manifest, tuple(item.path for item in snapshot.inspection.tracked_files)
+    )
+    head_files = _flag_lone_concurrent_indexes(
+        root, head, snapshot.inspection.tracked_files, base_files, head_roots
+    )
     base_paths = tuple(item.path for item in base_files)
     if base is not None and provenance.manifest_path in base_paths:
         manifest_blob = read_tracked_blob_contents(
@@ -145,6 +153,28 @@ def with_migration_comparison(
             comparison_basis=provenance.comparison_basis or comparison_base.basis,
         ),
     )
+
+
+def _flag_lone_concurrent_indexes(
+    root: Path,
+    head: GitIdentity,
+    files: tuple[TrackedFileEvidence, ...],
+    base_files: tuple[TrackedFileEvidence, ...],
+    roots: tuple[str, ...],
+) -> tuple[TrackedFileEvidence, ...]:
+    known = {(item.path, item.object_id) for item in base_files}
+    paths = tuple(
+        item.path
+        for item in files
+        if item.path.endswith(".sql")
+        and (item.path, item.object_id) not in known
+        and any(item.path.startswith(f"{prefix}/") for prefix in roots)
+    )
+    flagged: set[str] = set()
+    for start in range(0, len(paths), _BLOB_BATCH):
+        blobs = read_tracked_blob_contents(root, paths[start : start + _BLOB_BATCH], identity=head)
+        flagged.update(item.path for item in blobs if is_lone_concurrent_index(item.content))
+    return tuple(replace(item, non_consolidatable=item.path in flagged) for item in files)
 
 
 def _comparison_base(root: Path, head: GitIdentity, base_revision: str | None) -> _ComparisonBase:
