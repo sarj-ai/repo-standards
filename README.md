@@ -204,25 +204,6 @@ path/to/generated/** pr-size-excluded
 Thresholds, labels, comments, and approval requirements remain consumer policy. Use
 `pull_request`, never `pull_request_target`; this metric is not a security gate.
 
-## Verified GitHub checkout
-
-For a `pull_request` job checked out at the workspace root, the
-`sarj-ai/repo-standards/github-checkout` Action exposes `comparison-base`,
-`source-commit`, `tree`, `event-head`, and `mode` outputs. Pin the Action to an
-immutable commit. It uses system Python 3.11+ and Git without installing packages.
-Fetch at least two history levels for a tested merge so Git can report its parents.
-
-For GitHub's tested merge, use both `comparison-base` and `source-commit` when
-selecting work: the PR's event head can omit newer target changes. A head-only
-checkout retains the event base. Mismatched runner or parent evidence fails the
-Action. The context does not certify that the baseline passed CI; consumers must
-retain that coverage prerequisite before narrowing work or reusing results.
-
-The `pythonpath` output exposes the same immutable owner source for a producer to
-reverify its checkout after checks. Set `PYTHONPATH` to that output for
-`python3 -P -S -m repo_standards.github_checkout`; the command reads the current
-GitHub event and checkout again and appends context to `GITHUB_OUTPUT`.
-
 ## Safety model
 
 - Repository contents come from one exact Git tree.
