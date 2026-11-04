@@ -4,12 +4,13 @@ from dataclasses import dataclass
 import re
 from typing import NamedTuple
 
+from markdown_it import MarkdownIt
+
 
 _ATX_HEADING = re.compile(r"^ {0,3}(?P<marks>#{1,6})(?:[ \t]+(?P<title>.*?))?[ \t]*$")
 _ATX_CLOSING = re.compile(r"[ \t]+#+[ \t]*$")
 _SETEXT_HEADING = re.compile(r"^ {0,3}(?P<marks>=+|-+)[ \t]*$")
 _SETEXT_TEXT = re.compile(r"^ {0,3}[^ \t]")
-_FENCE = re.compile(r"^ {0,3}(?P<marks>`{3,}|~{3,})(?P<tail>.*)$")
 _HEADING_DECORATION = re.compile(r"[*_`]+")
 
 
@@ -30,8 +31,11 @@ def missing_required_body_sections(
     body: str,
     required_sections: tuple[str, ...],
 ) -> tuple[str, ...]:
-    lines = _markdown_lines(body)
-    headings = _headings(lines)
+    if not required_sections:
+        return ()
+    code_lines = _code_lines(body)
+    lines = _markdown_lines(body, code_lines)
+    headings = _headings(lines, code_lines)
     filled = _filled_sections(lines, headings)
     return tuple(
         required for required in required_sections if _normalized_title(required) not in filled
@@ -42,22 +46,31 @@ def missing_template_sections(
     template: str,
     required_sections: tuple[str, ...],
 ) -> tuple[str, ...]:
-    titles = {heading.title for heading in _headings(_markdown_lines(template))}
+    if not required_sections:
+        return ()
+    code_lines = _code_lines(template)
+    titles = {
+        heading.title for heading in _headings(_markdown_lines(template, code_lines), code_lines)
+    }
     return tuple(
         required for required in required_sections if _normalized_title(required) not in titles
     )
 
 
-def _markdown_lines(body: str) -> list[str]:
+def _code_lines(body: str) -> frozenset[int]:
+    return frozenset(
+        line
+        for token in MarkdownIt("commonmark").parse(body)
+        if token.type in {"fence", "code_block"} and token.map is not None
+        for line in range(*token.map)
+    )
+
+
+def _markdown_lines(body: str, code_lines: frozenset[int]) -> list[str]:
     lines: list[str] = []
-    fence: str | None = None
     comment = False
-    for line in re.split(r"\r\n?|\n", body):
-        if not comment and (matched := _FENCE.match(line)) is not None:
-            fence = _fence_state(matched, fence)
-            lines.append(line)
-            continue
-        if fence is not None:
+    for index, line in enumerate(re.split(r"\r\n?|\n", body)):
+        if index in code_lines:
             lines.append(line)
             continue
         stripped = _strip_line_comments(line, comment=comment)
@@ -81,29 +94,14 @@ def _strip_line_comments(line: str, *, comment: bool) -> _CommentLine:
     return _CommentLine("".join(parts), comment)
 
 
-def _fence_state(matched: re.Match[str], fence: str | None) -> str | None:
-    marks, tail = matched.group("marks", "tail")
-    if fence is None:
-        return None if marks[0] == "`" and "`" in tail else marks
-    if marks[0] == fence[0] and len(marks) >= len(fence) and not tail.strip():
-        return None
-    return fence
-
-
-def _headings(lines: list[str]) -> tuple[_Heading, ...]:
+def _headings(lines: list[str], code_lines: frozenset[int]) -> tuple[_Heading, ...]:
     headings: list[_Heading] = []
-    fence: str | None = None
     index = 0
     while index < len(lines):
-        line = lines[index]
-        if (fence_match := _FENCE.match(line)) is not None:
-            fence = _fence_state(fence_match, fence)
+        if index in code_lines:
             index += 1
             continue
-        if fence is not None:
-            index += 1
-            continue
-        heading = _heading_at(lines, index)
+        heading = _heading_at(lines, index, code_lines)
         if heading is None:
             index += 1
             continue
@@ -112,7 +110,7 @@ def _headings(lines: list[str]) -> tuple[_Heading, ...]:
     return tuple(headings)
 
 
-def _heading_at(lines: list[str], index: int) -> _Heading | None:
+def _heading_at(lines: list[str], index: int, code_lines: frozenset[int]) -> _Heading | None:
     line = lines[index]
     if (atx := _ATX_HEADING.match(line)) is not None:
         return _Heading(
@@ -121,7 +119,12 @@ def _heading_at(lines: list[str], index: int) -> _Heading | None:
             content_start=index + 1,
             line_index=index,
         )
-    if index + 1 >= len(lines) or not line.strip() or _SETEXT_TEXT.match(line) is None:
+    if (
+        index + 1 >= len(lines)
+        or index + 1 in code_lines
+        or not line.strip()
+        or _SETEXT_TEXT.match(line) is None
+    ):
         return None
     if (setext := _SETEXT_HEADING.match(lines[index + 1])) is None:
         return None

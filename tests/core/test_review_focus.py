@@ -47,12 +47,81 @@ def _approval(name: str, *, commit: GitObjectId = HEAD, bot: bool = False) -> Hu
 
 @pytest.mark.parametrize("length", [1999, 2000, 2001])
 def test_description_budget_counts_all_characters(length: int) -> None:
-    evidence = replace(_evidence("src/reader.py"), body="x" * length)
+    wrapper = "```text\n\n```"
+    body = "```text\n" + "x" * (length - len(wrapper)) + "\n```"
+    evidence = replace(_evidence("src/reader.py"), body=body)
 
     result = evaluate_review_policy(evidence)
 
     assert result.merge_ready == (length <= 2000)
     assert (ReviewPolicyReason.BODY_TOO_LONG in result.reasons) == (length > 2000)
+
+
+@pytest.mark.parametrize("length", [499, 500, 501])
+def test_prose_budget_is_smaller_than_the_total_budget(length: int) -> None:
+    result = evaluate_review_policy(replace(_evidence("src/reader.py"), body="x" * length))
+
+    assert result.merge_ready == (length <= 500)
+    assert (ReviewPolicyReason.BODY_PROSE_TOO_LONG in result.reasons) == (length > 500)
+    assert result.description is not None
+    assert result.description.prose_characters == length
+
+
+@pytest.mark.parametrize("maximum", [10, 700])
+def test_trusted_prose_budget_is_used(maximum: int) -> None:
+    result = evaluate_review_policy(
+        replace(_evidence("src/reader.py"), body="x" * 500),
+        ReviewPolicyConfig(maximum_prose_characters=maximum),
+    )
+
+    assert result.merge_ready == (maximum >= 500)
+
+
+@pytest.mark.parametrize("body", ["```\nvalue = 1\n```", "```py\nvalue = 1", "```py\n```"])
+def test_code_example_format_blocks_the_native_review_policy(body: str) -> None:
+    result = evaluate_review_policy(replace(_evidence("src/reader.py"), body=body))
+
+    assert not result.merge_ready
+    assert result.reasons == (
+        ReviewPolicyReason.ZERO_REVIEW_THRESHOLD,
+        ReviewPolicyReason.BODY_CODE_EXAMPLE_INVALID,
+    )
+
+
+def test_raw_budget_is_checked_before_markdown_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected_parse(_body: str) -> None:
+        pytest.fail("oversized descriptions must not be parsed")
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- intercept real lookup; injection bypasses it.
+        "repo_standards.core.review_policy.analyze_description", unexpected_parse
+    )
+
+    result = evaluate_review_policy(replace(_evidence("src/reader.py"), body="x" * 2001))
+
+    assert result.description is None
+    assert result.reasons == (
+        ReviewPolicyReason.ZERO_REVIEW_THRESHOLD,
+        ReviewPolicyReason.BODY_TOO_LONG,
+    )
+
+
+@pytest.mark.parametrize("value", [True, 0, -1, 10001, 500.0])
+def test_runtime_prose_budget_requires_a_bounded_integer(value: float) -> None:
+    with pytest.raises(ValueError, match="maximum prose characters"):
+        ReviewPolicyConfig(maximum_prose_characters=value)  # pyright: ignore[reportArgumentType] -- exercise runtime validation of a fractional value.
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(None, id="null-body"),
+        pytest.param(123, id="numeric-body"),
+        pytest.param(["text"], id="sequence-body"),
+    ],
+)
+def test_public_review_evidence_requires_text_body(body: int | list[str] | None) -> None:
+    with pytest.raises(TypeError, match="body must be a string"):
+        replace(_evidence("src/reader.py"), body=body)
 
 
 def test_hidden_comments_and_unbroken_text_cannot_bypass_description_budget() -> None:
@@ -194,3 +263,24 @@ def test_declared_domain_roots_do_not_match_adjacent_names() -> None:
 
     assert not evaluate_review_policy(_evidence("src/models/account.py"), policy).merge_ready
     assert evaluate_review_policy(_evidence("src/models_extra/account.py"), policy).merge_ready
+
+
+@pytest.mark.parametrize(
+    ("path", "sensitive"),
+    [
+        ("apps/[tenant]/schema/001.sql", True),
+        ("apps/t/schema/001.sql", False),
+        ("apps/[tenant]/schema_old/001.sql", False),
+    ],
+)
+def test_bracket_roots_match_only_literal_path_boundaries(path: str, sensitive: bool) -> None:
+    policy = ReviewPolicyConfig(
+        migration_roots=("apps/[tenant]/schema",),
+        domain_roots=("apps/[tenant]/schema",),
+    )
+
+    result = evaluate_review_policy(_evidence(path), policy)
+
+    assert result.touches_migration == sensitive
+    assert result.touches_domain == sensitive
+    assert result.merge_ready != sensitive

@@ -637,9 +637,12 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         typer.Option(help="Git attribute that marks repository-specific excluded artifacts."),
     ] = "pr-size-excluded",
 ) -> None:
-    """Require concise descriptions, isolated SQL migrations, and current human consensus.
+    """Require short prose, well-formed examples, isolated migrations and human consensus.
 
-    Descriptions default to 2,000 characters, including Markdown and comments.
+    Defaults: 2,000 total characters and 500 prose characters. Use closed,
+    language-tagged code fences when examples help explain the change.
+
+    The total includes Markdown and comments.
     Migration-only PRs and declared domain roots need current human approval.
     Coupling other files requires a tracked migration_exception with reason,
     alternatives, and every coupled path, plus two human approvals on this head.
@@ -751,6 +754,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                 ),
                 require_resolved_threads=configured.require_resolved_threads,
                 maximum_body_characters=configured.maximum_body_characters,
+                maximum_prose_characters=configured.maximum_prose_characters,
                 domain_roots=configured.domain_roots,
             ),
         )
@@ -980,6 +984,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             "require_resolved_threads": configured.require_resolved_threads,
             "required_body_sections": list(configured.required_body_sections),
             "maximum_body_characters": configured.maximum_body_characters,
+            "maximum_prose_characters": configured.maximum_prose_characters,
             "domain_roots": list(configured.domain_roots),
             "require_migration_isolation": True,
             "transition_exemptions": list(configured.transition_exemptions),
@@ -999,6 +1004,13 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             "migration_coupled_paths": list(result.migration_coupled_paths),
             "migration_exception_accepted": result.migration_exception_accepted,
             "body_characters": len(provider.body),
+            "description": {
+                "prose_characters": result.description.prose_characters,
+                "code_examples": result.description.code_examples,
+                "invalid_code_examples": result.description.invalid_code_examples,
+            }
+            if result.description is not None
+            else None,
             "transition_exemption": transition_exemption,
             "missing_body_sections": list(missing_sections),
             "reasons": reasons,

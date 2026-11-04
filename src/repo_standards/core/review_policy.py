@@ -7,9 +7,11 @@ import re
 from typing import Literal
 
 from .canonical import canonical_path
+from .description import DescriptionMetrics, analyze_description
 from .errors import ConfigurationError
 from .models import (
     DEFAULT_MAXIMUM_BODY_CHARACTERS,
+    DEFAULT_MAXIMUM_PROSE_CHARACTERS,
     MAXIMUM_BODY_CHARACTERS,
     GitObjectId,
     MigrationCouplingException,
@@ -92,6 +94,8 @@ class ReviewPolicyReason(StrEnum):
     THREAD_EVIDENCE_MISSING = "thread_evidence_missing"
     THREADS_UNRESOLVED = "threads_unresolved"
     BODY_TOO_LONG = "body_too_long"
+    BODY_PROSE_TOO_LONG = "body_prose_too_long"
+    BODY_CODE_EXAMPLE_INVALID = "body_code_example_invalid"
     DOMAIN_REVIEW_FLOOR = "domain_review_floor"
     SENSITIVE_APPROVAL_MISSING = "sensitive_approval_missing"
     MIGRATION_CHANGES_MIXED = "migration_changes_mixed"
@@ -109,6 +113,7 @@ class ReviewPolicyConfig:
     require_resolved_threads: bool = True
     maximum_body_characters: int = DEFAULT_MAXIMUM_BODY_CHARACTERS
     domain_roots: tuple[str, ...] = ("domain", "domains")
+    maximum_prose_characters: int = DEFAULT_MAXIMUM_PROSE_CHARACTERS
 
     def __post_init__(self) -> None:
         if type(self.zero_review_below_lines) is not int or self.zero_review_below_lines <= 0:
@@ -127,14 +132,21 @@ class ReviewPolicyConfig:
             if type(floor) is not int or floor not in {0, 1, 2}:
                 message = f"{name} review floor must be 0, 1, or 2"
                 raise ValueError(message)
-        _validate_paths(self.migration_roots, "migration root")
-        _validate_paths(self.domain_roots, "domain root")
-        if (
-            type(self.maximum_body_characters) is not int
-            or not 1 <= self.maximum_body_characters <= MAXIMUM_BODY_CHARACTERS
+        for kind, roots in (
+            ("migration", self.migration_roots),
+            ("domain", self.domain_roots),
         ):
-            message = "maximum body characters must be an integer between 1 and 10000"
-            raise ValueError(message)
+            _validate_paths(roots, f"{kind} root")
+            if any("*" in root or "?" in root for root in roots):
+                message = f"{kind} roots must be exact repository paths"
+                raise ValueError(message)
+        for label, maximum in (
+            ("maximum body characters", self.maximum_body_characters),
+            ("maximum prose characters", self.maximum_prose_characters),
+        ):
+            if type(maximum) is not int or not 1 <= maximum <= MAXIMUM_BODY_CHARACTERS:
+                message = f"{label} must be an integer between 1 and 10000"
+                raise ValueError(message)
         allowed = {
             CheckConclusion.SUCCESS,
             CheckConclusion.NEUTRAL,
@@ -202,6 +214,9 @@ class ReviewPolicyEvidence:
         if type(self.counted_lines) is not int or self.counted_lines < 0:
             message = "counted lines must be a non-negative integer"
             raise ValueError(message)
+        if type(self.body) is not str:
+            message = "pull request body must be a string"
+            raise TypeError(message)
         if _OBJECT_ID.fullmatch(self.evaluated_head_sha) is None:
             message = "evaluated head SHA must be a lowercase 40-character object ID"
             raise ValueError(message)
@@ -234,6 +249,7 @@ class ReviewPolicyResult:
     touches_domain: bool = False
     migration_coupled_paths: tuple[str, ...] = ()
     migration_exception_accepted: bool = False
+    description: DescriptionMetrics | None = None
 
 
 def evaluate_review_policy(
@@ -287,6 +303,13 @@ def evaluate_review_policy(
     reasons.extend(review_assessment.reasons)
     reasons.extend(_focus_reasons(evidence, config))
 
+    description = (
+        analyze_description(evidence.body)
+        if len(evidence.body) <= config.maximum_body_characters
+        else None
+    )
+    reasons.extend(_description_reasons(description, config))
+
     if config.require_resolved_threads:
         if evidence.threads_resolved is None:
             reasons.append(ReviewPolicyReason.THREAD_EVIDENCE_MISSING)
@@ -316,7 +339,21 @@ def evaluate_review_policy(
         touches_domain=touches_domain,
         migration_coupled_paths=coupled_paths,
         migration_exception_accepted=ReviewPolicyReason.MIGRATION_EXCEPTION_ACCEPTED in reasons,
+        description=description,
     )
+
+
+def _description_reasons(
+    description: DescriptionMetrics | None, config: ReviewPolicyConfig
+) -> tuple[ReviewPolicyReason, ...]:
+    if description is None:
+        return (ReviewPolicyReason.BODY_TOO_LONG,)
+    reasons: list[ReviewPolicyReason] = []
+    if description.prose_characters > config.maximum_prose_characters:
+        reasons.append(ReviewPolicyReason.BODY_PROSE_TOO_LONG)
+    if description.invalid_code_examples:
+        reasons.append(ReviewPolicyReason.BODY_CODE_EXAMPLE_INVALID)
+    return tuple(reasons)
 
 
 def _focus_reasons(
@@ -355,9 +392,6 @@ def _focus_reasons(
             if exception_accepted
             else ReviewPolicyReason.MIGRATION_CHANGES_MIXED
         )
-    if len(evidence.body) > config.maximum_body_characters:
-        reasons.append(ReviewPolicyReason.BODY_TOO_LONG)
-
     return tuple(reasons)
 
 

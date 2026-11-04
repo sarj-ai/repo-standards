@@ -90,6 +90,14 @@ def test_review_paths_must_be_canonical_before_migration_matching(path: str) -> 
         ReviewPolicyConfig(migration_roots=(path,))
 
 
+@pytest.mark.parametrize("root", ["db/*/schema", "db/?/schema"])
+def test_review_roots_require_exact_paths(root: str) -> None:
+    with pytest.raises(ValueError, match="migration roots must be exact"):
+        ReviewPolicyConfig(migration_roots=(root,))
+    with pytest.raises(ValueError, match="domain roots must be exact"):
+        ReviewPolicyConfig(domain_roots=(root,))
+
+
 def _approval(
     reviewer: str = "reviewer",
     *,

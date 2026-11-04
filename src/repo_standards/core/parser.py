@@ -12,6 +12,7 @@ from .images import is_image_path
 from .javascript import is_javascript_path
 from .models import (
     DEFAULT_MAXIMUM_BODY_CHARACTERS,
+    DEFAULT_MAXIMUM_PROSE_CHARACTERS,
     MAX_REPOSITORY_INPUT_BYTES,
     MAXIMUM_BODY_CHARACTERS,
     Baseline,
@@ -378,6 +379,7 @@ def parse_pull_request_review_policy(
         "accepted_check_conclusions",
         "require_resolved_threads",
         "maximum_body_characters",
+        "maximum_prose_characters",
         "domain_roots",
     }
     required = {
@@ -427,7 +429,7 @@ def parse_pull_request_review_policy(
     folded_roots = tuple(path.casefold() for path in migration_roots)
     if len(folded_roots) != len(set(folded_roots)):
         ConfigurationError.fail(f"{context}.migration_roots must contain unique paths")
-    if any(any(character in root for character in "*?[") for root in migration_roots):
+    if any(any(character in root for character in "*?") for root in migration_roots):
         ConfigurationError.fail(f"{context}.migration_roots must be exact repository paths")
     for index, root in enumerate(folded_roots):
         if any(
@@ -475,24 +477,32 @@ def parse_pull_request_review_policy(
         accepted_check_conclusions=accepted_check_conclusions,
         require_resolved_threads=_boolean(data, "require_resolved_threads", context, default=True),
         maximum_body_characters=_body_character_budget(data, context=context),
+        maximum_prose_characters=_body_character_budget(
+            data,
+            context=context,
+            key="maximum_prose_characters",
+            default=DEFAULT_MAXIMUM_PROSE_CHARACTERS,
+        ),
         domain_roots=_domain_roots(policy_strings("domain_roots", default=["domain", "domains"])),
     )
 
 
-def _body_character_budget(data: dict[str, object], *, context: str) -> int:
-    maximum = _integer(
-        data, "maximum_body_characters", context, default=DEFAULT_MAXIMUM_BODY_CHARACTERS
-    )
+def _body_character_budget(
+    data: dict[str, object],
+    *,
+    context: str,
+    key: str = "maximum_body_characters",
+    default: int = DEFAULT_MAXIMUM_BODY_CHARACTERS,
+) -> int:
+    maximum = _integer(data, key, context, default=default)
     if not 1 <= maximum <= MAXIMUM_BODY_CHARACTERS:
-        ConfigurationError.fail(
-            f"{context}.maximum_body_characters must be between 1 and {MAXIMUM_BODY_CHARACTERS}"
-        )
+        ConfigurationError.fail(f"{context}.{key} must be between 1 and {MAXIMUM_BODY_CHARACTERS}")
     return maximum
 
 
 def _domain_roots(paths: tuple[str, ...]) -> tuple[str, ...]:
     roots = tuple(canonical_path(path) for path in paths)
-    if any(any(character in root for character in "*?[") for root in roots):
+    if any(any(character in root for character in "*?") for root in roots):
         ConfigurationError.fail(
             "pull_request.review_policy.domain_roots must be exact repository paths"
         )

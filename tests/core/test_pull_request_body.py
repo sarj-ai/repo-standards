@@ -56,6 +56,26 @@ def test_html_comment_text_inside_code_does_not_hide_real_sections() -> None:
     assert missing_template_sections(body, ("What & why",)) == ()
 
 
+@pytest.mark.parametrize("marker", ["-", "1."])
+def test_list_code_examples_cannot_supply_required_sections(marker: str) -> None:
+    indent = " " * (len(marker) + 1)
+    body = f"{marker} ```markdown\n{indent}## What & why\n{indent}Example only.\n{indent}```\n"
+
+    assert missing_required_body_sections(body, ("What & why",)) == ("What & why",)
+    assert missing_template_sections(body, ("What & why",)) == ("What & why",)
+
+
+@pytest.mark.parametrize("marker", ["-", "1."])
+def test_comments_in_list_code_do_not_hide_following_real_sections(marker: str) -> None:
+    indent = " " * (len(marker) + 1)
+    body = (
+        f"{marker} ```html\n{indent}<!-- Example source.\n{indent}```\n## What & why\nEvidence.\n"
+    )
+
+    assert missing_required_body_sections(body, ("What & why",)) == ()
+    assert missing_template_sections(body, ("What & why",)) == ()
+
+
 def test_fence_text_inside_an_html_comment_does_not_hide_real_sections() -> None:
     body = "<!--\n```markdown\n## Example\n-->\n## What & why\nReal evidence.\n"
 

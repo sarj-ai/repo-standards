@@ -278,14 +278,13 @@ def pull_request_snapshot(client: GitHubClient, number: int) -> PullRequestSnaps
     head_sha = _string(head.get("sha"), "head SHA")
     if _OBJECT_ID.fullmatch(base_sha) is None or _OBJECT_ID.fullmatch(head_sha) is None:
         raise ReconciliationError("pull request revisions must be lowercase 40-character SHAs")
-    body = value.get("body")
     return PullRequestSnapshot(
         number=number,
         base_sha=base_sha,
         head_sha=head_sha,
         base_ref=_string(base.get("ref"), "base ref"),
         head_ref=_string(head.get("ref"), "head ref"),
-        body=body if isinstance(body, str) else "",
+        body=_body_text(value.get("body")),
         author=_string(user.get("login"), "pull request author"),
         author_id=GitHubUserId(_integer(user.get("id"), "pull request author id")),
         author_type=_string(user.get("type"), "pull request author type"),
@@ -295,6 +294,14 @@ def pull_request_snapshot(client: GitHubClient, number: int) -> PullRequestSnaps
         draft=_boolean(value.get("draft"), "pull request draft"),
         state=_string(value.get("state"), "pull request state"),
     )
+
+
+def _body_text(value: object) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ReconciliationError("pull request body must be a string or null")
+    return value
 
 
 def _boolean(value: object, context: str) -> bool:
@@ -869,11 +876,33 @@ def render_comment(
         f"{earlier_lines}"
         f"- Migration: **{'yes' if summary.get('touches_migration') else 'no'}**\n"
         f"- Domain: **{'yes' if summary.get('touches_domain') else 'no'}**\n"
-        f"- Description: **{summary.get('body_characters', '?')}** characters\n"
+        f"{_description_line(summary, receipt)}"
         f"- Review-optional lane: **{lane}**\n"
         f"- Reasons: `{reason_text}`\n\n"
         f"Evaluated head `{_evaluated_head(receipt)}`.\n"
     )
+
+
+def _description_line(summary: Mapping[str, object], receipt: Mapping[str, object]) -> str:
+    description = _optional_mapping(summary.get("description"))
+    policy = _optional_mapping(receipt.get("policy")) or {}
+    if description is None:
+        if "maximum_body_characters" in policy:
+            return (
+                f"- Description: **{summary.get('body_characters', '?')}/"
+                f"{policy['maximum_body_characters']}** total characters\n"
+            )
+        return f"- Description: **{summary.get('body_characters', '?')}** characters\n"
+    line = (
+        f"- Description: **{description.get('prose_characters', '?')}/"
+        f"{policy.get('maximum_prose_characters', '?')}** prose characters; "
+        f"**{summary.get('body_characters', '?')}/"
+        f"{policy.get('maximum_body_characters', '?')}** total; "
+        f"**{description.get('code_examples', '?')}** code examples\n"
+    )
+    if description.get("invalid_code_examples"):
+        line += "  Use nonempty, closed code fences with a language tag.\n"
+    return line
 
 
 def _approvals_line(summary: Mapping[str, object]) -> str:

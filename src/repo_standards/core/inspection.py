@@ -341,7 +341,11 @@ def load_calibration_snapshot(
 def _pull_request_templates(
     root: Path, manifest: Manifest, blobs: tuple[TrackedBlob, ...]
 ) -> tuple[PullRequestTemplate, ...]:
-    if manifest.pull_request is None or manifest.pull_request.review_policy is None:
+    if (
+        manifest.pull_request is None
+        or manifest.pull_request.review_policy is None
+        or not manifest.pull_request.review_policy.required_body_sections
+    ):
         return ()
     selected = tuple(blob for blob in blobs if _PULL_REQUEST_TEMPLATE.match(blob.path))
     contents, issues = _read_metadata_batch(root, selected)

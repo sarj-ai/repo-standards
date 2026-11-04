@@ -150,6 +150,7 @@ class MigrationCouplingException:
 
 
 DEFAULT_MAXIMUM_BODY_CHARACTERS = 2000
+DEFAULT_MAXIMUM_PROSE_CHARACTERS = 500
 MAXIMUM_BODY_CHARACTERS = 10000
 
 
@@ -168,6 +169,7 @@ class PullRequestReviewPolicyConfig:
     require_resolved_threads: bool = True
     maximum_body_characters: int = DEFAULT_MAXIMUM_BODY_CHARACTERS
     domain_roots: tuple[str, ...] = ("domain", "domains")
+    maximum_prose_characters: int = DEFAULT_MAXIMUM_PROSE_CHARACTERS
 
 
 @dataclass(frozen=True, slots=True)

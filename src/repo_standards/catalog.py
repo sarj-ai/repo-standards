@@ -767,8 +767,8 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
             capability_id=CapabilityId("pull-request-review-policy"),
             title="Pull-request review policy",
             summary=(
-                "Require concise descriptions, isolated SQL migrations and current human "
-                "review for migrations and declared domain roots, alongside checks and size tiers."
+                "Keep PR prose short and code examples well-formed, with isolated SQL migrations "
+                "and current human review for migrations and declared domain roots."
             ),
             status="preview",
             command_ids=(CommandId("pull-request.review-policy"),),
