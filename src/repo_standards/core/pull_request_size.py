@@ -17,8 +17,7 @@ _TEST_COMPONENTS = frozenset({"tests", "__tests__", "__snapshots__"})
 _PYTHON_TEST = re.compile(r"(?:test_.+|.+_test)\.py\Z")
 _JAVASCRIPT_TEST = re.compile(r".+\.(?:test|spec)\.(?:[cm]?[jt]sx?)\Z")
 _GO_TEST = re.compile(r".+_test\.go\Z")
-_JVM_TEST = re.compile(r".+(?:test|tests)\.(?:java|kt|kts|groovy|scala)\Z")
-_DOTNET_TEST = re.compile(r".+(?:test|tests)\.cs\Z")
+_CLASS_TEST = re.compile(r".+Tests?\.(?i:java|kt|kts|groovy|scala|cs)\Z")
 _RUBY_TEST = re.compile(r".+_(?:spec|test)\.rb\Z")
 _XCODE_TEST_COMPONENT = re.compile(r".+Tests\Z")
 PullRequestSizeCategory = Literal["production", "test", "generated", "binary"]
@@ -210,8 +209,7 @@ def is_test_path(path: str) -> bool:
         or _PYTHON_TEST.fullmatch(basename) is not None
         or _JAVASCRIPT_TEST.fullmatch(basename) is not None
         or _GO_TEST.fullmatch(basename) is not None
-        or _JVM_TEST.fullmatch(basename) is not None
-        or _DOTNET_TEST.fullmatch(basename) is not None
+        or _CLASS_TEST.fullmatch(pure.name) is not None
         or _RUBY_TEST.fullmatch(basename) is not None
         or basename.endswith(".bats")
     )

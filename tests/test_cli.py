@@ -387,11 +387,16 @@ def test_pull_request_review_policy_thread_resolution_follows_manifest(
     assert _object(payload["summary"])["merge_ready"] is merge_ready
 
 
+@pytest.mark.parametrize(
+    "migration_root",
+    ["db/migrations", "deployments/test/migrations", "environments/test/db/migrations"],
+)
 def test_pull_request_review_policy_migration_floor_blocks_without_approval(
     tmp_path: Path,
+    migration_root: str,
 ) -> None:
     base = _review_policy_fixture(tmp_path)
-    migration = tmp_path / "db" / "migrations"
+    migration = tmp_path / migration_root
     migration.mkdir(parents=True)
     (migration / "001.sql").write_text("SELECT 1;\n", encoding="utf-8")
     _commit_changes(tmp_path)
@@ -829,9 +834,12 @@ def test_review_policy_reads_exception_from_exact_head_without_trusting_candidat
     assert run.summary["migration_coupled_paths"] == [".repo-standards/repository.toml", "codec.py"]
 
 
-def test_migration_isolation_sees_renames_and_excluded_tests(tmp_path: Path) -> None:
+@pytest.mark.parametrize("migration_root", ["db/migrations", "deployments/test/migrations"])
+def test_migration_isolation_sees_renames_and_excluded_tests(
+    tmp_path: Path, migration_root: str
+) -> None:
     base = _review_policy_fixture(tmp_path)
-    migration = tmp_path / "db" / "migrations" / "001.sql"
+    migration = tmp_path / migration_root / "001.sql"
     migration.parent.mkdir(parents=True)
     migration.write_text("SELECT 1;\n")
     (tmp_path / "tests").mkdir()

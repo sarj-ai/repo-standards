@@ -78,6 +78,14 @@ def _repository(tmp_path: Path) -> RepositoryFixture:
         "android/src/androidTest/resources/config.xml",
         "WidgetTests/fixture.json",
         "WidgetUITests/fixture.json",
+        "src/WidgetTest.java",
+        "src/WidgetTests.kt",
+        "src/WidgetTest.kts",
+        "src/WidgetTest.groovy",
+        "src/WidgetTest.scala",
+        "src/WidgetTests.cs",
+        "src/WidgetTests.CS",
+        "src/test/java/Latest.java",
     ],
 )
 def test_test_conventions_are_excluded(path: str) -> None:
@@ -98,6 +106,14 @@ def test_test_conventions_are_excluded(path: str) -> None:
         "deployments/test/config.yml",
         "src/contests/scoring.py",
         "src/Contests/scoring.py",
+        "src/main/java/FlowableCombineLatest.java",
+        "src/main/java/Contest.java",
+        "src/main/kotlin/Latest.kt",
+        "src/main/kotlin/Latest.kts",
+        "src/main/groovy/Latest.groovy",
+        "src/main/scala/Latest.scala",
+        "src/Latest.cs",
+        "src/Contests.cs",
     ],
 )
 def test_test_near_misses_are_counted(path: str) -> None:
@@ -167,7 +183,13 @@ def test_policy_is_loaded_from_base_not_head(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "path",
-    ["environments/test/main.tf", "deployments/test/config.yml", "src/contests/scoring.py"],
+    [
+        "environments/test/main.tf",
+        "deployments/test/config.yml",
+        "src/contests/scoring.py",
+        "src/main/java/FlowableCombineLatest.java",
+        "src/Latest.cs",
+    ],
 )
 def test_production_churn_is_counted_in_ambiguous_directories(tmp_path: Path, path: str) -> None:
     repository, base = _repository(tmp_path)
