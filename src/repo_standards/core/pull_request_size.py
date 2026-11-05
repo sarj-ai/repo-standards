@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -12,14 +13,14 @@ from repo_standards._git_environment import GIT_ENVIRONMENT
 from .errors import ConfigurationError
 
 
-_TEST_COMPONENTS = frozenset({"test", "tests", "__tests__", "__snapshots__"})
+_TEST_COMPONENTS = frozenset({"tests", "__tests__", "__snapshots__"})
 _PYTHON_TEST = re.compile(r"(?:test_.+|.+_test)\.py\Z")
 _JAVASCRIPT_TEST = re.compile(r".+\.(?:test|spec)\.(?:[cm]?[jt]sx?)\Z")
 _GO_TEST = re.compile(r".+_test\.go\Z")
 _JVM_TEST = re.compile(r".+(?:test|tests)\.(?:java|kt|kts|groovy|scala)\Z")
 _DOTNET_TEST = re.compile(r".+(?:test|tests)\.cs\Z")
 _RUBY_TEST = re.compile(r".+_(?:spec|test)\.rb\Z")
-_XCODE_TEST_COMPONENT = re.compile(r".+(?:ui)?tests\Z")
+_XCODE_TEST_COMPONENT = re.compile(r".+Tests\Z")
 PullRequestSizeCategory = Literal["production", "test", "generated", "binary"]
 _NUMSTAT_FIELDS = 3
 _CATEGORIES: tuple[PullRequestSizeCategory, ...] = (
@@ -193,11 +194,14 @@ def _directory_size(
 def is_test_path(path: str) -> bool:
     pure = PurePosixPath(path)
     components = tuple(component.casefold() for component in pure.parts[:-1])
-    if any(
-        component in _TEST_COMPONENTS
-        or component == "androidtest"
-        or _XCODE_TEST_COMPONENT.fullmatch(component) is not None
-        for component in components
+    # A directory named "test" may be a deployment environment; require a suite layout.
+    if (
+        components[:1] == ("test",)
+        or any(
+            component in _TEST_COMPONENTS or component == "androidtest" for component in components
+        )
+        or any(pair == ("src", "test") for pair in pairwise(components))
+        or any(_XCODE_TEST_COMPONENT.fullmatch(component) for component in pure.parts[:-1])
     ):
         return True
     basename = pure.name.casefold()
