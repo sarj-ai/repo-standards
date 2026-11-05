@@ -73,6 +73,11 @@ def _repository(tmp_path: Path) -> RepositoryFixture:
         "conftest.py",
         "python/project/conftest.py",
         "typescript/app/__snapshots__/service.snap",
+        "test/setup.ts",
+        "server/src/test/resources/application.yml",
+        "android/src/androidTest/resources/config.xml",
+        "WidgetTests/fixture.json",
+        "WidgetUITests/fixture.json",
     ],
 )
 def test_test_conventions_are_excluded(path: str) -> None:
@@ -89,6 +94,10 @@ def test_test_conventions_are_excluded(path: str) -> None:
         "src/conftest_helpers.py",
         "src/my_conftest.py",
         "templates/conftest.py.in",
+        "environments/test/main.tf",
+        "deployments/test/config.yml",
+        "src/contests/scoring.py",
+        "src/Contests/scoring.py",
     ],
 )
 def test_test_near_misses_are_counted(path: str) -> None:
@@ -154,6 +163,23 @@ def test_policy_is_loaded_from_base_not_head(tmp_path: Path) -> None:
         "src/new.py",
     }
     assert [directory.path for directory in result.directory_sizes()] == [".", "src"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["environments/test/main.tf", "deployments/test/config.yml", "src/contests/scoring.py"],
+)
+def test_production_churn_is_counted_in_ambiguous_directories(tmp_path: Path, path: str) -> None:
+    repository, base = _repository(tmp_path)
+    target = repository / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# deployment change\n" * 801, encoding="utf-8")
+    head = _commit(repository, "change production")
+
+    result = analyze_pull_request_size(repository, base=base, head=head)
+
+    assert result.counted_lines == 801
+    assert result.excluded_lines == 0
 
 
 @pytest.mark.parametrize("destination", ["tests/test_app.py", "conftest.py"])
