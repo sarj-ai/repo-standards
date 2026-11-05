@@ -164,7 +164,14 @@ def test_only_migration_sql_can_merge_after_review() -> None:
 
 
 @pytest.mark.parametrize(
-    "path", ["tests/migrations/fixture.sql", "examples/migrations/001.sql", "sql/query.sql"]
+    "path",
+    [
+        "tests/migrations/fixture.sql",
+        "test/migrations/fixture.sql",
+        "app/src/test/resources/migrations/fixture.sql",
+        "examples/migrations/001.sql",
+        "sql/query.sql",
+    ],
 )
 def test_fixture_and_ordinary_sql_do_not_create_a_migration_pr(path: str) -> None:
     result = evaluate_review_policy(_evidence(path, "src/reader.py"))

@@ -16,6 +16,7 @@ from .models import (
     GitObjectId,
     MigrationCouplingException,
 )
+from .pull_request_size import is_test_path
 
 
 ZERO_REVIEW_BELOW_LINES = 200
@@ -26,10 +27,7 @@ MIGRATION_EXCEPTION_REVIEW_COUNT = 2
 
 _MIGRATION_DISCOVERY_EXCLUSIONS = frozenset(
     {
-        "test",
-        "tests",
         "testing",
-        "__tests__",
         "fixture",
         "fixtures",
         "__fixtures__",
@@ -448,8 +446,10 @@ def _is_sql_migration(path: str, roots: tuple[str, ...]) -> bool:
         return True
     directories = PurePosixPath(path).parts[:-1]
 
-    return "migrations" in directories and not any(
-        part.casefold() in _MIGRATION_DISCOVERY_EXCLUSIONS for part in directories
+    return (
+        "migrations" in directories
+        and not is_test_path(path)
+        and not any(part.casefold() in _MIGRATION_DISCOVERY_EXCLUSIONS for part in directories)
     )
 
 
