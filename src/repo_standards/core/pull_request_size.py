@@ -111,19 +111,28 @@ class PullRequestSize:
     @property
     def summary(self) -> PullRequestSizeSummary:
         """Return aggregate file and churn counts."""
-        counted = tuple(item for item in self.files if item.category == "production")
-        excluded = tuple(item for item in self.files if item.category != "production")
+        counted_files = binary_files = additions = deletions = 0
+        counted_additions = counted_deletions = 0
+        for item in self.files:
+            additions += item.additions
+            deletions += item.deletions
+            if item.category == "production":
+                counted_files += 1
+                counted_additions += item.additions
+                counted_deletions += item.deletions
+            elif item.category == "binary":
+                binary_files += 1
         return PullRequestSizeSummary(
             changed_files=len(self.files),
-            counted_files=len(counted),
-            excluded_files=len(excluded),
-            binary_files=sum(item.category == "binary" for item in self.files),
-            additions=sum(item.additions for item in self.files),
-            deletions=sum(item.deletions for item in self.files),
-            counted_additions=sum(item.additions for item in counted),
-            counted_deletions=sum(item.deletions for item in counted),
-            excluded_additions=sum(item.additions for item in excluded),
-            excluded_deletions=sum(item.deletions for item in excluded),
+            counted_files=counted_files,
+            excluded_files=len(self.files) - counted_files,
+            binary_files=binary_files,
+            additions=additions,
+            deletions=deletions,
+            counted_additions=counted_additions,
+            counted_deletions=counted_deletions,
+            excluded_additions=additions - counted_additions,
+            excluded_deletions=deletions - counted_deletions,
         )
 
     @property

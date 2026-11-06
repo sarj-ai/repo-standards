@@ -9,6 +9,9 @@ import pytest
 
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.pull_request_size import (
+    PullRequestFileSize,
+    PullRequestSize,
+    PullRequestSizeSummary,
     analyze_pull_request_size,
     analyze_size_since_review,
     is_test_path,
@@ -18,6 +21,43 @@ from repo_standards.core.pull_request_size import (
 class RepositoryFixture(NamedTuple):
     path: Path
     base_revision: str
+
+
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [
+        ((), PullRequestSizeSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)),
+        (
+            (PullRequestFileSize("app.py", 7, 3, "production"),),
+            PullRequestSizeSummary(1, 1, 0, 0, 7, 3, 7, 3, 0, 0),
+        ),
+        (
+            (
+                PullRequestFileSize("tests/test_app.py", 11, 4, "test"),
+                PullRequestFileSize("generated.py", 5, 2, "generated"),
+                PullRequestFileSize("icon.png", 0, 0, "binary"),
+                PullRequestFileSize("custom.txt", 9, 1, "custom"),
+            ),
+            PullRequestSizeSummary(4, 0, 4, 1, 25, 7, 0, 0, 25, 7),
+        ),
+        (
+            (
+                PullRequestFileSize("app.py", 7, 3, "production"),
+                PullRequestFileSize("tests/test_app.py", 11, 4, "test"),
+                PullRequestFileSize("icon.png", 0, 0, "binary"),
+            ),
+            PullRequestSizeSummary(3, 1, 2, 1, 18, 7, 7, 3, 11, 4),
+        ),
+    ],
+    ids=["empty", "production", "excluded-and-custom", "mixed"],
+)
+def test_summary_preserves_churn_and_category_totals(
+    files: tuple[PullRequestFileSize, ...], expected: PullRequestSizeSummary
+) -> None:
+    size = PullRequestSize("base", "head", "pr-size-excluded", files)
+
+    assert size.summary == expected
+    assert size.counted_lines + size.excluded_lines == size.total_lines
 
 
 def _git(repository: Path, *arguments: str) -> str:
