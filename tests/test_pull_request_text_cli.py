@@ -114,6 +114,12 @@ def test_text_preflight_rejects_a_directory(tmp_path: Path) -> None:
         pytest.param("[SARJ-123] fix(api): " + "x" * 72, [], id="structural-prefixes"),
         pytest.param("fix(api: v1): " + "x" * 73, ["subject.too-long"], id="colon-in-scope"),
         pytest.param("x" * 73, ["subject.too-long"], id="plain-title"),
+        pytest.param("x" * 72 + " (GH-123)", [], id="plain-title-reference"),
+        pytest.param(
+            "fix: " + "x" * 73 + " (#123)",
+            ["subject.too-long"],
+            id="long-description-with-reference",
+        ),
     ],
 )
 def test_text_preflight_can_advise_on_a_proposed_title(

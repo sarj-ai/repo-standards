@@ -34,7 +34,7 @@ const textCommand = 'repo-standards pull-request text PR_BODY.txt';
         <Code code={textCommand} lang="bash" frame="terminal" wrap />
         <p>Link detailed evidence and retain the outcome, validation and material caveats. Nonempty, closed code fences need a language tag.</p>
         <p>Warnings exit zero. Unreadable, oversized or invalid input exits two. This preview uses default budgets; the configured review-policy check remains authoritative.</p>
-        <p>Pass <code>--title</code> to preview a title. Descriptive subjects above 72 characters receive advice; recognized ticket, series, type and scope prefixes do not spend that target.</p>
+        <p>Pass <code>--title</code> to preview a title. Descriptive subjects above 72 characters receive advice. Recognized ticket, series, type and scope prefixes and trailing <code>(#123)</code> or <code>(GH-123)</code> references do not spend that target.</p>
       </section>
 
       <section class="capability-card" aria-labelledby="managed-commit-headers">

@@ -95,3 +95,20 @@ def test_subject_advice_does_not_replace_a_strict_syntax_failure(tmp_path: Path)
     assert payload["advisories"] == []
     findings = OBJECT_MAPS.validate_python(payload["findings"])
     assert findings[0]["code"] == "commit-message.invalid-header"
+
+
+def test_reference_advice_preserves_the_full_commit_message(tmp_path: Path) -> None:
+    path = tmp_path / "COMMIT_EDITMSG"
+    original = (
+        "[SARJ-1] fix(api): " + "x" * 72 + " (#123) (GH-456)\r\n\r\nReason.\r\n"
+        "\r\nCo-authored-by: Contributor <contributor@example.invalid>\r\n"
+    ).encode()
+    path.write_bytes(original)
+
+    result = runner.invoke(app, ["commit-message", str(path), "--advise", "--format", "json"])
+
+    assert result.exit_code == 0
+    payload = OBJECT_MAP.validate_json(result.stdout)
+    assert payload["advisories"] == []
+    assert payload["findings"] == []
+    assert path.read_bytes() == original
