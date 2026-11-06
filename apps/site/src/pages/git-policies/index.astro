@@ -34,12 +34,14 @@ const textCommand = 'repo-standards pull-request text PR_BODY.txt';
         <Code code={textCommand} lang="bash" frame="terminal" wrap />
         <p>Link detailed evidence and retain the outcome, validation and material caveats. Nonempty, closed code fences need a language tag.</p>
         <p>Warnings exit zero. Unreadable, oversized or invalid input exits two. This preview uses default budgets; the configured review-policy check remains authoritative.</p>
+        <p>Pass <code>--title</code> to preview a title. Descriptive subjects above 72 characters receive advice; recognized ticket, series, type and scope prefixes do not spend that target.</p>
       </section>
 
       <section class="capability-card" aria-labelledby="managed-commit-headers">
         <p class="data-line">commit-msg · local and CI</p>
         <h2 id="managed-commit-headers">Managed commit headers</h2>
         <p>The hook validates new commit headers. Safe fixing normalizes only casing and spacing; commit bodies and trailers remain untouched.</p>
+        <p>Use <code>--advise</code> for optional subject-length advice. It preserves strict syntax results and message bytes. Keep essential identifiers even when the subject needs extra space.</p>
         <Code code={hookCommand} lang="bash" frame="terminal" wrap />
         <p>CI validates every direct non-merge commit, including commits created before a contributor installed the hook.</p>
         <p><a href={siteHref("/cli/#commit-message")}>Commit-message command reference</a></p>

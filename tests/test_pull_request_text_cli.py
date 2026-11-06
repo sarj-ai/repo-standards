@@ -106,3 +106,51 @@ def test_text_preflight_rejects_a_directory(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     assert OBJECT_MAP.validate_json(result.stdout)["completion"] == "incomplete"
+
+
+@pytest.mark.parametrize(
+    ("title", "warning_codes"),
+    [
+        pytest.param("[SARJ-123] fix(api): " + "x" * 72, [], id="structural-prefixes"),
+        pytest.param("fix(api: v1): " + "x" * 73, ["subject.too-long"], id="colon-in-scope"),
+        pytest.param("x" * 73, ["subject.too-long"], id="plain-title"),
+    ],
+)
+def test_text_preflight_can_advise_on_a_proposed_title(
+    tmp_path: Path, title: str, warning_codes: list[str]
+) -> None:
+    body_file = tmp_path / "body.txt"
+    body_file.write_text("Fix retry exhaustion.")
+
+    result = runner.invoke(
+        app, ["pull-request", "text", str(body_file), "--title", title, "--format", "json"]
+    )
+
+    assert result.exit_code == 0
+    payload = OBJECT_MAP.validate_json(result.stdout)
+    warnings = OBJECT_MAPS.validate_python(payload["warnings"])
+    assert [finding["code"] for finding in warnings] == warning_codes
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r"])
+def test_text_preflight_rejects_a_title_with_physical_line_separators(
+    tmp_path: Path, separator: str
+) -> None:
+    body_file = tmp_path / "body.txt"
+    body_file.write_text("Fix retry exhaustion.")
+
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "text",
+            str(body_file),
+            "--title",
+            f"First{separator}second",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert OBJECT_MAP.validate_json(result.stdout)["completion"] == "incomplete"

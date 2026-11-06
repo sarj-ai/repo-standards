@@ -76,10 +76,8 @@ def analyze_commit_header(header: str) -> CommitMessageResult:
             "The commit header contains a control character.",
             "Remove control characters and retry the commit.",
         )
-    prefix = _PREFIX.match(header)
-    conventional = header[prefix.end() if prefix is not None else 0 :]
-    parsed = ConventionalCommit(commit_msg=conventional).match(conventional)
-    groups = parsed.groupdict() if parsed is not None and parsed.end() == len(conventional) else {}
+    conventional = _conventional_text(header)
+    groups = _conventional_groups(conventional)
     parsed_type = groups.get("type")
     if parsed_type is not None and parsed_type != parsed_type.lower():
         replacement = _safe_replacement(header)
@@ -99,6 +97,27 @@ def analyze_commit_header(header: str) -> CommitMessageResult:
             replacement=_safe_replacement(header),
         )
     return CommitMessageResult(header=header, findings=())
+
+
+def descriptive_subject(header: str, *, allow_plain: bool = False) -> str | None:
+    if not header or _CONTROLS.search(header) is not None or "\n" in header or "\r" in header:
+        return None
+    conventional = _conventional_text(header)
+    groups = _conventional_groups(conventional)
+    if not _valid_groups(groups, conventional):
+        return conventional if allow_plain else None
+    subject = groups.get("subject")
+    return subject.removeprefix(" ") if subject is not None else None
+
+
+def _conventional_text(header: str) -> str:
+    prefix = _PREFIX.match(header)
+    return header[prefix.end() if prefix is not None else 0 :]
+
+
+def _conventional_groups(conventional: str) -> dict[str, str | None]:
+    parsed = ConventionalCommit(commit_msg=conventional).match(conventional)
+    return parsed.groupdict() if parsed is not None and parsed.end() == len(conventional) else {}
 
 
 def analyze_commit_message_bytes(content: bytes) -> CommitMessageResult:

@@ -84,6 +84,7 @@ from repo_standards.core.review_policy import (
     evaluate_review_policy,
     migration_coupled_paths,
 )
+from repo_standards.core.subject import subject_advisories
 from repo_standards.policy_sarj import SarjPolicy
 from repo_standards.pull_request._context import NotApplicable
 from repo_standards.pull_request._inputs import (
@@ -281,6 +282,10 @@ def commit_message_command(
         ),
     ] = False,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
+    advise: Annotated[  # ruff: ignore[boolean-default-value-positional-argument] - explicit opt-in advisory
+        bool,
+        typer.Option("--advise", help="Advise on descriptive subject length without blocking."),
+    ] = False,
 ) -> None:
     """Enforce `[(i/n) ][TICKET] type(scope)!: description` and safely normalize spacing/case."""
     try:
@@ -294,10 +299,15 @@ def commit_message_command(
             remediation="Provide exactly one bounded UTF-8 regular commit-message file.",
         )
     payload = _commit_message_payload(result, fix_safe_enabled=fix_safe)
+    advisories = subject_advisories(result.header) if advise and result.satisfied else ()
+    if advise:
+        payload = {**payload, "advisories": [asdict(advice) for advice in advisories]}
     if output_format is OutputFormat.TEXT:
         rendered = _render_commit_message(result)
         if rendered:
             typer.echo(rendered, nl=False)
+        for advice in advisories:
+            typer.echo(f"Advisory: {advice.code}\n{advice.message}\n{advice.remediation}")
     elif output_format is OutputFormat.PRETTY_JSON:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True) + "\n", nl=False)
     else:
@@ -346,16 +356,21 @@ def _render_commit_message(result: CommitMessageResult) -> str:
 def pull_request_text_command(
     body_file: Annotated[Path, typer.Argument(help="UTF-8 file containing the proposed PR body.")],
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
+    title: Annotated[
+        str | None, typer.Option("--title", help="Proposed single-line PR title.")
+    ] = None,
 ) -> None:
     """Preview default description budgets without Git or provider evidence; warnings exit zero."""
     try:
         body = _read_pull_request_body(body_file)
+        if title is not None and ("\n" in title or "\r" in title):
+            ConfigurationError.fail("pull request title must be one line")
     except (ConfigurationError, OSError) as error:
         _emit_command_error(
             "pull-request text",
             "analysis.incomplete",
             str(error),
-            remediation="Provide a bounded UTF-8 regular file containing the proposed PR body.",
+            remediation="Provide a bounded UTF-8 body file; keep any title on one line.",
         )
     description = (
         analyze_description(body) if len(body) <= DEFAULT_MAXIMUM_BODY_CHARACTERS else None
@@ -369,6 +384,16 @@ def pull_request_text_command(
         {"code": reason.value, "severity": "warning", "remediation": remediation[reason.value]}
         for reason in description_reasons(description)
     ]
+    if title is not None:
+        warnings.extend(
+            {
+                "code": advice.code,
+                "severity": "warning",
+                "message": advice.message,
+                "remediation": advice.remediation,
+            }
+            for advice in subject_advisories(title, allow_plain=True)
+        )
     payload = {
         **_envelope(
             "pull-request text",
@@ -389,6 +414,10 @@ def pull_request_text_command(
     if output_format is OutputFormat.TEXT:
         typer.echo(f"PR text: {len(warnings)} warning(s); {len(body)} total characters.")
         for finding in warnings:
+            if "message" in finding:
+                typer.echo(f"{finding['code']}: {finding['message']}")
+                typer.echo(finding["remediation"])
+                continue
             typer.echo(f"{finding['code']}: {finding['remediation']}")
     elif output_format is OutputFormat.PRETTY_JSON:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
