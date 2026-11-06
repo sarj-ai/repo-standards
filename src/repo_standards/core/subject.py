@@ -20,7 +20,7 @@ def subject_advisories(header: str, *, allow_plain: bool = False) -> tuple[Subje
     description = descriptive_subject(header, allow_plain=allow_plain)
     if description is None:
         return ()
-    characters = len(description.strip())
+    characters = _descriptive_characters(description)
     if characters <= MAXIMUM_SUBJECT_CHARACTERS:
         return ()
     return (
@@ -33,3 +33,25 @@ def subject_advisories(header: str, *, allow_plain: bool = False) -> tuple[Subje
             remediation="Move detail to the body; retain the outcome and essential identifiers.",
         ),
     )
+
+
+def _descriptive_characters(description: str) -> int:
+    subject = description.strip()
+    end = len(subject)
+    while end and subject[end - 1] == ")":
+        start = subject.rfind(" (", 0, end)
+        if start < 0:
+            break
+        reference = subject[start + 2 : end - 1]
+        if reference.startswith("#"):
+            number = reference[1:]
+        elif reference.startswith("GH-"):
+            number = reference[3:]
+        else:
+            break
+        if not number or number[0] == "0" or not number.isascii() or not number.isdecimal():
+            break
+        end = start
+        while end and subject[end - 1].isspace():
+            end -= 1
+    return end

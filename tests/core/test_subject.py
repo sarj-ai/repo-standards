@@ -40,3 +40,32 @@ def test_subject_advice_counts_only_descriptive_content(
         assert len(warnings) == 1
         assert warnings[0].code == "subject.too-long"
         assert "essential identifiers" in warnings[0].remediation
+
+
+@pytest.mark.parametrize(
+    ("suffix", "warns"),
+    [
+        pytest.param(" (#123)", False, id="issue-reference"),
+        pytest.param(" (GH-123)", False, id="github-reference"),
+        pytest.param(" (#1) (GH-2)", False, id="reference-chain"),
+        pytest.param(" (#1)  (GH-2) ", False, id="reference-chain-spacing"),
+        pytest.param(" (v2)", True, id="ordinary-parenthetical"),
+        pytest.param(" (#0)", True, id="zero-is-not-a-reference"),
+        pytest.param(" (GH-01)", True, id="leading-zero-is-not-a-reference"),
+        pytest.param(" (#\u0661)", True, id="non-ascii-number"),
+        pytest.param(" `(#1)`", True, id="quoted-reference-literal"),
+        pytest.param(" (#1) detail", True, id="nonterminal-reference"),
+        pytest.param(" (GH-2) detail)", True, id="unmatched-parenthetical"),
+    ],
+)
+def test_terminal_references_do_not_spend_the_descriptive_budget(
+    suffix: str, *, warns: bool
+) -> None:
+    assert bool(subject_advisories("fix: " + "x" * 72 + suffix)) is warns
+
+
+def test_reference_exclusion_preserves_a_genuinely_long_description() -> None:
+    warnings = subject_advisories("fix: " + "x" * 73 + " (#1) (GH-2)")
+
+    assert len(warnings) == 1
+    assert warnings[0].message == "The descriptive subject has 73 characters; target 72."
