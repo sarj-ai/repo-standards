@@ -771,7 +771,7 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
                 "and current human review for migrations and declared domain roots."
             ),
             status="preview",
-            command_ids=(CommandId("pull-request.review-policy"),),
+            command_ids=(CommandId("pull-request.review-policy"), CommandId("pull-request.text")),
             input_kinds=("git-diff", "repository-manifest", "provider-evidence"),
         ),
         CapabilityDescriptor(

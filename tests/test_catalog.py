@@ -141,6 +141,7 @@ def test_catalog_graph_is_complete() -> None:
         "pull-request.documentation",
         "pull-request.review-policy",
         "pull-request.size",
+        "pull-request.text",
         "report",
         "rest.discover",
         "rest.doctor",

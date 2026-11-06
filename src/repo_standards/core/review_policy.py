@@ -306,7 +306,9 @@ def evaluate_review_policy(
         if len(evidence.body) <= config.maximum_body_characters
         else None
     )
-    reasons.extend(_description_reasons(description, config))
+    reasons.extend(
+        description_reasons(description, maximum_prose_characters=config.maximum_prose_characters)
+    )
 
     if config.require_resolved_threads:
         if evidence.threads_resolved is None:
@@ -341,13 +343,15 @@ def evaluate_review_policy(
     )
 
 
-def _description_reasons(
-    description: DescriptionMetrics | None, config: ReviewPolicyConfig
+def description_reasons(
+    description: DescriptionMetrics | None,
+    *,
+    maximum_prose_characters: int = DEFAULT_MAXIMUM_PROSE_CHARACTERS,
 ) -> tuple[ReviewPolicyReason, ...]:
     if description is None:
         return (ReviewPolicyReason.BODY_TOO_LONG,)
     reasons: list[ReviewPolicyReason] = []
-    if description.prose_characters > config.maximum_prose_characters:
+    if description.prose_characters > maximum_prose_characters:
         reasons.append(ReviewPolicyReason.BODY_PROSE_TOO_LONG)
     if description.invalid_code_examples:
         reasons.append(ReviewPolicyReason.BODY_CODE_EXAMPLE_INVALID)

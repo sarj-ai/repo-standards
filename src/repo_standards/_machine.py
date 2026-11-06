@@ -41,6 +41,7 @@ def capabilities_payload() -> dict[str, object]:
             "pull-request commits",
             "pull-request review-policy",
             "pull-request size",
+            "pull-request text",
             "report",
             "rest discover",
             "rest doctor",
