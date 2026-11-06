@@ -74,13 +74,19 @@ def explicit_migration_roots(manifest: Manifest | None) -> tuple[str, ...]:
 def migration_roots(manifest: Manifest | None, paths: tuple[str, ...]) -> tuple[str, ...]:
     roots = set(explicit_migration_roots(manifest))
     for path in paths:
+        if "migrations" not in path:
+            continue
         parts = PurePosixPath(path).parts
-        if any(part.casefold() in _AUTO_ROOT_EXCLUDED for part in parts[:-1]):
+        if _auto_discovery_excluded(parts):
             continue
         for index, part in enumerate(parts[:-1]):
             if part == "migrations":
                 roots.add("/".join(parts[: index + 1]))
     return tuple(sorted(roots))
+
+
+def _auto_discovery_excluded(parts: tuple[str, ...]) -> bool:
+    return any(part.casefold() in _AUTO_ROOT_EXCLUDED for part in parts[:-1])
 
 
 def protected_roots(base: tuple[str, ...], head: tuple[str, ...]) -> tuple[str, ...]:
@@ -176,6 +182,8 @@ def _revisions(
     explicit = frozenset(explicit_roots)
     grouped: dict[tuple[str, str], list[TrackedFileEvidence]] = defaultdict(list)
     for item in files:
+        if ".sql" not in item.path:
+            continue
         path = PurePosixPath(item.path)
         ancestors = (parent.as_posix() for parent in path.parents)
         root = next(
@@ -184,7 +192,7 @@ def _revisions(
         )
         if root is None:
             continue
-        if any(part.casefold() in _AUTO_ROOT_EXCLUDED for part in path.parts[:-1]) and not any(
+        if _auto_discovery_excluded(path.parts) and not any(
             parent.as_posix() in explicit for parent in path.parents
         ):
             continue
