@@ -6,17 +6,18 @@ import ReferencePage from '../../components/ReferencePage.astro';
 
 const commitGrammar = '[(i/N) ][TICKET] type(scope)!: description';
 const hookCommand = 'repo-standards commit-message .git/COMMIT_EDITMSG --fix-safe';
+const textCommand = 'repo-standards pull-request text PR_BODY.txt';
 ---
 
 <ReferencePage
   title="Git policies"
-  description="Commit-message and pull-request history policies enforced outside the repository rule registry."
+  description="Commit-message, PR text and history policies outside the repository rule registry."
 >
   <article class="git-policies">
     <header class="section-heading">
       <p class="eyebrow">Version-control contracts</p>
       <h1>Git policies</h1>
-      <p class="lede">Commit messages and pull-request history are enforced outside the repository rule registry. They are commands and hooks, so they do not appear in the rule count.</p>
+      <p class="lede">Commit messages, PR text and history are checked outside the repository rule registry. They are commands and hooks, so they do not appear in the rule count.</p>
     </header>
 
     <section class="git-policy-grammar" aria-labelledby="commit-header-grammar">
@@ -26,6 +27,15 @@ const hookCommand = 'repo-standards commit-message .git/COMMIT_EDITMSG --fix-saf
     </section>
 
     <div class="capability-grid git-policy-grid">
+      <section class="capability-card" aria-labelledby="compact-pr-descriptions">
+        <p class="data-line">PR text · advisory preflight</p>
+        <h2 id="compact-pr-descriptions">Preview a compact description</h2>
+        <p>Check a UTF-8 body file before publishing. Default budgets allow 500 rendered prose characters and 2,000 total characters, including links, comments and automation markup.</p>
+        <Code code={textCommand} lang="bash" frame="terminal" wrap />
+        <p>Link detailed evidence and retain the outcome, validation and material caveats. Nonempty, closed code fences need a language tag.</p>
+        <p>Warnings exit zero. Unreadable, oversized or invalid input exits two. This preview uses default budgets; the configured review-policy check remains authoritative.</p>
+      </section>
+
       <section class="capability-card" aria-labelledby="managed-commit-headers">
         <p class="data-line">commit-msg · local and CI</p>
         <h2 id="managed-commit-headers">Managed commit headers</h2>

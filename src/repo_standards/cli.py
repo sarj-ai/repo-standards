@@ -22,6 +22,7 @@ from repo_standards._machine import (
 )
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.commit_message import CommitMessageResult, check_local_commit_message_file
+from repo_standards.core.description import analyze_description
 from repo_standards.core.engine import baseline_from_report
 from repo_standards.core.errors import BaselineError, ConfigurationError
 from repo_standards.core.inspection import (
@@ -31,6 +32,8 @@ from repo_standards.core.inspection import (
     read_tracked_blob_contents,
 )
 from repo_standards.core.models import (
+    DEFAULT_MAXIMUM_BODY_CHARACTERS,
+    DEFAULT_MAXIMUM_PROSE_CHARACTERS,
     AnalysisReport,
     Baseline,
     Diagnostic,
@@ -77,6 +80,7 @@ from repo_standards.core.review_policy import (
     ReviewPolicyResult,
     ReviewState,
     SinceReviewEvidence,
+    description_reasons,
     evaluate_review_policy,
     migration_coupled_paths,
 )
@@ -336,6 +340,74 @@ def _render_commit_message(result: CommitMessageResult) -> str:
         return ""
     finding = result.findings[0]
     return f"Commit message: {finding.code}\n{finding.message}\nFix: {finding.remediation}\n"
+
+
+@pull_request_app.command("text")
+def pull_request_text_command(
+    body_file: Annotated[Path, typer.Argument(help="UTF-8 file containing the proposed PR body.")],
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TEXT,
+) -> None:
+    """Preview default description budgets without Git or provider evidence; warnings exit zero."""
+    try:
+        body = _read_pull_request_body(body_file)
+    except (ConfigurationError, OSError) as error:
+        _emit_command_error(
+            "pull-request text",
+            "analysis.incomplete",
+            str(error),
+            remediation="Provide a bounded UTF-8 regular file containing the proposed PR body.",
+        )
+    description = (
+        analyze_description(body) if len(body) <= DEFAULT_MAXIMUM_BODY_CHARACTERS else None
+    )
+    remediation = {
+        "body_too_long": "Shorten the body, including hidden markup and links.",
+        "body_prose_too_long": "Link detailed evidence; retain the outcome and material caveats.",
+        "body_code_example_invalid": "Use nonempty, closed code fences with a language tag.",
+    }
+    warnings = [
+        {"code": reason.value, "severity": "warning", "remediation": remediation[reason.value]}
+        for reason in description_reasons(description)
+    ]
+    payload = {
+        **_envelope(
+            "pull-request text",
+            conclusion="findings" if warnings else "passed",
+            provenance={"kind": "pull-request-body-file"},
+        ),
+        "policy": {
+            "enforcement": "advisory",
+            "maximum_body_characters": DEFAULT_MAXIMUM_BODY_CHARACTERS,
+            "maximum_prose_characters": DEFAULT_MAXIMUM_PROSE_CHARACTERS,
+        },
+        "summary": {
+            "body_characters": len(body),
+            "description": asdict(description) if description is not None else None,
+        },
+        "warnings": warnings,
+    }
+    if output_format is OutputFormat.TEXT:
+        typer.echo(f"PR text: {len(warnings)} warning(s); {len(body)} total characters.")
+        for finding in warnings:
+            typer.echo(f"{finding['code']}: {finding['remediation']}")
+    elif output_format is OutputFormat.PRETTY_JSON:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        typer.echo(canonical_json(payload))
+
+
+def _read_pull_request_body(path: Path) -> str:
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file():
+        ConfigurationError.fail("pull request body must be a regular file")
+    with resolved.open("rb") as stream:
+        content = stream.read(_MAX_REVIEW_POLICY_EVIDENCE_BYTES + 1)
+    if len(content) > _MAX_REVIEW_POLICY_EVIDENCE_BYTES:
+        ConfigurationError.fail("pull request body exceeds 1048576 bytes")
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError:
+        ConfigurationError.fail("pull request body must be UTF-8")
 
 
 @pull_request_app.command("size")
