@@ -1215,6 +1215,48 @@ def test_root_workspace_package_owns_conventional_verifier_code(directory: str) 
     )
 
 
+@pytest.mark.parametrize(
+    ("component_root", "kind", "package_name", "expected"),
+    [
+        pytest.param("packages/app", "application", "app", [], id="exact-owner"),
+        pytest.param(
+            "packages",
+            "application",
+            "app",
+            [RuleId("repository/documentation/placement")],
+            id="ancestor-owner",
+        ),
+        pytest.param(
+            "packages/app",
+            "application",
+            None,
+            [RuleId("repository/documentation/placement")],
+            id="unnamed-package",
+        ),
+        pytest.param(
+            "packages/app",
+            "terraform-root",
+            "app",
+            [RuleId("repository/documentation/placement")],
+            id="operational-owner",
+        ),
+    ],
+)
+def test_explicit_package_owner_is_independent_of_workspace_exclusion(
+    component_root: str, kind: str, package_name: str | None, expected: list[RuleId]
+) -> None:
+    snapshot = _snapshot(
+        "packages/app/src/guide.md",
+        components=(Component(ComponentId("app"), kind, component_root, "@example/team"),),
+        packages=(
+            _root_package("npm", "packages/app/package.json", package_name, workspace_root=False),
+        ),
+        workspaces=(WorkspaceEvidence("npm", "package.json", ("packages/*",), ("packages/app",)),),
+    )
+
+    assert _rule_ids(snapshot) == expected
+
+
 def test_declared_nested_component_owns_conventional_verifier_source() -> None:
     component = Component(
         ComponentId("application.web"),
