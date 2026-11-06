@@ -1124,11 +1124,12 @@ def _owned_package_root(
     if not project.name:
         return None
     component = components.nearest(root)
-    explicitly_owned = (
+    if (
         component is not None
         and component.path == root
         and component.kind in _NON_OPERATIONAL_COMPONENT_KINDS
-    )
+    ):
+        return root
     containing_workspaces = tuple(
         workspace
         for workspace in snapshot.inspection.workspaces
@@ -1161,7 +1162,7 @@ def _owned_package_root(
             root, component=component, terraform_modules=snapshot.inspection.terraform_modules
         )
     )
-    return root if explicitly_owned or conventionally_owned else None
+    return root if conventionally_owned else None
 
 
 def _has_standalone_package_evidence(
