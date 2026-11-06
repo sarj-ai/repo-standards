@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 from repo_standards.cli import app
 from repo_standards.core.inspection import load_repository_snapshot
 from repo_standards.core.rule_reviews import RuleVersion
-from repo_standards.policy_sarj.migrations import MIGRATION_CONSOLIDATION_RULE_ID
+from repo_standards.policy_sarj.migrations import MIGRATION_CONSOLIDATION_RULE_ID, migration_roots
 from repo_standards.repository import RepositoryAnalysisRequest, analyze_repository
 from repo_standards.repository.comparison import with_migration_comparison
 
@@ -22,6 +22,25 @@ if TYPE_CHECKING:
 
 _RULE = "repository/artifacts/migration-consolidation"
 _MANIFEST = f'repository_id = "example"\ncomponents = []\nenabled_rules = ["{_RULE}"]\n'
+
+
+@pytest.mark.parametrize(
+    ("paths", "expected"),
+    [
+        (("db/migrations/README.md",), ("db/migrations",)),
+        (("db/migrations-old/001.sql", "src/migrations.py"), ()),
+        (("tests/migrations/001.sql", "generated/migrations/002.sql"), ()),
+        (
+            ("db/migrations/nested/migrations/001.sql",),
+            ("db/migrations", "db/migrations/nested/migrations"),
+        ),
+    ],
+    ids=("non-sql-discovery", "near-misses", "nonproduction", "nested"),
+)
+def test_migration_root_discovery_preserves_directory_boundaries(
+    paths: tuple[str, ...], expected: tuple[str, ...]
+) -> None:
+    assert migration_roots(None, paths) == expected
 
 
 def _git(root: Path, *arguments: str) -> str:
