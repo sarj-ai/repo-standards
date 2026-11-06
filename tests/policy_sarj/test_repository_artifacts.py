@@ -37,6 +37,7 @@ _NPM_PACKAGE = ("npm", "@example/input-library")
 @pytest.mark.parametrize(
     ("path", "roots", "expected"),
     [
+        ("packages/one/src/main.py", (), ()),
         ("packages/one/src/main.py", ("packages/one",), ("src", "main.py")),
         (
             "packages/one/nested/tests/test_main.py",
@@ -53,6 +54,7 @@ _NPM_PACKAGE = ("npm", "@example/input-library")
         (".github/scripts/check.py", ("", ".github"), ("scripts", "check.py")),
     ],
     ids=[
+        "no-owners",
         "source",
         "nearest-nested",
         "unowned",
