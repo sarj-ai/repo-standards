@@ -162,7 +162,9 @@ def _flag_lone_concurrent_indexes(
     base_files: tuple[TrackedFileEvidence, ...],
     roots: tuple[str, ...],
 ) -> tuple[TrackedFileEvidence, ...]:
-    known = {(item.path, item.object_id) for item in base_files}
+    known: set[tuple[str, str]] = (
+        {(item.path, item.object_id) for item in base_files} if roots else set()
+    )
     paths = tuple(
         item.path
         for item in files
@@ -174,7 +176,12 @@ def _flag_lone_concurrent_indexes(
     for start in range(0, len(paths), _BLOB_BATCH):
         blobs = read_tracked_blob_contents(root, paths[start : start + _BLOB_BATCH], identity=head)
         flagged.update(item.path for item in blobs if is_non_consolidatable_migration(item.content))
-    return tuple(replace(item, non_consolidatable=item.path in flagged) for item in files)
+    return tuple(
+        replace(item, non_consolidatable=item.path in flagged)
+        if item.non_consolidatable != (item.path in flagged)
+        else item
+        for item in files
+    )
 
 
 def _comparison_base(root: Path, head: GitIdentity, base_revision: str | None) -> _ComparisonBase:

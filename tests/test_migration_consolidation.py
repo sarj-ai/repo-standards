@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import shutil
 import subprocess
 from typing import TYPE_CHECKING
@@ -8,7 +9,11 @@ import pytest
 from typer.testing import CliRunner
 
 from repo_standards.cli import app
+from repo_standards.core.inspection import load_repository_snapshot
+from repo_standards.core.rule_reviews import RuleVersion
+from repo_standards.policy_sarj.migrations import MIGRATION_CONSOLIDATION_RULE_ID
 from repo_standards.repository import RepositoryAnalysisRequest, analyze_repository
+from repo_standards.repository.comparison import with_migration_comparison
 
 
 if TYPE_CHECKING:
@@ -491,3 +496,41 @@ def test_index_and_validate_only_revisions_are_both_skipped(repository: Path) ->
     report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
     assert report.completion == "complete"
     assert len(report.diagnostics) == 0
+
+
+@pytest.mark.parametrize("previous_flag", [False, True])
+def test_migration_comparison_recomputes_flags_without_mutating_input(
+    repository: Path, previous_flag: bool
+) -> None:
+    _write(repository, "README.md", "Repository\n")
+    _write(repository, "db/migrations/001_index.sql", _LONE_INDEX)
+    base = _commit(repository)
+    _write(repository, "db/migrations/002_column.sql", _COLUMN)
+    _write(repository, "db/migrations/003_index.sql", _LONE_INDEX)
+    _commit(repository)
+    snapshot = load_repository_snapshot(repository)
+    snapshot = replace(
+        snapshot,
+        inspection=replace(
+            snapshot.inspection,
+            tracked_files=tuple(
+                replace(item, non_consolidatable=previous_flag)
+                for item in snapshot.inspection.tracked_files
+            ),
+        ),
+    )
+
+    compared = with_migration_comparison(
+        repository,
+        snapshot,
+        enabled_rules=frozenset({RuleVersion(MIGRATION_CONSOLIDATION_RULE_ID, 1)}),
+        base_revision=base,
+    )
+
+    assert compared.migration_comparison is not None
+    assert {
+        item.path for item in compared.migration_comparison.head_files if item.non_consolidatable
+    } == {"db/migrations/003_index.sql"}
+    assert all(
+        item.non_consolidatable is previous_flag for item in snapshot.inspection.tracked_files
+    )
