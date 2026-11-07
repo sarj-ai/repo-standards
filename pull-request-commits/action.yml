@@ -39,6 +39,16 @@ runs:
       run: |
         uv run --project "$GITHUB_ACTION_PATH/.." --no-sync repo-standards \
           pull-request commits "$INPUT_ROOT" --github-event "$GITHUB_EVENT_PATH"
+    - name: Advise on pull-request text
+      id: text
+      if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+      continue-on-error: true
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/../.github/scripts/action-text-advice.sh"
+    - name: Report unavailable text advice
+      if: ${{ !cancelled() && steps.text.outcome == 'failure' }}
+      shell: bash
+      run: echo "::warning title=PR text::Text advice could not be completed; commit policy is unchanged."
     - name: Report the verdict as a commit status
       if: ${{ !cancelled() && inputs.status-context != '' }}
       shell: bash

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import subprocess
 
 from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
+import pytest
 import yaml
 
 
@@ -34,12 +37,13 @@ def test_pull_request_commits_hook_is_quiet_advisory_and_history_scoped() -> Non
         },
         {
             "id": "repo-standards-commit-message",
-            "entry": "repo-standards commit-message --fix-safe",
+            "entry": "repo-standards commit-message --fix-safe --advise",
             "language": "python",
             "language_version": "python3.15",
             "always_run": True,
             "pass_filenames": True,
             "require_serial": True,
+            "verbose": True,
             "stages": ["commit-msg"],
         },
         {
@@ -116,3 +120,76 @@ def test_ci_self_tests_action_hook_manifest_and_installed_cli() -> None:
     assert "bash .github/scripts/ci-workflow.sh smoke" in source
     smoke = (ROOT / ".github/scripts/smoke-interfaces.sh").read_text(encoding="utf-8")
     assert '"$cli" pull-request commits --help' in smoke
+
+
+@pytest.mark.parametrize(
+    ("title", "body", "codes"),
+    [
+        pytest.param("fix: repair retries", None, [], id="null-body"),
+        pytest.param("fix: " + "x" * 72 + " (#123)", "x" * 500, [], id="boundaries"),
+        pytest.param(
+            "fix: " + "x" * 73,
+            "x" * 501,
+            ["body_prose_too_long", "subject.too-long"],
+            id="automatic-advice",
+        ),
+        pytest.param("fix: repair retries", "x" * 2001, ["body_too_long"], id="raw-budget"),
+        pytest.param(
+            "fix: repair retries", "~~~text\n" + "x" * 1988 + "\n~~~", [], id="raw-boundary"
+        ),
+        pytest.param(
+            "fix: repair retries",
+            "~~~\nprivate payload\n~~~",
+            ["body_code_example_invalid"],
+            id="untyped-code",
+        ),
+        pytest.param(
+            "fix: $(touch INJECTED) %0A::error::PRIVATE",
+            "::error::PRIVATE\n$(touch INJECTED)\n" + "x" * 501,
+            ["body_prose_too_long"],
+            id="untrusted-metadata",
+        ),
+        pytest.param(
+            "fix: first\n::error::PRIVATE", "Retain facts.", None, id="unavailable-advice"
+        ),
+        pytest.param("fix: repair retries\n", "Retain facts.", None, id="trailing-title-newline"),
+    ],
+)
+def test_action_advises_on_event_metadata_without_mutation_or_disclosure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    title: str,
+    body: str | None,
+    codes: list[str] | None,
+) -> None:
+    document = OBJECT_MAP.validate_python(yaml.safe_load(ACTION_PATH.read_text(encoding="utf-8")))
+    steps = OBJECT_MAPS.validate_python(OBJECT_MAP.validate_python(document["runs"])["steps"])
+    step = next(step for step in steps if step.get("name") == "Advise on pull-request text")
+    assert step["if"] == "${{ !cancelled() && github.event_name == 'pull_request' }}"
+    assert step["continue-on-error"] is True
+    event = tmp_path / "event.json"
+    original = json.dumps({"pull_request": {"title": title, "body": body}}).encode()
+    event.write_bytes(original)
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setenv("GITHUB_ACTION_PATH", str(ACTION_PATH.parent))
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+
+    result = subprocess.run(
+        ("bash", "-e", "-o", "pipefail", "-c", str(step["run"])),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert (result.returncode == 0) is (codes is not None), result.stderr
+    annotations = result.stdout.splitlines()
+    expected_codes = codes or []
+    assert len(annotations) == len(expected_codes)
+    assert all(line.startswith("::warning title=PR text::") for line in annotations)
+    assert all(f"::{code}:" in line for code, line in zip(expected_codes, annotations, strict=True))
+    assert "PRIVATE" not in result.stdout + result.stderr
+    assert "private payload" not in result.stdout + result.stderr
+    assert not (tmp_path / "INJECTED").exists()
+    assert event.read_bytes() == original
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["event.json"]
