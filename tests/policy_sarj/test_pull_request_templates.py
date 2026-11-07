@@ -45,6 +45,8 @@ _COMPLETE_TEMPLATE = """\
 ## One-way or two-way door
 
 ## Test evidence
+
+## Merge Risk
 """
 
 
@@ -108,6 +110,7 @@ def test_each_missing_heading_is_reported_once(tmp_path: Path) -> None:
     assert [(item.path, item.expected) for item in diagnostics] == [
         (".github/pull_request_template.md", "One-way or two-way door"),
         (".github/pull_request_template.md", "Test evidence"),
+        (".github/pull_request_template.md", "Merge Risk"),
     ]
     assert len({item.manifest_anchor for item in diagnostics}) == len(diagnostics)
 
@@ -144,18 +147,20 @@ def test_required_sections_without_a_template_are_reported(tmp_path: Path) -> No
 
 @pytest.mark.parametrize("sections", ["", "required_body_sections = []\n"])
 @pytest.mark.parametrize("template_present", [False, True])
-def test_optional_sections_need_no_template_evidence(
+def test_merge_risk_heading_is_required_without_other_sections(
     tmp_path: Path, sections: str, template_present: bool
 ) -> None:
     configured = _REVIEW_POLICY.replace(
         'required_body_sections = ["What & why", "One-way or two-way door", "Test evidence"]\n',
         sections,
     )
-    files = {".github/pull_request_template.md": "x" * 1_048_577} if template_present else {}
+    files = {".github/pull_request_template.md": "## Summary\n"} if template_present else {}
     repository = _repository(tmp_path, configured, files)
 
-    assert load_repository_snapshot(repository).pull_request_templates == ()
-    assert _template_diagnostics(repository) == ()
+    (diagnostic,) = _template_diagnostics(repository)
+    assert diagnostic.expected == (
+        "Merge Risk" if template_present else ".github/pull_request_template.md"
+    )
 
 
 def test_repository_without_review_policy_skips_the_template(tmp_path: Path) -> None:

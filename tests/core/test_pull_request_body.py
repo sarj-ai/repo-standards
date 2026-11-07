@@ -195,3 +195,56 @@ def test_tab_indented_setext_underline_is_code() -> None:
 
     assert missing_template_sections(body, ("What & why",)) == ("What & why",)
     assert missing_required_body_sections(body, ("What & why",)) == ("What & why",)
+
+
+_MERGE_RISK = """\
+## Merge Risk
+
+**Merge risk: medium**
+**Alignment:** good ✅
+**Impact:** medium 👀
+**Verification:** decent 👀
+**Rollback cost:** low ✅
+**Error detection:** good ✅
+"""
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("**Merge risk: medium**", ""),
+        ("**Alignment:** good ✅", ""),
+        ("**Impact:** medium 👀", "**Impact:** 2"),
+        ("**Verification:** decent 👀", "**Verification:** low ✅"),
+        ("**Rollback cost:** low ✅", "**Rollback cost:** low ⚠️"),
+        ("**Error detection:** good ✅", "**Error detection:** unknown"),
+        ("**Alignment:** good ✅", "**Alignment:** good ✅\n**Alignment:** poor ⚠️"),
+        ("**Alignment:** good ✅", "<!-- **Alignment:** good ✅ -->"),
+        ("**Alignment:** good ✅", "```text\n**Alignment:** good ✅\n```"),
+        ("**Merge risk: medium**", "**Merge risk: 2**"),
+        ("**Alignment:** good ✅", "**Alignment:** good ✅\nThe change matches the issue."),
+        ("## Merge Risk", "## Merge Risk\n\n## Merge Risk"),
+    ],
+)
+def test_merge_risk_requires_the_original_verdict_ratings(old: str, new: str) -> None:
+    assert missing_required_body_sections(_MERGE_RISK.replace(old, new), ("Merge Risk",)) == (
+        "Merge Risk",
+    )
+
+
+def test_merge_risk_accepts_ratings_without_explanations() -> None:
+    assert missing_required_body_sections(_MERGE_RISK, ("Merge Risk",)) == ()
+    assert (
+        missing_required_body_sections(
+            _MERGE_RISK.replace("**Error detection:** good ✅", "**Error detection:** N/A ✅"),
+            ("Merge Risk",),
+        )
+        == ()
+    )
+
+
+def test_merge_risk_does_not_borrow_ratings_from_other_sections() -> None:
+    body = _MERGE_RISK.replace("**Alignment:** good ✅\n", "")
+    body += "\n## Evidence\n**Alignment:** good ✅\n"
+
+    assert missing_required_body_sections(body, ("Merge Risk",)) == ("Merge Risk",)

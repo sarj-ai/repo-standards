@@ -37,6 +37,7 @@ from .models import (
     RepositoryId,
     RuleId,
 )
+from .pull_request_body import MERGE_RISK_SECTION
 
 
 if TYPE_CHECKING:
@@ -441,7 +442,9 @@ def parse_pull_request_review_policy(
     required_checks = policy_strings("required_checks")
     if not required_checks:
         ConfigurationError.fail(f"{context}.required_checks must not be empty")
-    required_body_sections = policy_strings("required_body_sections")
+    required_body_sections = tuple(
+        dict.fromkeys((*policy_strings("required_body_sections"), MERGE_RISK_SECTION))
+    )
     transition_exemptions = policy_strings("transition_exemptions")
     known_transition_ids = {transition.transition_id for transition in transitions}
     unknown_exemptions = sorted(set(transition_exemptions) - known_transition_ids)

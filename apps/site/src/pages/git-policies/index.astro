@@ -7,6 +7,15 @@ import ReferencePage from '../../components/ReferencePage.astro';
 const commitGrammar = '[(i/N) ][TICKET] type(scope)!: description';
 const hookCommand = 'repo-standards commit-message .git/COMMIT_EDITMSG --fix-safe';
 const textCommand = 'repo-standards pull-request text PR_BODY.txt';
+const skillCommand = 'npx skills add sarj-ai/repo-standards --skill create-pr --skill merge-risk --global';
+const mergeRiskExample = `## Merge Risk
+
+**Merge risk: medium**
+**Alignment:** good ✅
+**Impact:** medium 👀
+**Verification:** decent 👀
+**Rollback cost:** low ✅
+**Error detection:** good ✅`;
 ---
 
 <ReferencePage
@@ -37,6 +46,16 @@ const textCommand = 'repo-standards pull-request text PR_BODY.txt';
         <p>The shared pull-request commit action runs this advice automatically on PR events, including metadata edits. It emits warnings without changing the PR or the commit-policy verdict.</p>
         <p>Pass <code>--title</code> to preview a title. Descriptive subjects above 72 characters receive advice. Recognized ticket, series, type and scope prefixes and trailing <code>(#123)</code> or <code>(GH-123)</code> references do not spend that target.</p>
         <p>PR titles may also start with <code>gh-123:</code> or <code>bpo-123:</code>, optionally after a branch label such as <code>[3.14]</code>. These prefixes do not spend the target. GitHub reference spelling is case-insensitive.</p>
+      </section>
+
+      <section class="capability-card" aria-labelledby="merge-risk-ratings">
+        <p class="data-line">Review Policy · required description section</p>
+        <h2 id="merge-risk-ratings">Run the skill before publishing</h2>
+        <p>The author runs the original Warp merge-risk skill. Its instructions are vendored byte for byte, alongside its license and pinned source checksum; the separate create-pr skill publishes only its overall rating and five verdicts.</p>
+        <Code code={skillCommand} lang="bash" frame="terminal" wrap />
+        <Code code={mergeRiskExample} lang="markdown" frame="none" />
+        <p>The existing Review Policy check requires this section even when no other headings are configured. Missing, duplicate, malformed or incomplete verdicts fail the check. Explanations and numerical scores stay out of the section; CI validates format and runs no model.</p>
+        <p>Install a release containing this policy through the repository's pinned Review Policy action. Existing verified transition exemptions are preserved.</p>
       </section>
 
       <section class="capability-card" aria-labelledby="managed-commit-headers">

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import NamedTuple
+from typing import Final, NamedTuple
 
 from markdown_it import MarkdownIt
 
@@ -12,6 +12,16 @@ _ATX_CLOSING = re.compile(r"[ \t]+#+[ \t]*$")
 _SETEXT_HEADING = re.compile(r"^ {0,3}(?P<marks>=+|-+)[ \t]*$")
 _SETEXT_TEXT = re.compile(r"^ {0,3}[^ \t]")
 _HEADING_DECORATION = re.compile(r"[*_`]+")
+MERGE_RISK_SECTION = "Merge Risk"
+_QUALITY_VERDICTS = frozenset({"poor ⚠️", "decent 👀", "good ✅"})
+_MERGE_RISK_VERDICTS: Final[dict[str, frozenset[str]]] = {
+    "merge risk": frozenset({"low", "medium", "high"}),
+    "alignment": _QUALITY_VERDICTS,
+    "impact": frozenset({"large ⚠️", "medium 👀", "small ✅"}),
+    "verification": _QUALITY_VERDICTS,
+    "rollback cost": frozenset({"high ⚠️", "medium 👀", "low ✅"}),
+    "error detection": _QUALITY_VERDICTS | {"n/a ✅"},
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,9 +47,45 @@ def missing_required_body_sections(
     lines = _markdown_lines(body, code_lines)
     headings = _headings(lines, code_lines)
     filled = _filled_sections(lines, headings)
+    if "merge risk" in filled and not _complete_merge_risk(lines, headings, code_lines):
+        filled -= {"merge risk"}
     return tuple(
         required for required in required_sections if _normalized_title(required) not in filled
     )
+
+
+def _complete_merge_risk(
+    lines: list[str], headings: tuple[_Heading, ...], code_lines: frozenset[int]
+) -> bool:
+    sections = tuple(heading for heading in headings if heading.title == "merge risk")
+    if len(sections) != 1:
+        return False
+    section = sections[0]
+    end = next(
+        (
+            heading.line_index
+            for heading in headings
+            if heading.line_index > section.line_index and heading.level <= section.level
+        ),
+        len(lines),
+    )
+    seen: set[str] = set()
+    for index in range(section.content_start, end):
+        if index in code_lines:
+            return False
+        line = _HEADING_DECORATION.sub("", lines[index]).strip()
+        if not line:
+            continue
+        label, separator, value = line.partition(":")
+        key = _normalized_title(label)
+        if (
+            not separator
+            or key in seen
+            or _normalized_title(value) not in _MERGE_RISK_VERDICTS.get(key, frozenset())
+        ):
+            return False
+        seen.add(key)
+    return seen == _MERGE_RISK_VERDICTS.keys()
 
 
 def missing_template_sections(
