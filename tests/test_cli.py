@@ -192,6 +192,18 @@ def test_pull_request_size_errors_have_command_specific_remediation(tmp_path: Pa
     assert "Fetch and verify" in str(invalid_issue["remediation"])
 
 
+_MERGE_RISK_BODY = """\
+## Merge Risk
+
+**Merge risk: medium**
+**Alignment:** good ✅
+**Impact:** medium 👀
+**Verification:** decent 👀
+**Rollback cost:** low ✅
+**Error detection:** good ✅
+"""
+
+
 def _review_policy_fixture(
     repository: Path,
     *,
@@ -251,7 +263,10 @@ def _review_policy_evidence(  # ruff: ignore[too-many-arguments] - focused fixtu
     head_repository_id: int = 123,
     check_head: str | None = None,
     threads_resolved: bool = True,
+    include_merge_risk: bool = True,
 ) -> Path:
+    if include_merge_risk:
+        body += "\n" + _MERGE_RISK_BODY
     evidence = repository / "evidence.json"
     evidence.write_text(
         json.dumps(
@@ -302,6 +317,7 @@ def _promotion_evidence(  # ruff: ignore[too-many-arguments] - independent trust
         head=head,
         reviews=[],
         body="",
+        include_merge_risk=False,
         base_ref="preview",
         head_ref=f"automation/promote-dev-{snapshot[:12]}",
         author_is_bot=True,
@@ -1109,6 +1125,7 @@ def test_pull_request_review_policy_reports_missing_body_sections(tmp_path: Path
         tmp_path,
         head=head,
         body="## What & why\n<!-- not filled -->\n",
+        include_merge_risk=False,
     )
 
     result = runner.invoke(
@@ -1131,6 +1148,7 @@ def test_pull_request_review_policy_reports_missing_body_sections(tmp_path: Path
     assert summary["missing_body_sections"] == [
         "What & why",
         "QA impact / blast radius",
+        "Merge Risk",
     ]
     reasons = summary["reasons"]
     assert isinstance(reasons, list)
@@ -1932,3 +1950,38 @@ def test_repository_text_is_bounded_without_changing_json_or_failure(tmp_path: P
     assert len(diagnostics) >= 120
     assert f"{len(diagnostics) - 50} diagnostic(s) omitted" in text.stdout
     assert len(text.stdout.splitlines()) == 52
+
+
+@pytest.mark.parametrize(
+    ("rating_body", "exit_code"),
+    [
+        pytest.param(_MERGE_RISK_BODY, 0, id="ratings-only"),
+        pytest.param("", 1, id="absent"),
+        pytest.param(
+            _MERGE_RISK_BODY.replace("**Alignment:** good ✅\n", ""), 1, id="missing-verdict"
+        ),
+        pytest.param(
+            _MERGE_RISK_BODY.replace("**Impact:** medium 👀", "**Impact:** 2"),
+            1,
+            id="internal-number",
+        ),
+    ],
+)
+def test_review_policy_requires_merge_risk_ratings_in_the_existing_gate(
+    tmp_path: Path, rating_body: str, exit_code: int
+) -> None:
+    base = _review_policy_fixture(tmp_path)
+    (tmp_path / "README.md").write_text("changed\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        body=f"## What & why\nSmall change.\n\n## QA impact / blast radius\nN/A\n{rating_body}",
+        include_merge_risk=False,
+    )
+
+    run = _invoke_review_policy(tmp_path, base=base, head=head, evidence=evidence)
+
+    assert run.exit_code == exit_code
+    assert run.summary["missing_body_sections"] == ([] if exit_code == 0 else ["Merge Risk"])

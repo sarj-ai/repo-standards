@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from repo_standards.core.models import ComponentId, Diagnostic, Remediation, RuleId
-from repo_standards.core.pull_request_body import missing_template_sections
+from repo_standards.core.pull_request_body import MERGE_RISK_SECTION, missing_template_sections
 
 
 if TYPE_CHECKING:
@@ -77,7 +77,11 @@ def _missing_section_diagnostic(path: str, section: str, *, rule: RuleDefinition
             steps=(
                 f"Add '## {section}' to {path}.",
                 "Do not put it inside a comment or a code block.",
-                "If the section is no longer needed, remove it from required_body_sections.",
+                (
+                    "Merge Risk is always required by Review Policy."
+                    if section == MERGE_RISK_SECTION
+                    else "Remove optional headings from required_body_sections if no longer needed."
+                ),
             ),
             validation=_VALIDATION,
         ),

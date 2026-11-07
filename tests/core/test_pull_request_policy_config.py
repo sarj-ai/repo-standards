@@ -237,7 +237,11 @@ def test_manifest_parses_review_policy() -> None:
     assert policy.two_reviews_above_counted_lines == 800
     assert policy.migration_roots == ("db/migrations", "services/api/migrations")
     assert policy.required_checks == ("lint", "test")
-    assert policy.required_body_sections == ("QA impact / blast radius", "Manual tests")
+    assert policy.required_body_sections == (
+        "QA impact / blast radius",
+        "Manual tests",
+        "Merge Risk",
+    )
     assert policy.transition_exemptions == ("dev-preview",)
     assert policy.transition_actors == ("release-automation[bot]",)
     assert policy.trusted_bot_authors == ()
@@ -320,7 +324,7 @@ def test_review_policy_requires_bounded_description_budget(field: str, value: st
 
 
 @pytest.mark.parametrize("sections", [b"required_body_sections = []", b""])
-def test_review_policy_allows_concise_prose_without_mandatory_headings(sections: bytes) -> None:
+def test_review_policy_keeps_merge_risk_required_without_other_headings(sections: bytes) -> None:
     configured = (
         _REVIEW_POLICY.replace(
             b'required_body_sections = ["QA impact / blast radius", "Manual tests"]',
@@ -333,7 +337,7 @@ def test_review_policy_allows_concise_prose_without_mandatory_headings(sections:
 
     assert manifest.pull_request is not None
     assert manifest.pull_request.review_policy is not None
-    assert manifest.pull_request.review_policy.required_body_sections == ()
+    assert manifest.pull_request.review_policy.required_body_sections == ("Merge Risk",)
     assert manifest.pull_request.review_policy.domain_roots == ("src/domain",)
     assert manifest.pull_request.review_policy.maximum_body_characters == 1000
 

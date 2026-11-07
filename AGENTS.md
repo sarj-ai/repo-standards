@@ -16,3 +16,5 @@ that derives access from `var.environment` belongs in `code-standards`.
 
 Before review, run `uv run ruff check .`, `uv run basedpyright`, `uv run pytest`, and the docs
 lint/check/build commands when catalog or public documentation changes.
+
+Before creating or updating a PR, use `.agents/skills/create-pr/SKILL.md`.
