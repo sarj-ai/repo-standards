@@ -116,6 +116,14 @@ def test_text_preflight_rejects_a_directory(tmp_path: Path) -> None:
         pytest.param("x" * 73, ["subject.too-long"], id="plain-title"),
         pytest.param("x" * 72 + " (GH-123)", [], id="plain-title-reference"),
         pytest.param(
+            "[3.14] gh-123: " + "x" * 72 + " (gh-456)", [], id="backport-title-references"
+        ),
+        pytest.param(
+            "gh-123: " + "x" * 73,
+            ["subject.too-long"],
+            id="issue-prefix-with-long-description",
+        ),
+        pytest.param(
             "fix: " + "x" * 73 + " (#123)",
             ["subject.too-long"],
             id="long-description-with-reference",
