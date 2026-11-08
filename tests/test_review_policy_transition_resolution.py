@@ -184,6 +184,11 @@ def test_independent_exact_head_approval_admits_a_reviewed_resolution(tmp_path: 
             [_approval("5:review-helper[bot]", bot=True)], ["resolver"], id="bot-approval"
         ),
         pytest.param([_approval("42:reviewer")], None, id="resolver-unknown"),
+        pytest.param([_approval("42:reviewer")], [], id="resolver-fail-closed"),
+        pytest.param([_approval("8:coauthor")], ["resolver", "coauthor"], id="co-author-approval"),
+        pytest.param(
+            [_approval("6:signer")], ["resolver", "web-flow", "signer"], id="signer-approval"
+        ),
     ],
 )
 def test_reviewed_resolution_needs_an_independent_exact_head_human_approval(
@@ -204,24 +209,81 @@ def test_reviewed_resolution_needs_an_independent_exact_head_human_approval(
 
 
 class _CommitClient(GitHubClient):
-    def __init__(self, commit: dict[str, object]) -> None:
+    def __init__(self, commit: dict[str, object] | None) -> None:
         super().__init__(token="token", repository="owner/repo", api_url="https://api.test")
-        self.paths: list[str] = []
-        self._commit: dict[str, object] = commit
+        self.variables: list[object] = []
+        self._commit: dict[str, object] | None = commit
 
     def request(self, method: str, path: str, *, payload: object | None = None) -> object:
-        assert method == "GET"
-        assert payload is None
-        self.paths.append(path)
-        return self._commit
+        assert (method, path) == ("POST", "/graphql")
+        assert isinstance(payload, dict)
+        self.variables.append(payload["variables"])  # pyright: ignore[reportUnknownArgumentType]
+        return {"data": {"repository": {"object": self._commit}}}
+
+
+def _user(login: str | None) -> dict[str, object]:
+    return {"user": None if login is None else {"login": login}}
+
+
+def _head_commit(
+    *,
+    authors: tuple[str | None, ...] = ("resolver",),
+    committer: str | None = "resolver",
+    valid: bool = True,
+    signer: str | None = "resolver",
+    by_github: bool = False,
+) -> dict[str, object]:
+    return {
+        "authors": {"totalCount": len(authors), "nodes": [_user(login) for login in authors]},
+        "committer": _user(committer),
+        "signature": {
+            "isValid": valid,
+            "state": "VALID" if valid else "UNKNOWN_KEY",
+            "wasSignedByGitHub": by_github,
+            "signer": None if signer is None else {"login": signer},
+        },
+    }
 
 
 def test_resolver_identity_comes_from_the_exact_head_commit() -> None:
-    client = _CommitClient({"author": {"login": "resolver"}, "committer": {"login": "web-flow"}})
+    client = _CommitClient(_head_commit())
 
-    assert head_commit_user_logins(client, "a" * 40) == ["resolver", "web-flow"]
-    assert client.paths == [f"/repos/owner/repo/commits/{'a' * 40}"]
-    assert head_commit_user_logins(_CommitClient({"author": None, "committer": None}), "a") == []
+    assert head_commit_user_logins(client, "a" * 40) == ["resolver"]
+    assert client.variables == [{"owner": "owner", "name": "repo", "oid": "a" * 40}]
+
+
+def test_github_signed_web_merge_lists_the_author_and_web_flow() -> None:
+    commit = _head_commit(committer="web-flow", signer=None, by_github=True)
+
+    assert head_commit_user_logins(_CommitClient(commit), "a") == ["resolver", "web-flow"]
+
+
+@pytest.mark.parametrize(
+    "commit",
+    [
+        pytest.param(_head_commit(committer=None), id="unlinked-committer"),
+        pytest.param(_head_commit(authors=(None,)), id="unlinked-author"),
+        pytest.param(_head_commit(authors=("teammate", None)), id="unlinked-co-author"),
+        pytest.param(_head_commit(valid=False), id="unverified-commit"),
+        pytest.param({**_head_commit(), "signature": None}, id="unsigned-commit"),
+        pytest.param(_head_commit(signer=None), id="unknown-signer"),
+        pytest.param(None, id="missing-commit"),
+    ],
+)
+def test_unauthenticated_head_commit_identities_fail_closed(
+    commit: dict[str, object] | None,
+) -> None:
+    assert head_commit_user_logins(_CommitClient(commit), "a") == []
+
+
+def test_co_authors_and_the_signer_are_excluded_from_approvers() -> None:
+    commit = _head_commit(authors=("resolver", "coauthor"), signer="signer")
+
+    assert head_commit_user_logins(_CommitClient(commit), "a") == [
+        "resolver",
+        "coauthor",
+        "signer",
+    ]
 
 
 def test_resolver_evidence_is_collected_only_for_opted_in_transitions() -> None:
