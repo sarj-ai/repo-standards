@@ -12,7 +12,10 @@ from jsonschema import ValidationError as JSONSchemaValidationError, validate
 import pytest
 from typer.testing import CliRunner
 
+from repo_standards import cli
+from repo_standards.activation_verification import VerifiedActivation
 from repo_standards.cli import app
+from repo_standards.core.activation_receipt import ActivationBinding, ActivationChange
 from repo_standards.core.models import Diagnostic, RepositorySnapshot, RuleId
 from repo_standards.github_review_policy import trusted_manifest
 from repo_standards.policy_sarj import policy as sarj_policy
@@ -1991,3 +1994,75 @@ def test_review_policy_requires_merge_risk_ratings_in_the_existing_gate(
 
     assert run.exit_code == exit_code
     assert run.summary["missing_body_sections"] == ([] if exit_code == 0 else ["Merge Risk"])
+
+
+@pytest.mark.parametrize("failure", ["none", "ci", "body", "threads"])
+def test_authenticated_activation_keeps_technical_and_body_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    base = _review_policy_fixture(tmp_path, trusted_bot_authors=("sarj-bulbul[bot]",))
+    (tmp_path / "domain").mkdir()
+    (tmp_path / "domain" / "flags.tf").write_text("example_enabled = true\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    proof = VerifiedActivation(
+        ActivationBinding(
+            "sarj-ai/platform",
+            123,
+            "dev",
+            base,
+            "automation/activate-dev-plt-4803",
+            head,
+            "dev",
+            base,
+            base,
+            "example",
+            (ActivationChange("domain/flags.tf", "a" * 64, "b" * 64),),
+        ),
+        7,
+        1,
+        "sha256:" + "c" * 64,
+    )
+
+    def verified(*_args: object, **_kwargs: object) -> VerifiedActivation:
+        return proof
+
+    monkeypatch.setattr(cli, "_authenticated_activation", verified)
+    evidence = _review_policy_evidence(
+        tmp_path,
+        head=head,
+        author_is_bot=True,
+        author_login="sarj-bulbul[bot]",
+        body=""
+        if failure == "body"
+        else "## What & why\nScoped flag.\n## QA impact / blast radius\nDev only.\n",
+        threads_resolved=failure != "threads",
+    )
+    if failure == "ci":
+        raw = _json_object(evidence.read_text())
+        raw["required_checks"] = [
+            {**item, "conclusion": "failure"} for item in _object_list(raw["required_checks"])
+        ]
+        evidence.write_text(json.dumps(raw), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "pull-request",
+            "review-policy",
+            str(tmp_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--evidence",
+            str(evidence),
+        ],
+    )
+    assert result.exit_code == (0 if failure == "none" else 1), result.stdout
+    payload = _json_object(result.stdout)
+    summary = _object(payload["summary"])
+    assert summary["required_human_reviews"] == 0
+    assert summary["transition_exemption"] is None
+    assert payload["nonproduction_activation"] == proof.binding.payload()

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeGuard
 
 import pytest
 
+import repo_standards.github_review_policy as policy
 from repo_standards.github_review_policy import (
     GitHubClient,
     ReconciliationError,
@@ -261,3 +262,45 @@ def test_pull_request_targeting_the_queue_base_skips_stack_lookups() -> None:
     assert queue.final_status()["state"] == "success"
     assert queue.calls.count(f"{REPO_PATH}commits/{queue.pulls[0].head_sha}/statuses") == 2
     assert not any("/matching-refs/" in path or "/compare/" in path for path in queue.calls)
+
+
+def _is_status(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, dict)
+
+
+def test_merge_group_reauthenticates_activation_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
+    queue = _stack(2)
+    original = queue.pages
+
+    def activation_status(path: str, **kwargs: object) -> list[object]:
+        result: list[object] = []
+        for item in original(path, **kwargs):
+            assert _is_status(item)
+            result.append({**item, "description": "Verified activation: review policy passed"})
+        return result
+
+    client = queue.client()
+    client.rest_pages = activation_status
+
+    def trusted_policy(*_args: object) -> object:
+        return object()
+
+    monkeypatch.setattr(policy, "policy_at_base", trusted_policy)
+    verifications: list[object] = []
+
+    def invalidated(*_args: object, **kwargs: object) -> None:
+        verifications.append(kwargs)
+
+    monkeypatch.setattr(policy, "authenticate_activation", invalidated)
+    pull = queue.pulls[-1]
+    assert (
+        policy.reconcile_merge_group(
+            client=client,
+            head_sha=pull.group_sha,
+            head_ref=f"{QUEUE_REF_PREFIX}pr-{pull.number}-{pull.group_parent_sha}",
+            workflow_path=WORKFLOW,
+        )
+        == 1
+    )
+    assert len(verifications) == 1
+    assert queue.posted[-1]["state"] == "failure"
