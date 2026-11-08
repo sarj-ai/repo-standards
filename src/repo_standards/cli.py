@@ -20,6 +20,7 @@ from repo_standards._machine import (
     envelope as _envelope,
     installed_version as _installed_version,
 )
+from repo_standards.activation_verification import VerifiedActivation, authenticate_activation
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.commit_message import CommitMessageResult, check_local_commit_message_file
 from repo_standards.core.description import analyze_description, without_bot_footer
@@ -195,6 +196,7 @@ class _ReviewPolicyEvidenceInput(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     schema_version: Literal[1]
+    pr_number: int | None = Field(default=None, gt=0)
     evaluated_head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     current_head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     base_ref: str = Field(min_length=1, max_length=1_024)
@@ -777,14 +779,8 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
             ConfigurationError.fail(
                 "evidence evaluated_head_sha must equal the exact --head commit SHA"
             )
-        configured_check_names = tuple(configured.required_checks)
-        observed_check_names = tuple(item.name for item in provider.required_checks)
-        if len(observed_check_names) != len(set(observed_check_names)):
-            ConfigurationError.fail("required_checks evidence contains duplicate check names")
-        if set(observed_check_names) != set(configured_check_names):
-            ConfigurationError.fail(
-                "required_checks evidence must contain exactly the checks in the trusted manifest"
-            )
+        _require_exact_configured_checks(provider, configured)
+        activation = _authenticated_activation(configured, provider, base=base, head=head)
         transition_exemption = _matching_review_policy_transition(
             root=resolved_root,
             base=GitObjectId(base),
@@ -847,6 +843,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                 zero_review_below_lines=configured.zero_review_below_counted_lines,
                 one_review_maximum_lines=configured.two_reviews_above_counted_lines,
                 migration_roots=configured.migration_roots,
+                verified_activation=activation,
                 author_review_floor=1
                 if transition_exemption is None and _is_allowlisted_bot_author(provider, configured)
                 else 0,
@@ -879,6 +876,8 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         missing_sections=missing_sections,
         transition_exemption=transition_exemption,
     )
+    if activation is not None:
+        payload = {**payload, "nonproduction_activation": activation.binding.payload()}
     typer.echo(canonical_json(payload) + "\n", nl=False)
     if not _review_policy_merge_ready(
         result=result,
@@ -888,6 +887,49 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         configured=configured,
     ):
         raise typer.Exit(1)
+
+
+def _require_exact_configured_checks(
+    provider: _ReviewPolicyEvidenceInput, configured: PullRequestReviewPolicyConfig
+) -> None:
+    configured_check_names = tuple(configured.required_checks)
+    observed_check_names = tuple(item.name for item in provider.required_checks)
+    if len(observed_check_names) != len(set(observed_check_names)):
+        ConfigurationError.fail("required_checks evidence contains duplicate check names")
+    if set(observed_check_names) != set(configured_check_names):
+        ConfigurationError.fail(
+            "required_checks evidence must contain exactly the checks in the trusted manifest"
+        )
+
+
+def _authenticated_activation(
+    configured: PullRequestReviewPolicyConfig,
+    provider: _ReviewPolicyEvidenceInput,
+    *,
+    base: str,
+    head: str,
+) -> VerifiedActivation | None:
+    if configured.nonproduction_activation is None or provider.pr_number is None:
+        return None
+    # Imported only for the explicitly opted-in authenticated lane, not ordinary CLI use.
+    from repo_standards.github_review_policy import GitHubClient  # ruff: ignore[import-outside-top-level] -- lazy import avoids the provider dependency for ordinary CLI use
+
+    token = os.environ.get("GITHUB_TOKEN", "")  # ruff: ignore[banned-api] -- GitHub runner authentication contract
+    repository = os.environ.get("GITHUB_REPOSITORY", "")  # ruff: ignore[banned-api] -- GitHub runner identity contract
+    if not token or not repository:
+        return None
+    client = GitHubClient(
+        token=token,
+        repository=repository,
+        api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),  # ruff: ignore[banned-api] -- GitHub runner endpoint contract
+    )
+    return authenticate_activation(
+        client,
+        policy=configured.nonproduction_activation,
+        number=provider.pr_number,
+        base_sha=base,
+        head_sha=head,
+    )
 
 
 def _candidate_migration_exception(

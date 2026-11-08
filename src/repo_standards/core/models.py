@@ -5,6 +5,8 @@ from datetime import date
 from enum import StrEnum
 from typing import ClassVar, Literal, NewType, Protocol, runtime_checkable
 
+from repo_standards.core.activation_policy import ActivationPolicy
+
 
 RepositoryId = NewType("RepositoryId", str)
 PolicyId = NewType("PolicyId", str)
@@ -163,6 +165,7 @@ class PullRequestReviewPolicyConfig:
     required_body_sections: tuple[str, ...]
     transition_exemptions: tuple[str, ...] = ()
     transition_actors: tuple[str, ...] = ()
+    nonproduction_activation: ActivationPolicy | None = None
     trusted_bot_authors: tuple[str, ...] = ()
     allowlisted_bot_reviewers: tuple[str, ...] = ()
     accepted_check_conclusions: tuple[str, ...] = ("success",)

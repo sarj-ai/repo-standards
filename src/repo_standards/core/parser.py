@@ -5,6 +5,8 @@ import re
 import tomllib
 from typing import TYPE_CHECKING
 
+from repo_standards.core.activation_policy import ActivationPolicy
+
 from ._json import parse_json_object
 from .canonical import canonical_path
 from .errors import ConfigurationError
@@ -376,6 +378,7 @@ def parse_pull_request_review_policy(
         "transition_exemptions",
         "transition_actors",
         "trusted_bot_authors",
+        "nonproduction_activation",
         "allowlisted_bot_reviewers",
         "accepted_check_conclusions",
         "require_resolved_threads",
@@ -472,6 +475,11 @@ def parse_pull_request_review_policy(
             data,
             context=context,
             transition_exemptions=transition_exemptions,
+        ),
+        nonproduction_activation=(
+            ActivationPolicy.model_validate(data["nonproduction_activation"])
+            if "nonproduction_activation" in data
+            else None
         ),
         trusted_bot_authors=_github_app_logins(data, "trusted_bot_authors", context=context),
         allowlisted_bot_reviewers=_github_app_logins(

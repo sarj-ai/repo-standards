@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeGuard
 
 import pytest
 
@@ -10,6 +10,7 @@ from repo_standards.github_review_policy import (
     ReconciliationError,
     reconcile_merge_group,
 )
+from tests.test_activation_verification import MANIFEST, REPOSITORY, Provider
 
 
 if TYPE_CHECKING:
@@ -88,7 +89,7 @@ class FakeQueue:
             "base": {
                 "sha": bases.get(pull.base_ref, BASE_TIP),
                 "ref": pull.base_ref,
-                "repo": {"id": 1},
+                "repo": {"id": 1, "full_name": "owner/repo"},
             },
             "head": {
                 "sha": pull.head_sha,
@@ -125,7 +126,8 @@ class FakeQueue:
             "event": "pull_request_target",
         }
 
-    def pages(self, path: str, **_kwargs: object) -> list[object]:
+    def pages(self, path: str, *, collection_key: str | None = None) -> list[object]:
+        assert collection_key is None
         self.calls.append(path)
         sha = path.removeprefix("/repos/owner/repo/commits/").removesuffix("/statuses")
         if not self.by_head(sha).receipt_passed:
@@ -261,3 +263,50 @@ def test_pull_request_targeting_the_queue_base_skips_stack_lookups() -> None:
     assert queue.final_status()["state"] == "success"
     assert queue.calls.count(f"{REPO_PATH}commits/{queue.pulls[0].head_sha}/statuses") == 2
     assert not any("/matching-refs/" in path or "/compare/" in path for path in queue.calls)
+
+
+def _is_status(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, dict)
+
+
+def test_merge_group_reauthenticates_activation_receipt() -> None:
+    provider = Provider()
+    queue = _stack(1)
+    original_request = queue.request
+    original_pages = queue.pages
+    base = BASE_TIP
+    provider.contents[base, ".repo-standards/repository.toml"] = MANIFEST.encode()
+
+    def request(method: str, path: str, *, payload: Mapping[str, object] | None = None) -> object:
+        if path.startswith(f"{REPO_PATH}git/") and "/matching-refs/" not in path:
+            queue.calls.append(path)
+            return provider.request(
+                method, path.replace(REPO_PATH, f"/repos/{REPOSITORY}/", 1), payload=payload
+            )
+        return original_request(method, path, payload=payload)
+
+    def activation_status(path: str, *, collection_key: str | None = None) -> list[object]:
+        result: list[object] = []
+        for item in original_pages(path, collection_key=collection_key):
+            assert _is_status(item)
+            result.append({**item, "description": "Verified activation: review policy passed"})
+        return result
+
+    client = queue.client()
+    client.request = request
+    client.rest_pages = activation_status
+    pull = queue.pulls[-1]
+    assert (
+        reconcile_merge_group(
+            client=client,
+            head_sha=pull.group_sha,
+            head_ref=f"{QUEUE_REF_PREFIX}pr-{pull.number}-{pull.group_parent_sha}",
+            workflow_path=WORKFLOW,
+        )
+        == 1
+    )
+    # A previously verified status is insufficient: the real authenticator checks
+    # the trusted policy and rejects this pull request's ordinary human author.
+    assert f"{REPO_PATH}git/commits/{base}" in queue.calls
+    assert queue.calls.count(f"{REPO_PATH}pulls/{pull.number}") >= 3
+    assert queue.posted[-1]["state"] == "failure"
