@@ -580,13 +580,9 @@ query($owner: String!, $name: String!, $oid: GitObjectID!) {
 """
 
 
+# Git author, committer and Co-authored-by identities are unauthenticated: count them only on a
+# valid signature with every one linked to GitHub, add the signer, and otherwise return nothing.
 def head_commit_user_logins(client: GitHubClient, head_sha: str) -> list[str]:
-    """Return every GitHub account behind the head commit, or nothing to fail closed.
-
-    Git author, committer and Co-authored-by trailers are unauthenticated, so the identities
-    count only when the commit signature is valid and every author, co-author and the committer
-    is linked to a GitHub account. The signer is included too, so none of them can approve.
-    """
     owner, _, name = client.repository.partition("/")
     data = client.graphql(
         _HEAD_COMMIT_IDENTITY_QUERY, {"owner": owner, "name": name, "oid": head_sha}
