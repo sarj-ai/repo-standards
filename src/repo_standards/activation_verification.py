@@ -1,9 +1,3 @@
-"""Authenticate an exact registered activation against live GitHub evidence.
-
-No caller-supplied classification, URL, digest, label or PR text grants this lane.
-Failure to acquire or verify evidence returns no exception to normal review policy.
-"""
-
 from __future__ import annotations
 
 import base64
@@ -20,11 +14,12 @@ from urllib.parse import quote
 from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
 import zlib
 
-from repo_standards.core.activation_policy import ActivationPolicy
+from repo_standards.core.activation_policy import ActivationEdit, ActivationPolicy
 from repo_standards.core.activation_receipt import (
     ActivationBinding,
     ActivationChange,
     exact_registered_activation,
+    exact_registered_append,
     matches_activation_payload,
 )
 
@@ -57,27 +52,18 @@ class VerifiedActivation:
     artifact_digest: str
 
 
+@dataclass(frozen=True, slots=True)
+class ProducerReceipt:
+    run_id: int
+    attempt: int
+    source: str
+    digest: str
+    raw: bytes
+
+
 class InvalidActivationError(ValueError):
     def __init__(self) -> None:
         super().__init__("activation evidence mismatch")
-
-
-def _is_environment(value: object) -> TypeGuard[Literal["dev", "preview"]]:
-    return value in {"dev", "preview"} if isinstance(value, str) else False
-
-
-def _is_object(value: object) -> TypeGuard[Mapping[str, object]]:
-    return isinstance(value, dict)
-
-
-def _is_array(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _array(value: object) -> list[object]:
-    if not _is_array(value):
-        raise InvalidActivationError
-    return value
 
 
 def _object(value: object) -> Mapping[str, object]:
@@ -161,6 +147,166 @@ def receipt_bytes(archive: bytes, digest: str, *, expected_name: str) -> bytes:
         return raw
 
 
+def policy_at_base(client: ActivationClient, base_sha: str) -> ActivationPolicy:
+    trusted = _object(
+        tomllib.loads(_blob(client, base_sha, ".repo-standards/repository.toml").decode())
+    )
+    configured = _object(_object(trusted.get("pull_request")).get("review_policy"))
+    return ActivationPolicy.model_validate(configured.get("nonproduction_activation"))
+
+
+def authenticate_activation(
+    client: ActivationClient,
+    *,
+    policy: ActivationPolicy,
+    number: int,
+    base_sha: str,
+    head_sha: str,
+) -> VerifiedActivation | None:
+    try:
+        return _authenticate(
+            client, policy=policy, number=number, base_sha=base_sha, head_sha=head_sha
+        )
+    except ValueError, KeyError, TypeError, OSError, RuntimeError, BadZipFile, zlib.error:
+        return None
+
+
+def _authenticate(  # ruff: ignore[too-many-locals] -- binding fields remain individually inspectable
+    client: ActivationClient,
+    *,
+    policy: ActivationPolicy,
+    number: int,
+    base_sha: str,
+    head_sha: str,
+) -> VerifiedActivation:
+    _require(policy.author == "sarj-bulbul[bot]")
+    _require(policy_at_base(client, base_sha) == policy)
+    pr = _snapshot(client, number)
+    base, head, user = (_object(pr.get(key)) for key in ("base", "head", "user"))
+    env = base.get("ref")
+    if not _is_environment(env):
+        raise InvalidActivationError
+    _require(pr.get("state") == "open" and pr.get("draft") is False)
+    _require(base.get("sha") == base_sha and head.get("sha") == head_sha)
+    _require(_object(base.get("repo")).get("full_name") == client.repository)
+    _require(
+        _integer(_object(head.get("repo")).get("id"))
+        == _integer(_object(base.get("repo")).get("id"))
+    )
+    _require(user.get("login") == policy.author and user.get("type") == "Bot")
+    _require_protected_base(client, env, base_sha)
+    producer = _producer_receipt(
+        client, policy, base_sha, environment=env, expected_name=f"{number}-{head_sha}.json"
+    )
+    parsed: object = json.loads(producer.raw)  # pyright: ignore[reportAny] -- untrusted JSON is narrowed immediately
+    payload = _object(parsed)
+    feature_id = _text(payload.get("feature_id"))
+    features = [item for item in policy.features if item.feature_id == feature_id]
+    _require(len(features) == 1)
+    feature = features[0]
+    edits = [item for item in feature.edits if item.environment == env]
+    _require(bool(edits) and len({item.path for item in edits}) == len(edits))
+    changes = _activation_changes(client, edits, number, base_sha, head_sha)
+    activation_source = _text(payload.get("activation_source_sha"))
+    _require(re.fullmatch(r"[0-9a-f]{40}", activation_source) is not None)
+    _require(
+        head.get("ref")
+        == f"automation/activate-{env}-{feature.ticket.lower()}-{activation_source[:12]}"
+    )
+    binding = ActivationBinding(
+        client.repository,
+        number,
+        env,
+        base_sha,
+        _text(head.get("ref")),
+        head_sha,
+        env,
+        producer.source,
+        activation_source,
+        feature_id,
+        tuple(changes),
+    )
+    _require(matches_activation_payload(producer.raw, binding))
+    proof = VerifiedActivation(binding, producer.run_id, producer.attempt, producer.digest)
+    _require_current_producer(client, policy, proof)
+    _require_protected_base(client, env, base_sha)
+    _require(_identity(_snapshot(client, number)) == _identity(pr))
+    return proof
+
+
+def _activation_changes(
+    client: ActivationClient,
+    edits: list[ActivationEdit],
+    number: int,
+    base_sha: str,
+    head_sha: str,
+) -> list[ActivationChange]:
+    changed = [
+        _object(item)
+        for item in client.rest_pages(f"/repos/{client.repository}/pulls/{number}/files")
+    ]
+    changed_paths = {_text(item.get("filename")) for item in changed}
+    _require(
+        bool(changed_paths)
+        and len(changed_paths) == len(changed)
+        and changed_paths <= {item.path for item in edits}
+    )
+    _require(
+        all(
+            item.get("status") == "modified" and not item.get("previous_filename")
+            for item in changed
+        )
+    )
+    changes: list[ActivationChange] = []
+    for edit in sorted(edits, key=lambda item: item.path):
+        # Producer/config/policy changes cannot ride in an activation receipt.
+        _require(not edit.path.startswith((".github/", ".repo-standards/")))
+        before, after = _blob(client, base_sha, edit.path), _blob(client, head_sha, edit.path)
+        _require(after.count(edit.after.encode()) == 1)
+        _require(not edit.before or edit.before.encode() not in after)
+        if edit.path not in changed_paths:
+            _require(before == after)
+            continue
+        _require(edit.after.encode() not in before)
+        after_hash = hashlib.sha256(after).hexdigest()
+        _require(
+            exact_registered_append(
+                base_content=before,
+                head_content=after,
+                registered_true=edit.after.encode(),
+                expected_content_sha256=after_hash,
+            )
+            if edit.operation == "append_line"
+            else exact_registered_activation(
+                base_content=before,
+                head_content=after,
+                registered_false=edit.before.encode(),
+                registered_true=edit.after.encode(),
+                expected_content_sha256=after_hash,
+            )
+        )
+        changes.append(ActivationChange(edit.path, hashlib.sha256(before).hexdigest(), after_hash))
+    return changes
+
+
+def _is_environment(value: object) -> TypeGuard[Literal["dev", "preview"]]:
+    return value in {"dev", "preview"} if isinstance(value, str) else False
+
+
+def _is_object(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, dict)
+
+
+def _array(value: object) -> list[object]:
+    if not _is_array(value):
+        raise InvalidActivationError
+    return value
+
+
+def _is_array(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _snapshot(client: ActivationClient, number: int) -> Mapping[str, object]:
     return _object(client.request("GET", f"/repos/{client.repository}/pulls/{number}"))
 
@@ -181,31 +327,6 @@ def _identity(pr: Mapping[str, object]) -> tuple[object, ...]:
     )
 
 
-def policy_at_base(client: ActivationClient, base_sha: str) -> ActivationPolicy:
-    trusted = _object(
-        tomllib.loads(_blob(client, base_sha, ".repo-standards/repository.toml").decode())
-    )
-    configured = _object(_object(trusted.get("pull_request")).get("review_policy"))
-    return ActivationPolicy.model_validate(configured.get("nonproduction_activation"))
-
-
-def authenticate_activation(
-    client: ActivationClient,
-    *,
-    policy: ActivationPolicy,
-    number: int,
-    base_sha: str,
-    head_sha: str,
-) -> VerifiedActivation | None:
-    """Read authoritative live state. Invalid/missing proof never lowers a floor."""
-    try:
-        return _authenticate(
-            client, policy=policy, number=number, base_sha=base_sha, head_sha=head_sha
-        )
-    except ValueError, KeyError, TypeError, OSError, RuntimeError, BadZipFile, zlib.error:
-        return None
-
-
 def _producer_receipt(  # ruff: ignore[too-many-locals] -- each authenticated provider identity stays explicit
     client: ActivationClient,
     policy: ActivationPolicy,
@@ -213,7 +334,7 @@ def _producer_receipt(  # ruff: ignore[too-many-locals] -- each authenticated pr
     *,
     environment: Literal["dev", "preview"],
     expected_name: str,
-) -> tuple[int, int, str, str, bytes]:
+) -> ProducerReceipt:
     prefix = f"/repos/{client.repository}"
     workflow = _object(
         client.request("GET", f"{prefix}/actions/workflows/{quote(policy.workflow_path, safe='')}")
@@ -285,7 +406,7 @@ def _producer_receipt(  # ruff: ignore[too-many-locals] -- each authenticated pr
     digest = _text(artifact.get("digest"))
     archive = client.artifact_bytes(_integer(artifact.get("id")))
     _require(len(archive) == size)
-    return (
+    return ProducerReceipt(
         run_id,
         attempt,
         source,
@@ -339,93 +460,3 @@ def _require_current_producer(
         protected.get("protected") is True
         and _object(protected.get("commit")).get("sha") == proof.binding.producer_source_sha
     )
-
-
-def _authenticate(  # ruff: ignore[too-many-locals] -- binding fields remain individually inspectable
-    client: ActivationClient,
-    *,
-    policy: ActivationPolicy,
-    number: int,
-    base_sha: str,
-    head_sha: str,
-) -> VerifiedActivation:
-    prefix = f"/repos/{client.repository}"
-    _require(policy.author == "sarj-bulbul[bot]")
-    _require(policy_at_base(client, base_sha) == policy)
-    pr = _snapshot(client, number)
-    base, head, user = (_object(pr.get(key)) for key in ("base", "head", "user"))
-    env = base.get("ref")
-    if not _is_environment(env):
-        raise InvalidActivationError
-    _require(pr.get("state") == "open" and pr.get("draft") is False)
-    _require(base.get("sha") == base_sha and head.get("sha") == head_sha)
-    _require(_object(base.get("repo")).get("full_name") == client.repository)
-    _require(
-        _integer(_object(head.get("repo")).get("id"))
-        == _integer(_object(base.get("repo")).get("id"))
-    )
-    _require(user.get("login") == policy.author and user.get("type") == "Bot")
-    _require_protected_base(client, env, base_sha)
-    run_id, attempt, source, digest, raw = _producer_receipt(
-        client, policy, base_sha, environment=env, expected_name=f"{number}-{head_sha}.json"
-    )
-    parsed: object = json.loads(raw)  # pyright: ignore[reportAny] -- untrusted JSON is narrowed immediately
-    payload = _object(parsed)
-    feature_id = _text(payload.get("feature_id"))
-    features = [item for item in policy.features if item.feature_id == feature_id]
-    _require(len(features) == 1)
-    feature = features[0]
-    edits = [item for item in feature.edits if item.environment == env]
-    _require(bool(edits) and len({item.path for item in edits}) == len(edits))
-    changed = [_object(item) for item in client.rest_pages(f"{prefix}/pulls/{number}/files")]
-    _require(
-        len(changed) == len(edits)
-        and {item.get("filename") for item in changed} == {item.path for item in edits}
-    )
-    _require(
-        all(
-            item.get("status") == "modified" and not item.get("previous_filename")
-            for item in changed
-        )
-    )
-    changes: list[ActivationChange] = []
-    for edit in sorted(edits, key=lambda item: item.path):
-        # Producer/config/policy changes cannot ride in an activation receipt.
-        _require(not edit.path.startswith((".github/", ".repo-standards/")))
-        before, after = _blob(client, base_sha, edit.path), _blob(client, head_sha, edit.path)
-        after_hash = hashlib.sha256(after).hexdigest()
-        _require(
-            exact_registered_activation(
-                base_content=before,
-                head_content=after,
-                registered_false=edit.before.encode(),
-                registered_true=edit.after.encode(),
-                expected_content_sha256=after_hash,
-            )
-        )
-        changes.append(ActivationChange(edit.path, hashlib.sha256(before).hexdigest(), after_hash))
-    activation_source = _text(payload.get("activation_source_sha"))
-    _require(re.fullmatch(r"[0-9a-f]{40}", activation_source) is not None)
-    _require(
-        head.get("ref")
-        == f"automation/activate-{env}-{feature.ticket.lower()}-{activation_source[:12]}"
-    )
-    binding = ActivationBinding(
-        client.repository,
-        number,
-        env,
-        base_sha,
-        _text(head.get("ref")),
-        head_sha,
-        env,
-        source,
-        activation_source,
-        feature_id,
-        tuple(changes),
-    )
-    _require(matches_activation_payload(raw, binding))
-    proof = VerifiedActivation(binding, run_id, attempt, digest)
-    _require_current_producer(client, policy, proof)
-    _require_protected_base(client, env, base_sha)
-    _require(_identity(_snapshot(client, number)) == _identity(pr))
-    return proof

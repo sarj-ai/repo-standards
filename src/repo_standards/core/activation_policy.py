@@ -1,18 +1,27 @@
-"""Protected-base configuration for the opt-in nonproduction activation lane."""
-
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ActivationEdit(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     environment: Literal["dev", "preview"]
     path: str = Field(min_length=1, max_length=512)
-    before: str = Field(min_length=1, max_length=4096)
+    operation: Literal["replace", "append_line"] = "replace"
+    before: str = Field(max_length=4096)
     after: str = Field(min_length=1, max_length=4096)
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> Self:
+        if (self.operation == "append_line") != (not self.before):
+            message = "only append_line requires an empty before literal"
+            raise ValueError(message)
+        if self.operation == "append_line" and any(c in self.after for c in "\r\n"):
+            message = "append_line requires a single registered line"
+            raise ValueError(message)
+        return self
 
 
 class RegisteredActivation(BaseModel):

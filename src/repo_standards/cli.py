@@ -723,7 +723,7 @@ def _trusted_review_policy(
 
 
 @pull_request_app.command("review-policy")
-def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-many-positional-arguments,too-many-locals] - trusted inputs stay explicit
+def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - trusted inputs stay explicit
     root: Annotated[Path, typer.Argument()] = Path(),
     base: Annotated[str, typer.Option(help="Exact trusted base commit SHA.")] = "",
     head: Annotated[str, typer.Option(help="Exact evaluated pull-request head commit SHA.")] = "",
@@ -779,14 +779,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
             ConfigurationError.fail(
                 "evidence evaluated_head_sha must equal the exact --head commit SHA"
             )
-        configured_check_names = tuple(configured.required_checks)
-        observed_check_names = tuple(item.name for item in provider.required_checks)
-        if len(observed_check_names) != len(set(observed_check_names)):
-            ConfigurationError.fail("required_checks evidence contains duplicate check names")
-        if set(observed_check_names) != set(configured_check_names):
-            ConfigurationError.fail(
-                "required_checks evidence must contain exactly the checks in the trusted manifest"
-            )
+        _require_exact_configured_checks(provider, configured)
         activation = _authenticated_activation(configured, provider, base=base, head=head)
         transition_exemption = _matching_review_policy_transition(
             root=resolved_root,
@@ -894,6 +887,19 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         configured=configured,
     ):
         raise typer.Exit(1)
+
+
+def _require_exact_configured_checks(
+    provider: _ReviewPolicyEvidenceInput, configured: PullRequestReviewPolicyConfig
+) -> None:
+    configured_check_names = tuple(configured.required_checks)
+    observed_check_names = tuple(item.name for item in provider.required_checks)
+    if len(observed_check_names) != len(set(observed_check_names)):
+        ConfigurationError.fail("required_checks evidence contains duplicate check names")
+    if set(observed_check_names) != set(configured_check_names):
+        ConfigurationError.fail(
+            "required_checks evidence must contain exactly the checks in the trusted manifest"
+        )
 
 
 def _authenticated_activation(

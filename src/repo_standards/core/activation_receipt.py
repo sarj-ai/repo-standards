@@ -1,16 +1,30 @@
-"""Exact receipt payload contract, independent of provider authentication.
-
-Matching a payload is necessary but never sufficient for an approval exemption.
-The provider must authenticate the latest successful pinned producer run and its
-immutable artifact before calling this validator.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
 import json
-from typing import Literal, TypeGuard
+from typing import Literal, TypedDict, TypeGuard
+
+
+class ActivationChangePayload(TypedDict):
+    path: str
+    before_sha256: str
+    after_sha256: str
+
+
+class ActivationPayload(TypedDict):
+    schema_version: int
+    repository: str
+    pull_request: int
+    base_ref: Literal["dev", "preview"]
+    base_sha: str
+    head_ref: str
+    head_sha: str
+    environment: Literal["dev", "preview"]
+    producer_source_sha: str
+    activation_source_sha: str
+    feature_id: str
+    changes: list[ActivationChangePayload]
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +48,7 @@ class ActivationBinding:
     feature_id: str
     changes: tuple[ActivationChange, ...]
 
-    def payload(self) -> dict[str, object]:
+    def payload(self) -> ActivationPayload:
         return {
             "schema_version": 1,
             "repository": self.repository,
@@ -59,7 +73,6 @@ class ActivationBinding:
 
 
 def matches_activation_payload(raw: bytes, expected: ActivationBinding) -> bool:
-    """Reject unknown keys, duplicates, wrong types and stale bound identities."""
     maximum_receipt_bytes = 16_384
     if len(raw) > maximum_receipt_bytes:
         return False
@@ -73,12 +86,8 @@ def matches_activation_payload(raw: bytes, expected: ActivationBinding) -> bool:
     return _exact_value(parsed, wanted)
 
 
-def _is_object(value: object) -> TypeGuard[dict[str, object]]:
+def _is_object(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
-
-
-def _is_array(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
 
 
 def _exact_value(actual: object, expected: object) -> bool:
@@ -113,16 +122,33 @@ def exact_registered_activation(
     registered_true: bytes,
     expected_content_sha256: str,
 ) -> bool:
-    """Match one registered byte replacement, preserving every other byte.
-
-    Registered byte strings must come from protected base configuration. They
-    describe a whole unambiguous flag assignment, never a bare boolean token.
-    """
     return (
         bool(registered_false)
         and bool(registered_true)
         and registered_false != registered_true
         and base_content.count(registered_false) == 1
         and head_content == base_content.replace(registered_false, registered_true, 1)
+        and hashlib.sha256(head_content).hexdigest() == expected_content_sha256
+    )
+
+
+def _is_array(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def exact_registered_append(
+    *,
+    base_content: bytes,
+    head_content: bytes,
+    registered_true: bytes,
+    expected_content_sha256: str,
+) -> bool:
+    return (
+        bool(registered_true)
+        and b"\r" not in registered_true
+        and b"\n" not in registered_true
+        and registered_true not in base_content
+        and head_content.count(registered_true) == 1
+        and head_content == base_content.rstrip() + b"\n" + registered_true + b"\n"
         and hashlib.sha256(head_content).hexdigest() == expected_content_sha256
     )
