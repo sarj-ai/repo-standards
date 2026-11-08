@@ -1007,21 +1007,6 @@ def _evaluated_head(receipt: Mapping[str, object]) -> object:
     return "unknown" if provenance is None else provenance.get("evaluated_head", "unknown")
 
 
-def _issue_text(value: object) -> str:
-    text = " ".join(str(value).replace("`", "'").split())
-    if len(text) > _ISSUE_TEXT_LIMIT:
-        return text[: _ISSUE_TEXT_LIMIT - 3] + "..."
-    return text
-
-
-def _incomplete_issue_line(issue: object) -> str:
-    fields = _optional_mapping(issue) or {}
-    code = _issue_text(fields.get("code", "unknown"))
-    phase = _issue_text(fields.get("phase", "unknown"))
-    message = _issue_text(fields.get("message", ""))
-    return f"  - `{code}` ({phase}): `{message}`\n"
-
-
 def render_incomplete_comment(receipt: Mapping[str, object]) -> str:
     issues = _optional_array(receipt.get("execution_issues")) or ()
     shown = "".join(_incomplete_issue_line(item) for item in issues[:_ISSUE_RENDER_LIMIT])
@@ -1035,6 +1020,21 @@ def render_incomplete_comment(receipt: Mapping[str, object]) -> str:
         f"- Receipt issues: **{len(issues)}**\n"
         f"{shown}{more}"
     )
+
+
+def _incomplete_issue_line(issue: object) -> str:
+    fields = _optional_mapping(issue) or {}
+    code = _issue_text(fields.get("code", "unknown"))
+    phase = _issue_text(fields.get("phase", "unknown"))
+    message = _issue_text(fields.get("message", ""))
+    return f"  - `{code}` ({phase}): `{message}`\n"
+
+
+def _issue_text(value: object) -> str:
+    text = " ".join(str(value).replace("`", "'").split())
+    if len(text) > _ISSUE_TEXT_LIMIT:
+        return text[: _ISSUE_TEXT_LIMIT - 3] + "..."
+    return text
 
 
 def upsert_comment(client: GitHubClient, number: int, body: str) -> None:
