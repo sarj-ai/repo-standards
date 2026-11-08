@@ -164,7 +164,7 @@ def test_other_failures_remain_fail_closed(monkeypatch: pytest.MonkeyPatch, fail
     assert clock.sleeps == []
 
 
-def test_artifact_redirect_drops_token_and_bounds_read(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_artifact_redirect_drops_token_and_bounds_read() -> None:
     class ArtifactOpener:
         def __init__(self) -> None:
             self.requests: list[Request] = []
@@ -182,13 +182,12 @@ def test_artifact_redirect_drops_token_and_bounds_read(monkeypatch: pytest.Monke
 
     opener = ArtifactOpener()
 
-    def build_artifact_opener(*_args: object) -> ArtifactOpener:
-        return opener
+    class ArtifactClient(policy.GitHubClient):
+        @staticmethod
+        def _artifact_opener() -> ArtifactOpener:
+            return opener
 
-    monkeypatch.setattr(policy, "build_opener", build_artifact_opener)
-    client = policy.GitHubClient(
-        token="test-token", repository="owner/repo", api_url="https://api.test"
-    )
+    client = ArtifactClient(token="test-token", repository="owner/repo", api_url="https://api.test")
     assert client.artifact_bytes(123) == b"artifact"
     assert len(opener.requests) == 2
 
@@ -196,9 +195,7 @@ def test_artifact_redirect_drops_token_and_bounds_read(monkeypatch: pytest.Monke
 @pytest.mark.parametrize(
     "location", ["http://storage.example/a", "https://user:secret@example.invalid/a"]
 )
-def test_artifact_rejects_unsafe_storage_redirect(
-    monkeypatch: pytest.MonkeyPatch, location: str
-) -> None:
+def test_artifact_rejects_unsafe_storage_redirect(location: str) -> None:
     class ArtifactOpener:
         def open(self, request: Request, *, timeout: float) -> BytesIO:
             assert timeout > 0
@@ -206,13 +203,12 @@ def test_artifact_rejects_unsafe_storage_redirect(
             headers["Location"] = location
             raise HTTPError(request.full_url, 302, "Found", headers, BytesIO())
 
-    def build_artifact_opener(*_args: object) -> ArtifactOpener:
-        return ArtifactOpener()
+    class ArtifactClient(policy.GitHubClient):
+        @staticmethod
+        def _artifact_opener() -> ArtifactOpener:
+            return ArtifactOpener()
 
-    monkeypatch.setattr(policy, "build_opener", build_artifact_opener)
-    client = policy.GitHubClient(
-        token="test-token", repository="owner/repo", api_url="https://api.test"
-    )
+    client = ArtifactClient(token="test-token", repository="owner/repo", api_url="https://api.test")
     with pytest.raises(
         policy.ReconciliationError, match="unsafe artifact storage redirect"
     ) as raised:
@@ -220,19 +216,18 @@ def test_artifact_rejects_unsafe_storage_redirect(
     assert location not in str(raised.value)
 
 
-def test_artifact_rejects_oversize_archive(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_artifact_rejects_oversize_archive() -> None:
     class ArtifactOpener:
         def open(self, request: Request, *, timeout: float) -> BytesIO:
             assert timeout > 0
             assert request.full_url.startswith("https://api.test/")
             return BytesIO(b"x" * 1_048_577)
 
-    def build_artifact_opener(*_args: object) -> ArtifactOpener:
-        return ArtifactOpener()
+    class ArtifactClient(policy.GitHubClient):
+        @staticmethod
+        def _artifact_opener() -> ArtifactOpener:
+            return ArtifactOpener()
 
-    monkeypatch.setattr(policy, "build_opener", build_artifact_opener)
-    client = policy.GitHubClient(
-        token="test-token", repository="owner/repo", api_url="https://api.test"
-    )
+    client = ArtifactClient(token="test-token", repository="owner/repo", api_url="https://api.test")
     with pytest.raises(policy.ReconciliationError, match="exceeds archive budget"):
         client.artifact_bytes(123)

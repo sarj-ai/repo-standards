@@ -5,6 +5,7 @@ from repo_standards.core.activation_receipt import (
     ActivationBinding,
     ActivationChange,
     exact_registered_activation,
+    exact_registered_append,
     matches_activation_payload,
 )
 
@@ -53,3 +54,23 @@ def test_registered_edit_preserves_every_other_byte():
     assert not accepts(after.replace(b'"operational": false', b'"operational": true'))
     assert not accepts(after, before + before)
     assert not accepts(before)
+
+
+def test_registered_append_preserves_exact_generator_bytes():
+    before = b"operational = false\n\n"
+    literal = b"model_catalog_enabled = true"
+    after = before.rstrip() + b"\n" + literal + b"\n"
+
+    def accepts(candidate: bytes, source: bytes = before) -> bool:
+        return exact_registered_append(
+            base_content=source,
+            head_content=candidate,
+            registered_true=literal,
+            expected_content_sha256=hashlib.sha256(candidate).hexdigest(),
+        )
+
+    assert accepts(after)
+    assert not accepts(after + literal + b"\n")
+    assert not accepts(after.replace(b"operational = false", b"operational = true"))
+    assert not accepts(after + b"unexpected = true\n")
+    assert not accepts(after, after)
