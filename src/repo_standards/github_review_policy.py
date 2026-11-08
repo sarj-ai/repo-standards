@@ -32,6 +32,8 @@ _MAX_PAGES: Final = 100
 _MAX_ITEMS: Final = 10_000
 _PER_PAGE: Final = 100
 _INCOMPLETE_EXIT: Final = 2
+_ISSUE_RENDER_LIMIT: Final = 5
+_ISSUE_TEXT_LIMIT: Final = 300
 # A reconcile run posts its final status a few seconds before the run completes,
 # and the merge queue starts a merge group as soon as that status turns green.
 _RUN_COMPLETION_TIMEOUT_SECONDS: Final = 300
@@ -1005,14 +1007,33 @@ def _evaluated_head(receipt: Mapping[str, object]) -> object:
     return "unknown" if provenance is None else provenance.get("evaluated_head", "unknown")
 
 
+def _issue_text(value: object) -> str:
+    text = " ".join(str(value).replace("`", "'").split())
+    if len(text) > _ISSUE_TEXT_LIMIT:
+        return text[: _ISSUE_TEXT_LIMIT - 3] + "..."
+    return text
+
+
+def _incomplete_issue_line(issue: object) -> str:
+    fields = _optional_mapping(issue) or {}
+    code = _issue_text(fields.get("code", "unknown"))
+    phase = _issue_text(fields.get("phase", "unknown"))
+    message = _issue_text(fields.get("message", ""))
+    return f"  - `{code}` ({phase}): `{message}`\n"
+
+
 def render_incomplete_comment(receipt: Mapping[str, object]) -> str:
-    issue_count = len(_optional_array(receipt.get("issues")) or ())
+    issues = _optional_array(receipt.get("execution_issues")) or ()
+    shown = "".join(_incomplete_issue_line(item) for item in issues[:_ISSUE_RENDER_LIMIT])
+    hidden = len(issues) - _ISSUE_RENDER_LIMIT
+    more = f"  - {hidden} more in the retained receipt\n" if hidden > 0 else ""
     return (
         f"{_COMMENT_MARKER}\n"
         "### Review policy\n\n"
         "- Decision: **incomplete**\n"
         "- The evidence transaction failed closed.\n"
-        f"- Receipt issues: **{issue_count}**\n"
+        f"- Receipt issues: **{len(issues)}**\n"
+        f"{shown}{more}"
     )
 
 
