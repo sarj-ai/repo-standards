@@ -16,7 +16,14 @@ import tomllib
 from typing import Final, NamedTuple, NewType, TypeGuard, final
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+
+from repo_standards.activation_verification import (
+    MAX_ARCHIVE_BYTES,
+    VerifiedActivation,
+    authenticate_activation,
+    policy_at_base,
+)
 
 
 _COMMENT_MARKER: Final = "<!-- repo-standards-review-policy -->"
@@ -132,6 +139,19 @@ class CollectedEvidence:
         return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
+class _NoArtifactRedirect(HTTPRedirectHandler):
+    def redirect_request(  # ruff: ignore[no-self-use,too-many-positional-arguments] -- urllib override signature
+        self,
+        req: Request,
+        fp: object,
+        code: int,
+        msg: str,
+        headers: object,
+        newurl: str,
+    ) -> None:
+        del req, fp, code, msg, headers, newurl
+
+
 class GitHubClient:
     def __init__(self, *, token: str, repository: str, api_url: str) -> None:
         if not token:
@@ -193,6 +213,47 @@ class GitHubClient:
                 f"GitHub API {method} {path} returned invalid JSON"
             ) from error
         return parsed
+
+    def artifact_bytes(self, artifact_id: int) -> bytes:
+        """Bounded artifact fetch; bearer token never follows a signed storage redirect."""
+        if type(artifact_id) is not int or artifact_id <= 0:
+            raise ReconciliationError("invalid artifact ID")
+        opener = build_opener(_NoArtifactRedirect())
+        request = Request(
+            f"{self.api_url}/repos/{self.repository}/actions/artifacts/{artifact_id}/zip",
+            headers={
+                "Authorization": f"Bearer {self._token}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        try:  # ruff: ignore[too-many-statements-in-try-clause] -- a single bounded download transaction
+            try:
+                response = opener.open(request, timeout=_API_TIMEOUT_SECONDS)  # pyright: ignore[reportAny] -- urllib response boundary
+            except HTTPError as redirect:
+                with redirect:
+                    expected_redirect = 302
+                    if redirect.code != expected_redirect:
+                        raise ReconciliationError("artifact API download failed") from None
+                    location = redirect.headers.get("Location", "")
+                parsed = urlsplit(location)
+                if (
+                    parsed.scheme != "https"
+                    or not parsed.hostname
+                    or parsed.username
+                    or parsed.password
+                ):
+                    raise ReconciliationError("unsafe artifact storage redirect") from None
+                # A fresh request intentionally has no Authorization or other API headers.
+                response = opener.open(Request(location), timeout=_API_TIMEOUT_SECONDS)  # pyright: ignore[reportAny] -- urllib response boundary
+            with response:
+                raw: bytes = response.read(MAX_ARCHIVE_BYTES + 1)  # pyright: ignore[reportAny] -- bounded binary HTTP body
+            if len(raw) > MAX_ARCHIVE_BYTES:
+                raise ReconciliationError("activation artifact exceeds archive budget")
+        except HTTPError, URLError, TimeoutError:
+            # Never include a signed storage URL or response body in diagnostics.
+            raise ReconciliationError("artifact download failed") from None
+        else:
+            return raw
 
     def rest_pages(self, path: str, *, collection_key: str | None = None) -> list[object]:
         items: list[object] = []
@@ -1175,7 +1236,7 @@ def _contains_commit(client: GitHubClient, *, head: str, ancestor: str) -> bool:
     return behind_by == 0
 
 
-def reconcile_merge_group(
+def reconcile_merge_group(  # ruff: ignore[too-many-branches] -- merge queue validation stays linear
     *,
     client: GitHubClient,
     head_sha: str,
@@ -1228,8 +1289,23 @@ def reconcile_merge_group(
         head_sha=snapshot.head_sha,
         workflow_path=workflow_path,
     )
+    latest_policy = _latest_review_policy_status(statuses)
+    latest_description = latest_policy.get("description") if latest_policy is not None else None
+    if (
+        passed
+        and isinstance(latest_description, str)
+        and latest_description.startswith("Verified activation:")
+    ):
+        proof = authenticate_activation(
+            client,
+            policy=policy_at_base(client, snapshot.base_sha),
+            number=number,
+            base_sha=snapshot.base_sha,
+            head_sha=snapshot.head_sha,
+        )
+        passed = proof is not None
     refreshed = pull_request_snapshot(client, snapshot.number)
-    if refreshed.head_sha != snapshot.head_sha or refreshed.base_ref != snapshot.base_ref:
+    if refreshed != snapshot:
         raise ReconciliationError(
             f"pull request {snapshot.number} changed during merge-group reconciliation"
         )
@@ -1278,7 +1354,7 @@ def _workflow_url() -> str | None:
     return None
 
 
-def final_policy_decision(
+def final_policy_decision(  # ruff: ignore[too-many-return-statements] -- explicit fail-closed decisions
     *,
     policy_passed: bool,
     tier: object,
@@ -1287,7 +1363,10 @@ def final_policy_decision(
     author_is_bot: bool,
     draft: bool,
     transition_exempt: bool = False,
+    verified_activation: VerifiedActivation | None = None,
 ) -> FinalPolicyDecision:
+    if verified_activation is not None and same_repository and not draft:
+        return FinalPolicyDecision(passed=policy_passed, reason=None)
     if not policy_passed or tier != 0 or (transition_exempt and same_repository and not draft):
         return FinalPolicyDecision(passed=policy_passed, reason=None)
     if not lane_enabled:
@@ -1301,7 +1380,7 @@ def final_policy_decision(
     return FinalPolicyDecision(passed=True, reason=None)
 
 
-def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - orchestration stays linear and auditable
+def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements,too-many-branches] - orchestration stays linear and auditable
     root = Path(args.root).resolve(strict=True)
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
@@ -1355,6 +1434,7 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
         )
         evidence = {
             "schema_version": 1,
+            "pr_number": args.pr_number,
             "evaluated_head_sha": snapshot.head_sha,
             "current_head_sha": snapshot.head_sha,
             "base_ref": snapshot.base_ref,
@@ -1413,6 +1493,20 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
         _write_output("merge-ready", "false")
         return _INCOMPLETE_EXIT
 
+    activation = None
+    if receipt.get("nonproduction_activation") is not None:
+        policy = policy_at_base(client, snapshot.base_sha)
+        activation = authenticate_activation(
+            client,
+            policy=policy,
+            number=snapshot.number,
+            base_sha=snapshot.base_sha,
+            head_sha=snapshot.head_sha,
+        )
+        if activation is None or activation.binding.payload() != receipt.get(
+            "nonproduction_activation"
+        ):
+            raise ReconciliationError("activation proof changed before policy decision")
     summary = _summary(receipt)
     tier = summary.get("tier")
     policy_passed = command.returncode == 0 and summary.get("merge_ready") is True
@@ -1425,6 +1519,7 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
         author_is_bot=author_is_bot,
         draft=snapshot.draft,
         transition_exempt=summary.get("transition_exemption") is not None,
+        verified_activation=activation,
     )
     final_passed = decision.passed
     operational_reason = decision.reason
@@ -1457,9 +1552,23 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
             raise ReconciliationError(
                 "pull request head changed during reconciliation; no final status was posted"
             )
+    if final_passed and activation is not None:
+        refreshed_activation = authenticate_activation(
+            client,
+            policy=policy_at_base(client, snapshot.base_sha),
+            number=snapshot.number,
+            base_sha=snapshot.base_sha,
+            head_sha=snapshot.head_sha,
+        )
+        if refreshed_activation != activation:
+            raise ReconciliationError("activation proof changed before final status")
     state = "success" if final_passed else "failure"
     description = (
-        f"Tier {tier}: review policy passed"
+        (
+            "Verified activation: review policy passed"
+            if activation is not None
+            else f"Tier {tier}: review policy passed"
+        )
         if final_passed
         else f"Tier {tier}: review policy blocked"
     )
