@@ -135,6 +135,9 @@ class PullRequestCommitHistoryTransition:
     base_ref: str
     head_prefix: str
     sha_prefix_length: int = 12
+    # Opt-in (default off): the refresh merge may change only `git merge-tree` conflicted paths,
+    # and review policy then needs an exact-head human approval from someone other than the PR
+    # author and every verified head commit identity (authors, co-authors, committer, signer).
     allow_reviewed_resolution: bool = False
 
 

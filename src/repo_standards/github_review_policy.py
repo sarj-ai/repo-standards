@@ -565,19 +565,66 @@ def allows_reviewed_resolution(manifest: Mapping[str, object]) -> bool:
     )
 
 
+_HEAD_COMMIT_IDENTITY_QUERY = """
+query($owner: String!, $name: String!, $oid: GitObjectID!) {
+  repository(owner: $owner, name: $name) {
+    object(oid: $oid) {
+      ... on Commit {
+        authors(first: 10) { totalCount nodes { user { login } } }
+        committer { user { login } }
+        signature { isValid state wasSignedByGitHub signer { login } }
+      }
+    }
+  }
+}
+"""
+
+
 def head_commit_user_logins(client: GitHubClient, head_sha: str) -> list[str]:
-    """Return the GitHub accounts linked to the head commit's author and committer."""
-    commit = _mapping(
-        client.request("GET", f"/repos/{client.repository}/commits/{head_sha}"),
-        "head commit",
+    """Return every GitHub account behind the head commit, or nothing to fail closed.
+
+    Git author, committer and Co-authored-by trailers are unauthenticated, so the identities
+    count only when the commit signature is valid and every author, co-author and the committer
+    is linked to a GitHub account. The signer is included too, so none of them can approve.
+    """
+    owner, _, name = client.repository.partition("/")
+    data = client.graphql(
+        _HEAD_COMMIT_IDENTITY_QUERY, {"owner": owner, "name": name, "oid": head_sha}
     )
+    repository = _mapping(data.get("repository"), "GraphQL repository")
+    commit = _optional_mapping(repository.get("object"))
+    signature = None if commit is None else _optional_mapping(commit.get("signature"))
+    if (
+        commit is None
+        or signature is None
+        or signature.get("isValid") is not True
+        or signature.get("state") != "VALID"
+    ):
+        return []
+    authors = _optional_mapping(commit.get("authors")) or {}
+    nodes = _optional_array(authors.get("nodes")) or ()
+    if not nodes or authors.get("totalCount") != len(nodes):
+        return []
+    actors = [*nodes, commit.get("committer")]
     logins: list[str] = []
-    for role in ("author", "committer"):
-        user = _optional_mapping(commit.get(role))
-        login = None if user is None else user.get("login")
-        if isinstance(login, str) and login and login not in logins:
-            logins.append(login)
-    return logins
+    for actor in actors:
+        login = _actor_login(_optional_mapping(actor))
+        if login is None:
+            return []
+        logins.append(login)
+    signer = _optional_mapping(signature.get("signer"))
+    if signer is not None or signature.get("wasSignedByGitHub") is not True:
+        signer_login = None if signer is None else signer.get("login")
+        if not isinstance(signer_login, str) or not signer_login:
+            return []
+        logins.append(signer_login)
+    return list(dict.fromkeys(logins))
+
+
+def _actor_login(actor: Mapping[str, object] | None) -> str | None:
+    user = None if actor is None else _optional_mapping(actor.get("user"))
+    login = None if user is None else user.get("login")
+    return login if isinstance(login, str) and login else None
 
 
 def _is_bot(user_type: str, login: str) -> bool:

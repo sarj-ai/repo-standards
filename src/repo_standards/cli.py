@@ -215,7 +215,7 @@ class _ReviewPolicyEvidenceInput(BaseModel):
     threads_complete: bool
     threads_resolved: bool
     body: str = Field(max_length=1_048_576)
-    head_commit_user_logins: tuple[str, ...] | None = Field(default=None, max_length=2)
+    head_commit_user_logins: tuple[str, ...] | None = Field(default=None, max_length=16)
 
 
 class OutputFormat(StrEnum):
@@ -1685,6 +1685,7 @@ def _render_pull_request_commits(result: PullRequestCommits, *, advisory: bool) 
             "an independent exact-head approval is required"
         )
         lines.extend(f"  {path}" for path in result.resolved_paths[:_MAX_RENDERED_COMMIT_FINDINGS])
+        lines.append(f"Inspect with: git show --remerge-diff {result.head_object_id}")
     if result.commit_message_findings:
         mode = result.commit_message_enforcement or "disabled"
         lines.append(f"Commit messages: {len(result.commit_message_findings)} finding(s) ({mode})")
