@@ -554,6 +554,32 @@ def allowlisted_bot_reviewer_logins(manifest: Mapping[str, object]) -> frozenset
     return frozenset(logins)
 
 
+def allows_reviewed_resolution(manifest: Mapping[str, object]) -> bool:
+    pull_request = _optional_mapping(manifest.get("pull_request")) or {}
+    history = _optional_mapping(pull_request.get("commit_history")) or {}
+    transitions = _optional_array(history.get("transitions")) or ()
+    return any(
+        (transition := _optional_mapping(item)) is not None
+        and transition.get("allow_reviewed_resolution") is True
+        for item in transitions
+    )
+
+
+def head_commit_user_logins(client: GitHubClient, head_sha: str) -> list[str]:
+    """Return the GitHub accounts linked to the head commit's author and committer."""
+    commit = _mapping(
+        client.request("GET", f"/repos/{client.repository}/commits/{head_sha}"),
+        "head commit",
+    )
+    logins: list[str] = []
+    for role in ("author", "committer"):
+        user = _optional_mapping(commit.get(role))
+        login = None if user is None else user.get("login")
+        if isinstance(login, str) and login and login not in logins:
+            logins.append(login)
+    return logins
+
+
 def _is_bot(user_type: str, login: str) -> bool:
     return user_type.casefold() == "bot" or login.casefold().endswith("[bot]")
 
@@ -1439,7 +1465,7 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
             token=github_token,
             server_url=os.environ.get("GITHUB_SERVER_URL", "https://github.com"),
         )
-        evidence = {
+        evidence: dict[str, object] = {
             "schema_version": 1,
             "pr_number": args.pr_number,
             "evaluated_head_sha": snapshot.head_sha,
@@ -1459,6 +1485,8 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
             "threads_resolved": collected.threads_resolved,
             "body": snapshot.body,
         }
+        if allows_reviewed_resolution(manifest):
+            evidence["head_commit_user_logins"] = head_commit_user_logins(client, snapshot.head_sha)
         evidence_path = temporary / "evidence.json"
         evidence_path.write_text(
             json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n",

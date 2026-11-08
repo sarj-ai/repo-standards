@@ -108,6 +108,14 @@ head_prefix = "automation/promote-dev-"
 # sha_prefix_length = 12
 ```
 
+A refreshed transition may also be one two-parent merge of the exact snapshot and current base.
+Its tree must equal the clean `git merge-tree` result. To land a human conflict resolution, set
+`allow_reviewed_resolution = true` on that transition (default off). The merge may then change only
+the paths `git merge-tree` reports as conflicted; the commit receipt lists them as
+`transition-resolution`, and the review policy requires a human approval on the exact head from
+someone other than the PR author and the head commit's author or committer. Bot and
+carried-forward approvals do not count, and required checks still apply.
+
 Repeat an explicit table for every trusted edge. Repo Standards rejects ambiguous prefixes,
 unsafe refs, duplicate IDs, and more than 64 transitions. Missing configuration keeps the strict
 five-commit default and grants no transition exemptions. Existing explicit evidence and JSON

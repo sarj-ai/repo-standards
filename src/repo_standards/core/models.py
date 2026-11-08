@@ -135,6 +135,7 @@ class PullRequestCommitHistoryTransition:
     base_ref: str
     head_prefix: str
     sha_prefix_length: int = 12
+    allow_reviewed_resolution: bool = False
 
 
 @dataclass(frozen=True, slots=True)

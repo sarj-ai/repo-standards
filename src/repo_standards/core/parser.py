@@ -288,7 +288,14 @@ def parse_pull_request_commit_history_transition(
 ) -> PullRequestCommitHistoryTransition:
     context = f"pull_request.commit_history.transitions[{index}]"
     data = _mapping(value, context)
-    fields = {"id", "source_ref", "base_ref", "head_prefix", "sha_prefix_length"}
+    fields = {
+        "id",
+        "source_ref",
+        "base_ref",
+        "head_prefix",
+        "sha_prefix_length",
+        "allow_reviewed_resolution",
+    }
     _strict_keys(data, fields, {"id", "source_ref", "base_ref", "head_prefix"}, context)
     transition_id = _identifier(_string(data, "id", context), f"{context}.id")
     source_ref = _logical_branch_ref(_string(data, "source_ref", context), f"{context}.source_ref")
@@ -314,6 +321,9 @@ def parse_pull_request_commit_history_transition(
         base_ref=base_ref,
         head_prefix=head_prefix,
         sha_prefix_length=sha_prefix_length,
+        allow_reviewed_resolution=_boolean(
+            data, "allow_reviewed_resolution", context, default=False
+        ),
     )
 
 
