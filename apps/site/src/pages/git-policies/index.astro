@@ -39,7 +39,7 @@ const mergeRiskExample = `## Merge Risk
       <section class="capability-card" aria-labelledby="compact-pr-descriptions">
         <p class="data-line">PR text · advisory preflight</p>
         <h2 id="compact-pr-descriptions">Preview a compact description</h2>
-        <p>Check a UTF-8 body file before publishing. Default budgets allow 500 rendered prose characters and 2,000 total characters, including links, comments and automation markup.</p>
+        <p>Check a UTF-8 body file before publishing. Default budgets allow 500 rendered prose characters and 2,000 total characters, including links, comments and automation markup. A complete top-level Blacksmith <code>codesmith:footer</code> block is excluded; text outside it still counts.</p>
         <Code code={textCommand} lang="bash" frame="terminal" wrap />
         <p>Link detailed evidence and retain the outcome, validation and material caveats. Nonempty, closed code fences need a language tag.</p>
         <p>Warnings exit zero. Unreadable, oversized or invalid input exits two. This preview uses default budgets; the configured review-policy check remains authoritative.</p>

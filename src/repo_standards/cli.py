@@ -22,7 +22,7 @@ from repo_standards._machine import (
 )
 from repo_standards.core.canonical import canonical_json
 from repo_standards.core.commit_message import CommitMessageResult, check_local_commit_message_file
-from repo_standards.core.description import analyze_description
+from repo_standards.core.description import analyze_description, without_bot_footer
 from repo_standards.core.engine import baseline_from_report
 from repo_standards.core.errors import BaselineError, ConfigurationError
 from repo_standards.core.inspection import (
@@ -362,7 +362,7 @@ def pull_request_text_command(
 ) -> None:
     """Preview default description budgets without Git or provider evidence; warnings exit zero."""
     try:
-        body = _read_pull_request_body(body_file)
+        body = without_bot_footer(_read_pull_request_body(body_file))
         if title is not None and ("\n" in title or "\r" in title):
             ConfigurationError.fail("pull request title must be one line")
     except (ConfigurationError, OSError) as error:
@@ -801,7 +801,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
             counted_lines = size.counted_lines
             changed_paths = tuple(item.path for item in size.files)
             missing_sections = missing_required_body_sections(
-                provider.body,
+                without_bot_footer(provider.body),
                 configured.required_body_sections,
             )
         else:
@@ -1104,7 +1104,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             "touches_domain": result.touches_domain,
             "migration_coupled_paths": list(result.migration_coupled_paths),
             "migration_exception_accepted": result.migration_exception_accepted,
-            "body_characters": len(provider.body),
+            "body_characters": len(without_bot_footer(provider.body)),
             "description": {
                 "prose_characters": result.description.prose_characters,
                 "code_examples": result.description.code_examples,

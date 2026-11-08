@@ -2,7 +2,50 @@ from __future__ import annotations
 
 import pytest
 
-from repo_standards.core.description import DescriptionMetrics, analyze_description
+from repo_standards.core.description import (
+    DescriptionMetrics,
+    analyze_description,
+    without_bot_footer,
+)
+
+
+FOOTER = (
+    "<!-- codesmith:footer -->\n---\n"
+    '<a href="https://backend.blacksmith.sh/track/enable-autofix?pr_number=1"><picture>'
+    '<source media="(prefers-color-scheme: dark)" srcset="https://assets.invalid/dark.svg">'
+    '<img alt="Autofix with [code]smith" src="https://assets.invalid/dark.png"></picture></a>\n'
+    '<sup><a href="https://app.blacksmith.sh/pr/1">Open in [code]smith</a> · Need help on this'
+    " PR? Tag <code>@codesmith</code> with what you need.</sup>\n\n"
+    "<!-- codesmith:autofix:disabled -->\n<!-- /codesmith:footer -->"
+)
+UNCLOSED = "Fix.\n\n<!-- codesmith:footer -->\nHidden prose.\n"
+FENCED = "```text\n<!-- codesmith:footer -->\n```\n\nShown.\n<!-- /codesmith:footer -->\n"
+QUOTED = "> <!-- codesmith:footer -->\n> Hidden.\n> <!-- /codesmith:footer -->\n"
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        pytest.param(f"Fix.\n\n{FOOTER}", "Fix.\n\n", id="footer-present"),
+        pytest.param(
+            f"Fix.\r\n\r\n{FOOTER.replace(chr(10), chr(13) + chr(10))}\r\nAfter.",
+            "Fix.\r\n\r\nAfter.",
+            id="crlf-footer-keeps-trailing-content",
+        ),
+        pytest.param(f"{FOOTER}\n\nAfter.\n", "\nAfter.\n", id="content-after-close-counts"),
+        pytest.param(f"{FOOTER}\n{FOOTER}", f"{FOOTER}", id="only-one-footer"),
+        pytest.param(UNCLOSED, UNCLOSED, id="unclosed-marker-strips-nothing"),
+        pytest.param(FENCED, FENCED, id="fenced-marker-strips-nothing"),
+        pytest.param(QUOTED, QUOTED, id="nested-marker-strips-nothing"),
+        pytest.param(
+            "<!-- codesmith:footer --> x\nHidden.\n<!-- /codesmith:footer -->",
+            "<!-- codesmith:footer --> x\nHidden.\n<!-- /codesmith:footer -->",
+            id="marker-must-stand-alone",
+        ),
+    ],
+)
+def test_only_a_complete_top_level_bot_footer_is_removed(body: str, expected: str) -> None:
+    assert without_bot_footer(body) == expected
 
 
 @pytest.mark.parametrize(
