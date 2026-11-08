@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
@@ -639,3 +639,49 @@ def test_invalid_policy_is_rejected() -> None:
         ReviewPolicyConfig(accepted_check_conclusions=frozenset())
     with pytest.raises(ValueError, match="accepted check conclusions"):
         ReviewPolicyConfig(accepted_check_conclusions=frozenset({CheckConclusion.FAILURE}))
+
+
+_FOOTER = (
+    "<!-- codesmith:footer -->\n---\n"
+    f'<a href="https://backend.blacksmith.sh/track?{"s" * 1700}">'
+    '<img alt="Autofix with [code]smith" src="https://assets.invalid/a.png"></a>\n'
+    '<sup><a href="https://app.blacksmith.sh/pr/1">Open in [code]smith</a> · Need help on this'
+    " PR? Tag <code>@codesmith</code> with what you need.</sup>\n\n"
+    "<!-- /codesmith:footer -->"
+)
+
+
+@pytest.mark.parametrize(
+    ("body", "reasons"),
+    [
+        pytest.param(f"{'x' * 500}\n\n{_FOOTER}", (), id="footer-excluded-from-both-caps"),
+        pytest.param(
+            f"{'x' * 501}\n\n{_FOOTER}",
+            (ReviewPolicyReason.BODY_PROSE_TOO_LONG,),
+            id="prose-over-cap-still-fails",
+        ),
+        pytest.param(
+            f"{'x' * 400}\n\n{_FOOTER}\n\n{'y' * 101}",
+            (ReviewPolicyReason.BODY_PROSE_TOO_LONG,),
+            id="prose-after-footer-counts",
+        ),
+        pytest.param(
+            f"{'x' * 400}\n\n{_FOOTER.removesuffix('<!-- /codesmith:footer -->')}",
+            (ReviewPolicyReason.BODY_TOO_LONG,),
+            id="unclosed-footer-counts",
+        ),
+        pytest.param(
+            f"```text\n{_FOOTER}\n```",
+            (ReviewPolicyReason.BODY_TOO_LONG,),
+            id="fenced-footer-counts",
+        ),
+    ],
+)
+def test_description_budgets_exclude_only_a_complete_bot_footer(
+    body: str, reasons: tuple[ReviewPolicyReason, ...]
+) -> None:
+    result = evaluate_review_policy(replace(_evidence(), body=body))
+
+    budget = {ReviewPolicyReason.BODY_TOO_LONG, ReviewPolicyReason.BODY_PROSE_TOO_LONG}
+    assert tuple(reason for reason in result.reasons if reason in budget) == reasons
+    assert result.merge_ready is not bool(reasons)

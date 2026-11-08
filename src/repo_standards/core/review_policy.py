@@ -7,7 +7,7 @@ import re
 from typing import Literal
 
 from .canonical import canonical_path
-from .description import DescriptionMetrics, analyze_description
+from .description import DescriptionMetrics, analyze_description, without_bot_footer
 from .errors import ConfigurationError
 from .models import (
     DEFAULT_MAXIMUM_BODY_CHARACTERS,
@@ -301,10 +301,9 @@ def evaluate_review_policy(
     reasons.extend(review_assessment.reasons)
     reasons.extend(_focus_reasons(evidence, config))
 
+    body = without_bot_footer(evidence.body)
     description = (
-        analyze_description(evidence.body)
-        if len(evidence.body) <= config.maximum_body_characters
-        else None
+        analyze_description(body) if len(body) <= config.maximum_body_characters else None
     )
     reasons.extend(
         description_reasons(description, maximum_prose_characters=config.maximum_prose_characters)

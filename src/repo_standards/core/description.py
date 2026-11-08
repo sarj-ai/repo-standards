@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 
 
 _LANGUAGE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_+#.-]*\Z")
+_LINE_END = re.compile(r"(?<=\n)|(?<=\r)(?!\n)")
+_BOT_FOOTER_OPEN = "<!-- codesmith:footer -->"
+_BOT_FOOTER_CLOSE = "<!-- /codesmith:footer -->"
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,8 +44,26 @@ def _html_text(value: str) -> str:
     return "".join(parser.parts)
 
 
+def without_bot_footer(body: str) -> str:
+    start: int | None = None
+    for token in _markdown().parse(body):
+        if token.type != "html_block" or token.level or token.map is None:
+            continue
+        marker = token.content.strip()
+        if start is None and marker == _BOT_FOOTER_OPEN:
+            start = token.map[0]
+        elif start is not None and marker == _BOT_FOOTER_CLOSE:
+            lines = _LINE_END.split(body)
+            return "".join(lines[:start] + lines[token.map[1] :])
+    return body
+
+
+def _markdown() -> MarkdownIt:
+    return MarkdownIt("commonmark").enable(["table", "strikethrough"])
+
+
 def analyze_description(body: str) -> DescriptionMetrics:
-    tokens = MarkdownIt("commonmark").enable(["table", "strikethrough"]).parse(body)
+    tokens = _markdown().parse(body)
     prose: list[str] = []
     examples = 0
     invalid = 0

@@ -70,6 +70,20 @@ def test_text_preflight_uses_existing_budgets_without_a_git_repository(
     assert not (tmp_path / ".git").exists()
 
 
+def test_text_preflight_excludes_a_complete_bot_footer(tmp_path: Path) -> None:
+    body_file = tmp_path / "body.txt"
+    body_file.write_text(
+        "x" * 500 + "\n\n<!-- codesmith:footer -->\n<sup>" + "y" * 2000 + "</sup>\n"
+        "<!-- /codesmith:footer -->"
+    )
+
+    result = runner.invoke(app, ["pull-request", "text", str(body_file), "--format", "json"])
+
+    payload = OBJECT_MAP.validate_json(result.stdout)
+    assert payload["warnings"] == []
+    assert OBJECT_MAP.validate_python(payload["summary"])["body_characters"] == 502
+
+
 @pytest.mark.parametrize("output_format", ["text", "pretty-json"])
 def test_text_preflight_explains_how_to_shorten_a_body(tmp_path: Path, output_format: str) -> None:
     body_file = tmp_path / "body.txt"

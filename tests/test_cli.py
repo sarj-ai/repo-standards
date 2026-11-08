@@ -1956,6 +1956,12 @@ def test_repository_text_is_bounded_without_changing_json_or_failure(tmp_path: P
     ("rating_body", "exit_code"),
     [
         pytest.param(_MERGE_RISK_BODY, 0, id="ratings-only"),
+        pytest.param(
+            f"{_MERGE_RISK_BODY}\n<!-- codesmith:footer -->\n---\n<sup>Open</sup>\n"
+            "<!-- /codesmith:footer -->",
+            0,
+            id="ratings-before-bot-footer",
+        ),
         pytest.param("", 1, id="absent"),
         pytest.param(
             _MERGE_RISK_BODY.replace("**Alignment:** good ✅\n", ""), 1, id="missing-verdict"
