@@ -8,6 +8,7 @@ from io import BytesIO
 import json
 import tomllib
 from typing import TYPE_CHECKING, TypeGuard
+from urllib.parse import parse_qs, urlsplit
 from zipfile import ZipFile
 
 
@@ -169,6 +170,7 @@ class Provider:
         self.pr_reads = 0
         self.changed_on_refresh = False
         self.producer_race = ""
+        self.run_queries: list[dict[str, list[str]]] = []
 
     def set_archive(self, zipped: bytes) -> None:
         self.zipped = zipped
@@ -254,7 +256,14 @@ class Provider:
     def rest_pages(self, path: str, *, collection_key: str | None = None) -> list[object]:
         assert path.startswith("/repos/")
         if collection_key == "workflow_runs":
-            return list(self.runs)
+            # Mirror the provider's server-side filters so selection sees what GitHub returns.
+            query = parse_qs(urlsplit(path).query, strict_parsing=True)
+            self.run_queries.append(query)
+            return [
+                run
+                for run in self.runs
+                if [run["head_branch"]] == query["branch"] and [run["event"]] == query["event"]
+            ]
         if collection_key == "artifacts":
             return [self.artifact]
         return list(self.files)
@@ -263,6 +272,8 @@ class Provider:
         assert artifact_id == 6
         if self.producer_race == "new_run":
             self.runs.append(self.run | {"id": 99, "status": "in_progress", "conclusion": None})
+        elif self.producer_race == "other_event":
+            self.runs.append(self.run | {"id": 99, "event": "check_run", "head_sha": "d" * 40})
         elif self.producer_race == "rerun":
             self.run.update(run_attempt=3, status="in_progress", conclusion=None)
         return self.zipped
@@ -551,6 +562,40 @@ def test_new_producer_during_artifact_acquisition_revokes_proof(race: str) -> No
     provider = Provider()
     provider.producer_race = race
     assert provider.verify() is None
+
+
+def test_newer_run_from_another_event_does_not_displace_configured_event_run() -> None:
+    provider = Provider()
+    provider.runs.append(
+        provider.run | {"id": 10, "run_attempt": 1, "event": "check_run", "head_sha": "d" * 40}
+    )
+    proof = provider.verify()
+    assert proof is not None
+    assert proof.run_id == 7
+    assert provider.run_queries
+    assert all(
+        query == {"branch": ["dev"], "event": ["workflow_dispatch"]}
+        for query in provider.run_queries
+    )
+
+
+def test_run_from_another_event_during_acquisition_keeps_proof() -> None:
+    provider = Provider()
+    provider.producer_race = "other_event"
+    assert provider.verify() is not None
+
+
+def test_newer_configured_event_run_on_other_head_is_rejected() -> None:
+    provider = Provider()
+    provider.runs.append(provider.run | {"id": 10, "run_attempt": 1, "head_sha": "d" * 40})
+    assert provider.verify() is None
+
+
+def test_policy_without_event_fails_closed() -> None:
+    raw = POLICY.model_dump(mode="json")
+    del raw["event"]
+    with pytest.raises(ValidationError):
+        ActivationPolicy.model_validate(raw)
 
 
 @pytest.mark.parametrize("violation", ["unprotected", "advanced"])
