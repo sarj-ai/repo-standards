@@ -1,0 +1,19 @@
+{
+  "$schema": "https://react.doctor/schema/config.json",
+  "buckets": {
+    "compiler-cleanup": "off"
+  },
+  "ignore": {
+    "tags": [
+      "design",
+      "test-noise"
+    ]
+  },
+  "rules": {
+    "react-doctor/no-array-index-as-key": "error"
+  },
+  "serverAuthFunctionNames": [
+    "forRequest"
+  ],
+  "warnings": false
+}

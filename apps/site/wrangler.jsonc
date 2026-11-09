@@ -9,21 +9,21 @@
     "not_found_handling": "404-page",
     "html_handling": "force-trailing-slash",
     "binding": "ASSETS",
-    "run_worker_first": true
+    "run_worker_first": true,
   },
   "routes": [
     {
       "pattern": "repo-standards.sarj.ai",
-      "custom_domain": true
+      "custom_domain": true,
     },
     {
       "pattern": "engineering.sarj.ai/projects/repo-standards",
-      "zone_name": "sarj.ai"
+      "zone_name": "sarj.ai",
     },
     {
       "pattern": "engineering.sarj.ai/projects/repo-standards/*",
-      "zone_name": "sarj.ai"
-    }
+      "zone_name": "sarj.ai",
+    },
   ],
-  "main": "./src/worker.ts"
+  "main": "./src/worker.ts",
 }

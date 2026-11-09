@@ -1,21 +1,28 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { env, exit, stderr } from 'node:process';
+import { spawnSync } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import { env, exit, stderr } from "node:process";
 
-const appDirectory = resolve(import.meta.dirname, '..');
-const repositoryDirectory = resolve(appDirectory, '../..');
-const generatedDirectory = resolve(appDirectory, 'src/generated');
+const appDirectory = resolve(import.meta.dirname, "..");
+const repositoryDirectory = resolve(appDirectory, "../..");
+const generatedDirectory = resolve(appDirectory, "src/generated");
 const result = spawnSync(
-  'uv',
-  ['run', '--project', repositoryDirectory, '--frozen', 'repo-standards', 'catalog'],
+  "uv",
+  [
+    "run",
+    "--project",
+    repositoryDirectory,
+    "--frozen",
+    "repo-standards",
+    "catalog",
+  ],
   {
     cwd: repositoryDirectory,
-    encoding: 'utf8',
+    encoding: "utf8",
     env: {
       ...env,
-      UV_CACHE_DIR: env.UV_CACHE_DIR ?? resolve(tmpdir(), 'repo-standards-uv'),
+      UV_CACHE_DIR: env.UV_CACHE_DIR ?? resolve(tmpdir(), "repo-standards-uv"),
     },
   },
 );
@@ -26,10 +33,10 @@ if (result.status !== 0) {
 const parsed: unknown = JSON.parse(result.stdout);
 await mkdir(generatedDirectory, { recursive: true });
 await Promise.all([
-  writeFile(resolve(generatedDirectory, 'catalog.json'), result.stdout, 'utf8'),
+  writeFile(resolve(generatedDirectory, "catalog.json"), result.stdout, "utf8"),
   writeFile(
-    resolve(generatedDirectory, 'catalog.generated.ts'),
+    resolve(generatedDirectory, "catalog.generated.ts"),
     `export const generatedCatalog = ${JSON.stringify(parsed)} as const;\n`,
-    'utf8',
+    "utf8",
   ),
 ]);

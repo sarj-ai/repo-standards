@@ -1,10 +1,10 @@
-import type { APIRoute } from 'astro';
+import type { APIRoute } from "astro";
 
-import { sourceRevision } from '../lib/source-revision';
-import { catalog } from '../lib/catalog';
+import { catalog } from "../lib/catalog";
+import { sourceRevision } from "../lib/source-revision";
 
 const payload = {
-  status: 'ok',
+  status: "ok",
   commit: sourceRevision,
   catalogVersion: catalog["catalog_version"],
   catalogDigest: catalog.provenance["content_digest"],
@@ -12,6 +12,7 @@ const payload = {
   commands: catalog.commands.length,
 };
 
-export const GET = (() => new Response(`${JSON.stringify(payload)}\n`, {
-  headers: { 'Content-Type': 'application/json; charset=utf-8' },
-})) satisfies APIRoute;
+export const GET = (() =>
+  new Response(`${JSON.stringify(payload)}\n`, {
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  })) satisfies APIRoute;

@@ -1,28 +1,38 @@
-import { hash } from 'node:crypto';
-import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { hash } from "node:crypto";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 
-import { SITE_BASE_PATH, SITE_ORIGIN, SITE_URL, siteHref, siteUrl } from '../src/lib/site.ts';
+import {
+  SITE_BASE_PATH,
+  SITE_ORIGIN,
+  SITE_URL,
+  siteHref,
+  siteUrl,
+} from "../src/lib/site.ts";
 
-const assetDirectory = new URL('../dist/', import.meta.url);
+const assetDirectory = new URL("../dist/", import.meta.url);
 const outputDirectory = new URL(`.${SITE_BASE_PATH}`, assetDirectory);
-const htmlPaths = (await readdir(outputDirectory, { recursive: true }))
-  .filter((path) => path.endsWith('.html'))
-  .sort();
 const outputPaths = await readdir(outputDirectory, { recursive: true });
+const htmlPaths = outputPaths
+  .filter((path) => path.endsWith(".html"))
+  .toSorted();
 const documents = await Promise.all(
   htmlPaths.map(
-    async (path) => [path, await readFile(new URL(path, outputDirectory), 'utf8')] as const,
+    async (path) =>
+      [path, await readFile(new URL(path, outputDirectory), "utf8")] as const,
   ),
 );
 await verifySearchDiscovery(outputDirectory, documents);
-const policy = extractPolicy(documents[0]?.[1] ?? '');
-if (policy === undefined) throw new Error('Astro did not emit a Content Security Policy.');
+const policy = extractPolicy(documents[0]?.[1] ?? "");
+if (policy === undefined)
+  throw new Error("Astro did not emit a Content Security Policy.");
 verifyCompactReference(outputPaths, documents);
 
 const hashes = new Set<string>();
 for (const [, document] of documents) {
-  for (const match of document.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gu)) {
-    hashes.add(`'sha256-${hash('sha256', match[1], 'base64')}'`);
+  for (const match of document.matchAll(
+    /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gu,
+  )) {
+    hashes.add(`'sha256-${hash("sha256", match[1], "base64")}'`);
   }
 }
 
@@ -31,54 +41,78 @@ async function verifySearchDiscovery(
   pages: readonly (readonly [string, string])[],
 ): Promise<void> {
   const catalogValue: unknown = JSON.parse(
-    await readFile(new URL('../src/generated/catalog.json', import.meta.url), 'utf8'),
+    await readFile(
+      new URL("../src/generated/catalog.json", import.meta.url),
+      "utf8",
+    ),
   );
   const catalog = parseDiscoveryCatalog(catalogValue);
-  const sitemapIndex = await readFile(new URL('sitemap-index.xml', directory), 'utf8');
-  if (!sitemapIndex.includes(siteUrl('/sitemap-0.xml'))) {
-    throw new Error('Sitemap index does not reference the canonical repo-standards sitemap.');
+  const sitemapIndex = await readFile(
+    new URL("sitemap-index.xml", directory),
+    "utf8",
+  );
+  if (!sitemapIndex.includes(siteUrl("/sitemap-0.xml"))) {
+    throw new Error(
+      "Sitemap index does not reference the canonical repo-standards sitemap.",
+    );
   }
-  const sitemap = await readFile(new URL('sitemap-0.xml', directory), 'utf8');
+  const sitemap = await readFile(new URL("sitemap-0.xml", directory), "utf8");
   const locations = new Set(
-    [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/gu)].map((match) => match[1]),
+    sitemap.matchAll(/<loc>([^<]+)<\/loc>/gu).map((match) => match[1]),
   );
   const expected = [
-    siteUrl('/rules/'),
-    ...catalog.rules.map((rule: { slug: string }) => siteUrl(`/rules/${rule.slug}/`)),
+    siteUrl("/rules/"),
+    ...catalog.rules.map((rule: { slug: string }) =>
+      siteUrl(`/rules/${rule.slug}/`),
+    ),
   ];
   for (const location of expected) {
-    if (!locations.has(location)) throw new Error(`Indexable page is missing from the sitemap: ${location}`);
+    if (!locations.has(location))
+      throw new Error(
+        `Indexable page is missing from the sitemap: ${location}`,
+      );
   }
 
   const pagesByPath = new Map(pages);
   await verifySidebarCategories(catalog, pagesByPath);
-  const llms = await readFile(new URL('llms.txt', directory), 'utf8');
+  const llms = await readFile(new URL("llms.txt", directory), "utf8");
   for (const category of catalog.categories) {
     const path = `rules/categories/${encodeURIComponent(category.id)}/`;
-    if (!llms.includes(`](${siteUrl(`/${path}`)})`) || !pagesByPath.has(`${path}index.html`)) {
-      throw new Error(`LLM reference category is missing its canonical rendered page: ${category.id}`);
+    if (
+      !llms.includes(`](${siteUrl(`/${path}`)})`) ||
+      !pagesByPath.has(`${path}index.html`)
+    ) {
+      throw new Error(
+        `LLM reference category is missing its canonical rendered page: ${category.id}`,
+      );
     }
   }
 
   for (const location of locations) {
     const url = new URL(location);
-    if (url.origin !== SITE_ORIGIN || !url.pathname.startsWith(SITE_BASE_PATH)) {
+    if (
+      url.origin !== SITE_ORIGIN ||
+      !url.pathname.startsWith(SITE_BASE_PATH)
+    ) {
       throw new Error(`Cross-origin sitemap URL: ${location}`);
     }
     const path = `${url.pathname.slice(SITE_BASE_PATH.length)}index.html`;
     const document = pagesByPath.get(path);
-    if (document === undefined) throw new Error(`Sitemap URL has no rendered page: ${location}`);
+    if (document === undefined)
+      throw new Error(`Sitemap URL has no rendered page: ${location}`);
     if (/name="robots" content="[^"]*noindex/iu.test(document)) {
       throw new Error(`Sitemap URL is marked noindex: ${location}`);
     }
     if (!document.includes(`rel="canonical" href="${location}"`)) {
-      throw new Error(`Sitemap URL is missing its self-canonical link: ${location}`);
+      throw new Error(
+        `Sitemap URL is missing its self-canonical link: ${location}`,
+      );
     }
   }
 
-  const notFound = pagesByPath.get('404.html') ?? '';
+  const notFound = pagesByPath.get("404.html") ?? "";
   if (!/name="robots" content="[^"]*noindex/iu.test(notFound)) {
-    throw new Error('The 404 page must remain noindex.');
+    throw new Error("The 404 page must remain noindex.");
   }
 }
 
@@ -87,21 +121,35 @@ async function verifySidebarCategories(
   pagesByPath: ReadonlyMap<string, string>,
 ): Promise<void> {
   const categoryIds = new Set(catalog.rules.map((rule) => rule.categoryId));
-  const rulesIndex = pagesByPath.get('rules/index.html') ?? '';
-  const stylesheet = await readFile(new URL('../src/styles/global.css', import.meta.url), 'utf8');
+  const rulesIndex = pagesByPath.get("rules/index.html") ?? "";
+  const stylesheet = await readFile(
+    new URL("../src/styles/global.css", import.meta.url),
+    "utf8",
+  );
   if (
-    !stylesheet.includes('a[data-sidebar-category]::before')
-    || !stylesheet.includes("content: ''")
-    || !stylesheet.includes('mask: center / contain no-repeat var(--sidebar-category-mark)')
+    !stylesheet.includes("a[data-sidebar-category]::before") ||
+    !stylesheet.includes('content: ""') ||
+    !stylesheet.includes(
+      "mask: center / contain no-repeat var(--sidebar-category-mark)",
+    )
   ) {
-    throw new Error('Sidebar categories are missing their shared decorative mark contract.');
+    throw new Error(
+      "Sidebar categories are missing their shared decorative mark contract.",
+    );
   }
-  for (const category of catalog.categories.filter(({ id }) => categoryIds.has(id))) {
+  for (const category of catalog.categories) {
+    if (!categoryIds.has(category.id)) continue;
     const hook = `data-sidebar-category="${category.id}"`;
     if (!rulesIndex.includes(hook)) {
-      throw new Error(`Rendered sidebar is missing the ${category.label} category hook.`);
+      throw new Error(
+        `Rendered sidebar is missing the ${category.label} category hook.`,
+      );
     }
-    if (!stylesheet.includes(`data-sidebar-category='${category.id}'] {\n  --sidebar-category-mark: url(`)) {
+    if (
+      !stylesheet.includes(
+        `data-sidebar-category="${category.id}"] {\n  --sidebar-category-mark: url(`,
+      )
+    ) {
       throw new Error(`Sidebar category ${category.label} has no visual mark.`);
     }
   }
@@ -123,25 +171,37 @@ interface DiscoveryRule {
 }
 
 function parseDiscoveryCatalog(value: unknown): DiscoveryCatalog {
-  if (!isRecord(value) || !Array.isArray(value.categories) || !Array.isArray(value.rules)) {
-    throw new Error('Generated catalog is missing its category or rule collection.');
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value.categories) ||
+    !Array.isArray(value.rules)
+  ) {
+    throw new Error(
+      "Generated catalog is missing its category or rule collection.",
+    );
   }
   if (!isRecord(value.product) || value.product["website_url"] !== SITE_URL) {
-    throw new Error('Catalog and website canonical addresses differ.');
+    throw new Error("Catalog and website canonical addresses differ.");
   }
   const categories = value.categories.map((candidate) => {
-    if (!isRecord(candidate) || typeof candidate["category_id"] !== 'string' || typeof candidate.label !== 'string') {
-      throw new Error('Generated catalog contains an invalid category descriptor.');
+    if (
+      !isRecord(candidate) ||
+      typeof candidate["category_id"] !== "string" ||
+      typeof candidate.label !== "string"
+    ) {
+      throw new Error(
+        "Generated catalog contains an invalid category descriptor.",
+      );
     }
     return { id: candidate["category_id"], label: candidate.label };
   });
   const rules = value.rules.map((candidate) => {
     if (
-      !isRecord(candidate)
-      || typeof candidate.slug !== 'string'
-      || typeof candidate["category_id"] !== 'string'
+      !isRecord(candidate) ||
+      typeof candidate.slug !== "string" ||
+      typeof candidate["category_id"] !== "string"
     ) {
-      throw new Error('Generated catalog contains an invalid rule descriptor.');
+      throw new Error("Generated catalog contains an invalid rule descriptor.");
     }
     return { categoryId: candidate["category_id"], slug: candidate.slug };
   });
@@ -149,28 +209,42 @@ function parseDiscoveryCatalog(value: unknown): DiscoveryCatalog {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === "object" && value !== null;
 }
-const completePolicy = appendHashes(policy, [...hashes].sort());
+const completePolicy = appendHashes(policy, [...hashes].toSorted());
 const policyHeader = `  Content-Security-Policy: ${completePolicy}`;
-if (Buffer.byteLength(policyHeader, 'utf8') > 2_000) {
-  throw new Error('Cloudflare Content-Security-Policy header exceeds the 2,000-byte line limit.');
+if (Buffer.byteLength(policyHeader, "utf8") > 2_000) {
+  throw new Error(
+    "Cloudflare Content-Security-Policy header exceeds the 2,000-byte line limit.",
+  );
 }
-for (const [path, document] of documents) {
-  await writeFile(new URL(path, outputDirectory), document.replace(policyPattern(), ''), 'utf8');
-}
+await Promise.all(
+  documents.map(([path, document]) =>
+    writeFile(
+      new URL(path, outputDirectory),
+      document.replace(policyPattern(), ""),
+      "utf8",
+    ),
+  ),
+);
 
-const headersUrl = new URL('_headers', outputDirectory);
-const headers = await readFile(headersUrl, 'utf8');
-if (!headers.startsWith('/*\n')) throw new Error('Cloudflare headers must begin with /*.');
+const headersUrl = new URL("_headers", outputDirectory);
+const headers = await readFile(headersUrl, "utf8");
+if (!headers.startsWith("/*\n"))
+  throw new Error("Cloudflare headers must begin with /*.");
 if (/^\s*X-Robots-Tag:/imu.test(headers)) {
-  throw new Error('Indexing directives must be expressed per page, not as a global response header.');
+  throw new Error(
+    "Indexing directives must be expressed per page, not as a global response header.",
+  );
 }
 await writeFile(
-  new URL('_headers', assetDirectory),
-  headers.replace('/*\n', `/*\n${policyHeader}\n`)
-    .replaceAll(/^\/(.*)$/gmu, (_match: string, path: string) => siteHref(`/${path}`)),
-  'utf8',
+  new URL("_headers", assetDirectory),
+  headers
+    .replace("/*\n", () => `/*\n${policyHeader}\n`)
+    .replaceAll(/^\/(.*)$/gmu, (_match: string, path: string) =>
+      siteHref(`/${path}`),
+    ),
+  "utf8",
 );
 if (outputDirectory.href !== assetDirectory.href) await rm(headersUrl);
 
@@ -182,20 +256,39 @@ function extractPolicy(document: string): string | undefined {
   return policyPattern().exec(document)?.[1];
 }
 
-function appendHashes(policy: string, hashes: string[]): string {
+function appendHashes(contentPolicy: string, scriptHashes: string[]): string {
   const pattern = /(script-src-elem [^;]*)(;)/u;
-  const directive = pattern.exec(policy)?.[1];
-  if (directive === undefined) throw new Error('Content Security Policy is missing script-src-elem.');
-  const additions = hashes.filter((hash) => !directive.includes(hash));
-  return policy.replace(pattern, `$1 ${additions.join(' ')}$2`);
+  const directive = pattern.exec(contentPolicy)?.[1];
+  if (directive === undefined)
+    throw new Error("Content Security Policy is missing script-src-elem.");
+  const additions = scriptHashes.filter(
+    (scriptHash) => !directive.includes(scriptHash),
+  );
+  return contentPolicy.replace(
+    pattern,
+    (_match, before: string, after: string) =>
+      `${before} ${additions.join(" ")}${after}`,
+  );
 }
 
 function verifyCompactReference(
   paths: readonly string[],
   pages: readonly (readonly [string, string])[],
 ): void {
-  const forbiddenPath = paths.find((path) => /(^|\/)pagefind(\/|$)|(^|\/)llms-full\.txt$/iu.test(path));
-  if (forbiddenPath !== undefined) throw new Error(`Forbidden search or duplicate LLM artifact: ${forbiddenPath}`);
-  const forbiddenMarkup = pages.find(([, document]) => /data-pagefind|pagefind-ui|aria-keyshortcuts=["'][^"']*(?:Meta|Control|Mod)\+K/iu.test(document));
-  if (forbiddenMarkup !== undefined) throw new Error(`Search UI or Cmd/Ctrl-K shortcut found in ${forbiddenMarkup[0]}`);
+  const forbiddenPath = paths.find((path) =>
+    /(^|\/)pagefind(\/|$)|(^|\/)llms-full\.txt$/iu.test(path),
+  );
+  if (forbiddenPath !== undefined)
+    throw new Error(
+      `Forbidden search or duplicate LLM artifact: ${forbiddenPath}`,
+    );
+  const forbiddenMarkup = pages.find(([, document]) =>
+    /data-pagefind|pagefind-ui|aria-keyshortcuts=["'][^"']*(?:Meta|Control|Mod)\+K/iu.test(
+      document,
+    ),
+  );
+  if (forbiddenMarkup !== undefined)
+    throw new Error(
+      `Search UI or Cmd/Ctrl-K shortcut found in ${forbiddenMarkup[0]}`,
+    );
 }

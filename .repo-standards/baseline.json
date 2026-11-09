@@ -2,7 +2,7 @@
   "fingerprints": [],
   "include_warnings": true,
   "policy": "sarj",
-  "policy_version": 27,
+  "policy_version": 35,
   "repository_id": "repo-standards",
   "schema_version": 2,
   "scope_digest": "96b6c959c498c2c0b3fe38f1c9090d5fcd6e6c112ca81d60a2d556c2e70c032d"

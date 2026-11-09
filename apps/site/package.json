@@ -9,11 +9,14 @@
     "check": "npm run catalog && npm run typecheck",
     "deploy": "wrangler deploy",
     "dev": "npm run catalog && astro dev",
-    "lint": "npm run catalog && eslint . --max-warnings 0",
+    "lint": "npm run catalog && uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards --root ../.. check --trust-repository-code apps/site",
     "preview": "astro preview",
     "test": "node --test ./scripts/*.test.ts",
     "typecheck": "astro check && tsc --project tsconfig.node.json",
-    "verify:deployment": "node ./scripts/verify-deployment.ts"
+    "verify:deployment": "node ./scripts/verify-deployment.ts",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "sync": "astro sync"
   },
   "dependencies": {
     "@astrojs/starlight": "0.42.7",
@@ -24,15 +27,22 @@
     "@astrojs/check": "0.9.12",
     "@astrojs/sitemap": "3.7.4",
     "@eslint/js": "10.0.1",
-    "@sarj/eslint-plugin": "16.26.2",
+    "@sarj/eslint-plugin": "19.7.0",
     "@types/node": "26.6.5",
     "@typescript/native": "npm:typescript@7.0.2",
     "eslint": "10.13.0",
-    "eslint-plugin-astro": "3.2.1",
     "jiti": "2.7.0",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "typescript-eslint": "8.72.0",
-    "wrangler": "4.152.0"
+    "wrangler": "4.152.0",
+    "eslint-plugin-zod": "5.2.2",
+    "oxfmt": "0.76.0",
+    "oxlint": "1.91.0",
+    "oxlint-plugin-eslint": "1.91.0",
+    "oxlint-plugin-react-doctor": "0.9.22",
+    "parse5": "8.0.0",
+    "syncpack": "15.3.3",
+    "tsrs": "0.23.0-ts7.1.0-beta"
   },
   "engines": {
     "node": ">=24.12.0"

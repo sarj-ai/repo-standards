@@ -1,6 +1,6 @@
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL } from "node:url";
 
-import { SITE_URL } from '../src/lib/site.ts';
+import { SITE_URL } from "../src/lib/site.ts";
 
 const DEFAULT_BASE_URL = SITE_URL;
 const DEFAULT_ATTEMPTS = 10;
@@ -38,16 +38,23 @@ export async function verifyDeployment({
   pause = sleep,
 }: VerificationOptions): Promise<DeploymentHealth> {
   if (!/^[0-9a-f]{40}$/u.test(expectedCommit)) {
-    throw new TypeError('EXPECTED_COMMIT must be a full lowercase Git commit SHA');
+    throw new TypeError(
+      "EXPECTED_COMMIT must be a full lowercase Git commit SHA",
+    );
   }
   if (!Number.isSafeInteger(attempts) || attempts < 1) {
-    throw new TypeError('attempts must be a positive safe integer');
+    throw new TypeError("attempts must be a positive safe integer");
   }
 
-  let lastError: unknown = new Error('deployment verification did not run');
+  let lastError: unknown = new Error("deployment verification did not run");
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      return await deploymentAtAttempt({ expectedCommit, baseUrl, attempt, request });
+      return await deploymentAtAttempt({
+        expectedCommit,
+        baseUrl,
+        attempt,
+        request,
+      });
     } catch (error) {
       lastError = error;
       if (attempt < attempts) await pause(RETRY_DELAY_MS);
@@ -71,50 +78,57 @@ async function deploymentAtAttempt({
 }: AttemptOptions): Promise<DeploymentHealth> {
   const query = `?commit=${expectedCommit}&attempt=${String(attempt)}`;
   const [healthResponse, catalogResponse] = await Promise.all([
-    request(new globalThis.URL(`health.json${query}`, baseUrl), { cache: 'no-store' }),
-    request(new globalThis.URL(`api/catalog.json${query}`, baseUrl), { cache: 'no-store' }),
+    request(new globalThis.URL(`health.json${query}`, baseUrl), {
+      cache: "no-store",
+    }),
+    request(new globalThis.URL(`api/catalog.json${query}`, baseUrl), {
+      cache: "no-store",
+    }),
   ]);
   if (!healthResponse.ok || !catalogResponse.ok) {
-    throw new Error('reference endpoints are unavailable');
+    throw new Error("reference endpoints are unavailable");
   }
   const health = parseHealth(await healthResponse.json());
   const catalog = parseCatalog(await catalogResponse.json());
-  if (health.commit !== expectedCommit) throw new Error('deployed commit does not match');
+  if (health.commit !== expectedCommit)
+    throw new Error("deployed commit does not match");
   if (health.catalogDigest !== catalog.provenance["content_digest"]) {
-    throw new Error('deployed catalog digest does not match');
+    throw new Error("deployed catalog digest does not match");
   }
   return health;
 }
 
 function parseHealth(value: unknown): DeploymentHealth {
   if (
-    !isRecord(value)
-    || typeof value.commit !== 'string'
-    || typeof value.catalogDigest !== 'string'
+    !isRecord(value) ||
+    typeof value.commit !== "string" ||
+    typeof value.catalogDigest !== "string"
   ) {
-    throw new Error('health endpoint returned an invalid payload');
+    throw new Error("health endpoint returned an invalid payload");
   }
   return { catalogDigest: value.catalogDigest, commit: value.commit };
 }
 
 function parseCatalog(value: unknown): DeploymentCatalog {
   if (
-    !isRecord(value)
-    || !isRecord(value.provenance)
-    || typeof value.provenance["content_digest"] !== 'string'
+    !isRecord(value) ||
+    !isRecord(value.provenance) ||
+    typeof value.provenance["content_digest"] !== "string"
   ) {
-    throw new Error('catalog endpoint returned an invalid payload');
+    throw new Error("catalog endpoint returned an invalid payload");
   }
-  return { provenance: { "content_digest": value.provenance["content_digest"] } };
+  return {
+    provenance: { "content_digest": value.provenance["content_digest"] },
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === "object" && value !== null;
 }
 
 async function main(): Promise<void> {
   const health = await verifyDeployment({
-    expectedCommit: globalThis.process.env.EXPECTED_COMMIT ?? '',
+    expectedCommit: globalThis.process.env.EXPECTED_COMMIT ?? "",
   });
   globalThis.process.stdout.write(`verified ${health.commit}\n`);
 }
