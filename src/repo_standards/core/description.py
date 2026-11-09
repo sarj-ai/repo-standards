@@ -86,7 +86,9 @@ def analyze_description(body: str) -> DescriptionMetrics:
         elif token.type == "inline" and token.children is not None:
             prose.append(_inline_text(token.children))
         elif token.type == "html_block":
-            prose.append(_html_text(token.content))
+            text = _html_text(token.content)
+            if text.strip():
+                prose.append(text)
         elif token.type == "code_block":
             prose.append(token.content.rstrip())
     return DescriptionMetrics(
