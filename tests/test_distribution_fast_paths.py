@@ -80,7 +80,7 @@ def test_documentation_installs_overlap_and_either_failure_blocks_build(
     assert sorted(path.name for path in signals.iterdir()) == ["npm", "uv"]
 
 
-@pytest.mark.parametrize("failed_check", ["none", "eslint", "test", "typecheck"])
+@pytest.mark.parametrize("failed_check", ["none", "standards", "test", "typecheck"])
 def test_reference_checks_overlap_and_all_must_pass_before_build(
     tmp_path: Path, failed_check: str
 ) -> None:
@@ -88,18 +88,19 @@ def test_reference_checks_overlap_and_all_must_pass_before_build(
     commands = script[script.index("npm run catalog") :]
     stub = tmp_path / "npm"
     stub.write_text(
-        '#!/bin/sh\ncase "$*" in *catalog*) exit 0;; *eslint*) name=eslint;; '
+        '#!/bin/sh\ncase "$*" in *catalog*|*sync*) exit 0;; *standards*) name=standards;; '
         "*typecheck*) name=typecheck;; *test*) name=test;; *) "
-        'test -f "$SIGNALS/eslint.done" && test -f "$SIGNALS/test.done" '
+        'test -f "$SIGNALS/standards.done" && test -f "$SIGNALS/test.done" '
         '&& test -f "$SIGNALS/typecheck.done" || exit 9; '
         'touch "$SIGNALS/build"; exit 0;; esac\n'
         'touch "$SIGNALS/$name.started"\n'
-        'until test -f "$SIGNALS/eslint.started" && test -f "$SIGNALS/test.started" '
+        'until test -f "$SIGNALS/standards.started" && test -f "$SIGNALS/test.started" '
         '&& test -f "$SIGNALS/typecheck.started"; do sleep 0.01; done\n'
         'touch "$SIGNALS/$name.done"\n'
         '[ "$name" != "$FAIL_CHECK" ]\n'
     )
     stub.chmod(0o755)
+    (tmp_path / "uvx").symlink_to(stub)
     node = tmp_path / "node"
     node.write_text("#!/bin/sh\nexit 0\n")
     node.chmod(0o755)
@@ -118,7 +119,7 @@ def test_reference_checks_overlap_and_all_must_pass_before_build(
     )
     assert (process.returncode == 0) == (failed_check == "none"), process.stderr
     assert (tmp_path / "build").exists() is (failed_check == "none")
-    assert all((tmp_path / f"{name}.done").exists() for name in ["eslint", "test", "typecheck"])
+    assert all((tmp_path / f"{name}.done").exists() for name in ["standards", "test", "typecheck"])
 
 
 @pytest.mark.parametrize("failed_check", ["none", "ruff", "basedpyright", "python"])

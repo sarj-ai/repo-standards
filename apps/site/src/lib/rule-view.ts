@@ -1,6 +1,6 @@
-import { changedLineMarks } from '@sarj/design/line-diff';
+import { changedLineMarks } from "@sarj/design/line-diff";
 
-import type { Rule } from './catalog';
+import type { Rule } from "./catalog";
 
 export interface RuleExampleView {
   readonly exampleId: string;

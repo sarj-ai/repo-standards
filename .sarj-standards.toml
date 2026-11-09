@@ -1,11 +1,10 @@
 # Managed by `code-standards setup`; commit this file.
-bundle = "8.111.1"
+bundle = "9.11.0"
 rule_profile = "all"
 schema = 4
 
 [capabilities]
 disable = [
-  "eslint",
   "swiftformat",
   "swiftlint",
   "ktlint",
@@ -15,6 +14,7 @@ disable = [
   "checkov",
   "jscpd",
   "knip",
+  "sqlfluff",
 ]
 
 [artifacts]
@@ -33,4 +33,5 @@ manager = "pre-commit"
 diagnostics = "diagnostic-baseline.json"
 
 [ci]
-runner = "blacksmith-2vcpu-ubuntu-2404"
+bootstrap = ["npm --prefix apps/site run catalog", "npm --prefix apps/site run sync"]
+runner = "ubuntu-latest"

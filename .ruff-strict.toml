@@ -19,6 +19,10 @@ exclude                  = ["*.md"]
 select = ["ALL"]
 external = ["SARJ"]
 preview = true
+# S307 owns eval calls/references, S102 exec calls, and T100 debugger calls.
+# PLW0602/3/4 reject global statements, F403/6 reject star imports, and B006
+# rejects ordinary mutable defaults. Sarj closes bare dynamic-builtin,
+# reference-alias, annotated-default and import-path-mutation gaps.
 # Let Ruff's native UP037 own quoted annotations, including TYPE_CHECKING-only
 # imports. Its fix is intentionally unsafe when it must change annotation
 # evaluation semantics, so consumer baselines can grandfather existing debt.
@@ -247,6 +251,16 @@ warns-extend-require-match-for = [
 ]
 
 [lint.flake8-tidy-imports.banned-api]
+# TID251 owns qualified builtin access and imports. SARJ499/557 cover bare
+# references that Ruff's import-oriented banned-api check does not resolve.
+"builtins.locals".msg = "Pass local state explicitly in typed variables or data structures."
+"builtins.globals".msg = "Pass dependencies explicitly instead of inspecting or mutating the module namespace."
+"builtins.compile".msg = "Keep source as data; a required compiler boundary needs an explained local suppression."
+"builtins.__import__".msg = "Use explicit Python imports."
+"builtins.getattr".msg = "Use declared typed attributes or a typed mapping; a required plugin boundary needs an explained local suppression."
+"builtins.hasattr".msg = "Narrow the type or use an explicit contract; required feature detection needs an explained local suppression."
+"builtins.delattr".msg = "Represent state explicitly instead of deleting attributes dynamically."
+
 "unittest.mock.Mock".msg              = "Prefer real fixtures or hand-rolled fakes implementing the relevant ABC. If a mock is genuinely required, import with `# noqa: TID251 — <reason>`."
 "unittest.mock.AsyncMock".msg         = "Same as Mock."
 "unittest.mock.MagicMock".msg         = "Same as Mock."
@@ -265,6 +279,9 @@ warns-extend-require-match-for = [
 "os.getenv".msg                       = "Same — use a Pydantic Settings class instead of os.getenv."
 
 "fastapi.UploadFile".msg              = "Use a pre-signed URL so the client uploads directly to object storage."
+"fastapi.File".msg                    = "Use a pre-signed URL so the client uploads directly to object storage; accept object metadata instead of file bytes."
+"fastapi.param_functions.File".msg    = "Use a pre-signed URL so the client uploads directly to object storage; accept object metadata instead of file bytes."
+"fastapi.params.File".msg             = "Use a pre-signed URL so the client uploads directly to object storage; accept object metadata instead of file bytes."
 "pydantic.alias_generators.to_camel".msg = "Don't camelCase API contracts in the backend. Keep snake_case; transform on the frontend with Zod."
 "typing.cast".msg                     = "Prefer discriminated unions or `isinstance` narrowing over `cast`."
 "typing_extensions.cast".msg          = "Prefer discriminated unions or `isinstance` narrowing over `cast`."
@@ -289,7 +306,6 @@ warns-extend-require-match-for = [
 "futures".msg = "LIB017: Remove the obsolete futures backport on Python 3.14. Replace with concurrent.futures."
 "importlib_metadata".msg = "LIB013: Python 3.14 provides importlib.metadata. Replace with importlib.metadata."
 "importlib_resources".msg = "LIB014: Python 3.14 provides importlib.resources. Replace with importlib.resources."
-"logging".msg = "LIB023: Standards standardizes application logging on loguru, whose bound context carries correlation fields to every line; a second stdlib logger splits the logs. A loguru bridge that intercepts third-party stdlib records needs a local, reasoned TID251 suppression. Replace with loguru."
 "marshmallow".msg = "LIB007: Standards standardizes validation and serialization on Pydantic. Replace with Pydantic."
 "mock".msg = "LIB022: Python 3.14 provides unittest.mock. Replace with unittest.mock."
 "nose".msg = "LIB021: Nose is unmaintained; use pytest. Replace with pytest."

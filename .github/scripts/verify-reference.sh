@@ -5,7 +5,8 @@ set -euo pipefail
 export UV_NO_DEV=true
 cd "$(dirname "${BASH_SOURCE[0]}")/../../apps/site"
 npm run catalog
-npm exec --offline -- eslint . --max-warnings 0 &
+npm exec --offline -- astro sync
+uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards --root ../.. check --trust-repository-code apps/site &
 lint_pid=$!
 npm test &
 tests_pid=$!

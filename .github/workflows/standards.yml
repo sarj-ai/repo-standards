@@ -16,29 +16,74 @@ concurrency:
 
 jobs:
   standards:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: '0.13.5'
           enable-cache: true
           cache-dependency-glob: |
             .sarj-standards.toml
             **/uv.lock
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Activate declared npm version
+        run: npm install --global npm@12.2.1 --ignore-scripts
+      - name: Install JavaScript dependencies
+        run: npm ci --no-audit --no-fund --ignore-scripts
+        working-directory: "apps/site"
       - name: Install Python dependencies
         run: uv sync --locked
       - name: Install the pinned native tool bootstrap
         env:
           UV_PYTHON_DOWNLOADS_JSON_URL: https://raw.githubusercontent.com/astral-sh/uv/4ecd0eff2a81e3ffdcd7cfee10d08936e4747c17/crates/uv-python-managed/download-metadata.json
-        run: uv run --no-config --no-project --python 3.15.0 --with code-standards==8.111.1 python -m sarj_standards.libs.adoption.native_bootstrap
+        run: uv run --no-config --no-project --python 3.15.0 --with code-standards==9.11.0 python -m sarj_standards.libs.adoption.native_bootstrap
       - name: Install and attest applicable native tools
-        run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards setup --tools-only
-      - name: Run standards
         env:
-          SARJ_STANDARDS_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          GITHUB_TOKEN: ${{ github.server_url == 'https://github.com' && github.token || '' }}
+        run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards setup --tools-only
+      - name: Bootstrap analysis inputs
+        run: |
+          npm --prefix apps/site run catalog
+      - name: Bootstrap analysis inputs (2)
+        run: |
+          npm --prefix apps/site run sync
+      - name: Restore Standards results
+        id: standards-results
+        if: vars.STANDARDS_RESULT_CACHE != 'off'
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/standards-results
+          key: standards-results-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.sarj-standards.toml') }}-${{ github.sha }}
+          restore-keys: standards-results-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.sarj-standards.toml') }}-
+      - name: Run standards
+        shell: bash
+        env:
+          SARJ_STANDARDS_BASE: >-
+            ${{ !(github.event_name == 'push' && github.event.created &&
+            github.event.before == '0000000000000000000000000000000000000000') &&
+            (github.event.pull_request.base.sha || github.event.merge_group.base_sha ||
+            github.event.before) || '' }}
+          SARJ_STANDARDS_RESULT_CACHE: >-
+            ${{ vars.STANDARDS_RESULT_CACHE != 'off' && format('{0}/standards-results', runner.temp) || 'off' }}
+          SARJ_STANDARDS_RESULT_CACHE_WRITE: >-
+            ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && '1' || '' }}
         run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards check --trust-repository-code --format github
+      - name: Save trusted Standards results
+        if: vars.STANDARDS_RESULT_CACHE != 'off' && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/standards-results
+          key: ${{ steps.standards-results.outputs.cache-primary-key }}
