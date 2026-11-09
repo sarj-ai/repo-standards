@@ -23,6 +23,11 @@ OBJECT_MAPS = TypeAdapter(list[dict[str, object]])
     [
         pytest.param("", [], id="self-evident-empty-body"),
         pytest.param("x" * 500, [], id="prose-at-budget"),
+        pytest.param(
+            "x" * 250 + "\n\n<!-- hidden -->\n\n" + "y" * 249,
+            [],
+            id="empty-html-at-prose-budget",
+        ),
         pytest.param("x" * 501, ["body_prose_too_long"], id="prose-over-budget"),
         pytest.param(
             "```text\n" + "x" * 1989 + "\n```",

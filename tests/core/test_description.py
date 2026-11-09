@@ -76,6 +76,22 @@ def test_only_a_complete_top_level_bot_footer_is_removed(body: str, expected: st
         pytest.param(
             "<!-- instructions -->\nFix.", 4, 0, 0, id="hidden-instructions-still-raw-bounded"
         ),
+        pytest.param("A\n\n<!-- hidden -->\n\nB", 3, 0, 0, id="empty-html-between-paragraphs"),
+        pytest.param(
+            "A\n\n<details>\n<summary></summary>\n</details>\n\nB",
+            3,
+            0,
+            0,
+            id="empty-html-wrapper-between-paragraphs",
+        ),
+        pytest.param("A\n\n<pre> \t\n</pre>\n\nB", 3, 0, 0, id="whitespace-only-html-pre"),
+        pytest.param("<pre>A  \nB</pre>", 5, 0, 0, id="visible-html-pre-keeps-whitespace"),
+        pytest.param("A\n\n`   `\n\nB", 7, 0, 0, id="whitespace-only-code-span-is-retained"),
+        pytest.param("A\n\n`<!-- hidden -->`\n\nB", 19, 0, 0, id="comment-code-span-is-literal"),
+        pytest.param("A\n\n    \u00a0\n\nB", 3, 0, 0, id="indented-code-keeps-rstrip-contract"),
+        pytest.param(
+            "A\n\n    \u00a0\n    x\n\nB", 7, 0, 0, id="indented-code-keeps-interior-whitespace"
+        ),
         pytest.param("&lt;div&gt; &amp; done", 12, 0, 0, id="escaped-html-stays-visible"),
         pytest.param("```python\nvalue = 1\n```", 0, 1, 0, id="typed-example"),
         pytest.param("~~~sql\nSELECT 1;\n~~~~", 0, 1, 0, id="tilde-fence-with-longer-close"),
