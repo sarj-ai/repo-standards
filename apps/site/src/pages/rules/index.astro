@@ -3,16 +3,15 @@ import ReferencePage from '../../components/reference-page.astro';
 import RuleDirectory from '../../components/rule-directory.astro';
 import { referenceCatalog } from '../../lib/catalog';
 import { siteHref } from '../../lib/site';
+import Breadcrumbs from '@sarj/design/Breadcrumbs.astro';
 
 const rows = referenceCatalog.flatMap((category) => category.topics.flatMap((topic) => topic.rules));
 ---
 
 <ReferencePage title="Rules" description="Repository rules available for explicit activation.">
-  <header class="section-heading">
-    <p class="eyebrow">Repository checks</p>
-    <h1>Rules</h1>
-    <p class="lede">Find a check. Review the examples. Enable its stable ID.</p>
-    <p class="muted">All rules are opt-in. <a href={siteHref('/getting-started/#enable-rules')}>How to enable a rule</a></p>
+  <header class="directory-heading">
+    <h1 class="engineering-visually-hidden">Rules</h1>
+    <Breadcrumbs ancestors={[{ label: 'Repo Standards', href: siteHref('/') }]} current="Rules" />
   </header>
   <RuleDirectory rows={rows} />
 </ReferencePage>

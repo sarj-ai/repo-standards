@@ -13,6 +13,7 @@ export default defineConfig({
   base: SITE_BASE_PATH,
   outDir: `./dist${SITE_BASE_PATH}`,
   output: "static",
+  build: { inlineStylesheets: "never" },
   trailingSlash: "always",
   compressHTML: true,
   markdown: { syntaxHighlight: "prism" },
@@ -32,7 +33,10 @@ export default defineConfig({
         resources: [{ resource: "'self'", kind: "element" }],
       },
       styleDirective: {
-        resources: [{ resource: "'unsafe-inline'", kind: "attribute" }],
+        resources: [
+          { resource: "'self'", kind: "element" },
+          { resource: "'unsafe-inline'", kind: "attribute" },
+        ],
       },
     },
   },
@@ -49,12 +53,6 @@ export default defineConfig({
       title: "Sarj Repo Standards",
       description: "Deterministic repository policy and contract analysis.",
       favicon: "/favicon.ico",
-      logo: {
-        alt: "Sarj",
-        dark: "./public/sarj-logo-dark.webp",
-        light: "./public/sarj-logo-light.webp",
-        replacesTitle: true,
-      },
       disable404Route: true,
       customCss: ["./src/styles/global.css"],
       sidebar: [
@@ -76,6 +74,7 @@ export default defineConfig({
       tableOfContents: false,
       credits: false,
       components: {
+        Head: "./src/components/engineering-head.astro",
         Search: "./src/components/disabled-feature.astro",
         TableOfContents: "./src/components/disabled-feature.astro",
         MobileTableOfContents: "./src/components/disabled-feature.astro",

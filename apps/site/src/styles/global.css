@@ -331,62 +331,9 @@ main :is(a, button, input, select, summary):focus-visible {
   padding-block: 3rem;
 }
 
-.rule-directory {
-  padding-top: 1.25rem;
-}
-.directory-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-.directory-filters[hidden] {
-  display: none;
-}
-.directory-field {
-  display: grid;
-  min-width: 0;
-  flex: 1 1 9rem;
-  gap: 0.4rem;
-  font-size: 0.85rem;
-  font-weight: 700;
-}
-.directory-filters .directory-search {
-  flex-basis: 100%;
-}
-.directory-filters :is(input, select, button) {
-  min-width: 0;
-  min-height: 44px;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--sl-color-gray-4);
-  border-radius: 0.35rem;
-  background: var(--sl-color-black);
-  color: var(--sl-color-white);
-  font: inherit;
-}
-.directory-filters :is(.directory-field, label, input, select, button) {
-  margin: 0;
-}
-.directory-filters :is(input, select, button):focus-visible {
-  outline: 2px solid var(--sl-color-accent);
-  outline-offset: 2px;
-}
-.directory-filters input::placeholder {
-  color: var(--sl-color-gray-2);
-  opacity: 1;
-}
-.directory-filters button {
-  color: var(--sl-color-accent-high);
-  cursor: pointer;
-}
-.directory-toolbar p,
 .rule-row__introduced {
   color: var(--sl-color-gray-2);
   font: 0.75rem/1.5 var(--sl-font-mono);
-}
-.directory-toolbar p {
-  margin-block: 0 0.75rem;
 }
 .directory-empty {
   padding: 1.5rem;
@@ -642,85 +589,5 @@ main :is(a, button, input, select, summary):focus-visible {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
-  }
-}
-
-/* Shared reading defaults for generated documentation. */
-:root {
-  --sl-font: ui-sans-serif, system-ui, sans-serif;
-  --sl-font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
-}
-html {
-  scroll-behavior: auto;
-  scroll-padding-block-start: calc(var(--sl-nav-height) + 1.5rem);
-}
-main {
-  min-inline-size: 0;
-}
-main :is(h1, h2, h3, h4) {
-  overflow-wrap: anywhere;
-}
-main :is(img, video) {
-  max-inline-size: 100%;
-  block-size: auto;
-}
-.sidebar-content a {
-  min-block-size: 2.75rem;
-  display: flex;
-  align-items: center;
-}
-@media (forced-colors: active) {
-  :focus-visible {
-    outline: 2px solid Highlight;
-    outline-offset: 3px;
-  }
-}
-@media print {
-  :root,
-  :root[data-theme="dark"] {
-    color-scheme: light;
-    --sl-color-black: #fff;
-    --sl-color-white: #000;
-    --sl-color-gray-1: #111;
-    --sl-color-gray-2: #222;
-    --sl-color-gray-3: #444;
-    --sl-content-inline-start: 0rem;
-    --sl-sidebar-width: 0rem;
-    --sl-content-width: 100%;
-  }
-  body,
-  .main-pane {
-    color: #000;
-    background: #fff;
-  }
-  main pre,
-  main code,
-  main pre span {
-    color: #000 !important;
-    background: transparent !important;
-  }
-  .page > header,
-  .sidebar-pane,
-  starlight-menu-button,
-  .pagination-links {
-    display: none;
-  }
-  .main-frame,
-  .main-pane {
-    margin: 0;
-    padding: 0;
-  }
-  main {
-    max-inline-size: none;
-  }
-  pre {
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  :is(h1, h2, h3) {
-    break-after: avoid;
-  }
-  :is(pre, table, figure) {
-    break-inside: avoid;
   }
 }

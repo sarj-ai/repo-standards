@@ -20,27 +20,27 @@ const orderedRows = rows.toSorted((left, right) => compareRules(
 ---
 
 <div class="rule-directory">
-  <form class="directory-filters" data-rule-filters role="search" aria-label="Filter rules" hidden>
-    <div class="directory-field directory-search">
-      <label for="rule-query">Search rules</label>
-      <input id="rule-query" type="search" name="q" placeholder="Name, ID, or keyword…" maxlength="200" autocomplete="off" aria-controls="rule-results" />
-    </div>
-    <div class="directory-field">
-      <label for="rule-topic">Topic</label>
-      <select id="rule-topic" name="topic"><option value="">All topics</option>{topics.map(([id, label]) => <option value={id}>{label}</option>)}</select>
-    </div>
-    <div class="directory-field">
-      <label for="rule-severity">Severity</label>
-      <select id="rule-severity" name="severity"><option value="">All severities</option><option value="error">Error</option><option value="warning">Warning</option></select>
-    </div>
-    <div class="directory-field">
-      <label for="rule-sort">Sort by</label>
-      <select id="rule-sort" name="sort" data-rule-sort><option value="name">Rule name</option><option value="newest">Introduced: newest first</option><option value="oldest">Introduced: oldest first</option></select>
-    </div>
-    <button type="reset">Clear filters</button>
-  </form>
   <div class="directory-toolbar">
     <p role="status" aria-live="polite" aria-atomic="true" data-rule-count>{rows.length} {rows.length === 1 ? 'rule' : 'rules'}</p>
+    <form class="directory-filters" data-rule-filters role="search" aria-label="Filter rules" hidden>
+      <div class="directory-field directory-search">
+        <label class="engineering-visually-hidden" for="rule-query">Search rules</label>
+        <input id="rule-query" type="search" name="q" placeholder="Search rules…" maxlength="200" autocomplete="off" aria-controls="rule-results" />
+      </div>
+      <div class="directory-field">
+        <label class="engineering-visually-hidden" for="rule-topic">Topic</label>
+        <select id="rule-topic" name="topic"><option value="">All topics</option>{topics.map(([id, label]) => <option value={id}>{label}</option>)}</select>
+      </div>
+      <div class="directory-field">
+        <label class="engineering-visually-hidden" for="rule-severity">Severity</label>
+        <select id="rule-severity" name="severity"><option value="">All severities</option><option value="error">Error</option><option value="warning">Warning</option></select>
+      </div>
+      <div class="directory-field">
+        <label class="engineering-visually-hidden" for="rule-sort">Sort by</label>
+        <select id="rule-sort" name="sort" data-rule-sort><option value="name">Name</option><option value="newest">Newest</option><option value="oldest">Oldest</option></select>
+      </div>
+      <button type="reset">Clear</button>
+    </form>
   </div>
   <p class="directory-empty" data-rule-empty hidden>No matching rules. Try fewer words or clear the filters.</p>
   <ul class="rule-table" id="rule-results" data-rule-list>
