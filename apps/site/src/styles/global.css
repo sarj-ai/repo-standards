@@ -365,6 +365,13 @@ main :is(a, button, input, select, summary):focus-visible {
   color: var(--sl-color-white);
   font: inherit;
 }
+.directory-filters :is(.directory-field, label, input, select, button) {
+  margin: 0;
+}
+.directory-filters :is(input, select, button):focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
 .directory-filters input::placeholder {
   color: var(--sl-color-gray-2);
   opacity: 1;
@@ -635,5 +642,85 @@ main :is(a, button, input, select, summary):focus-visible {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+}
+
+/* Shared reading defaults for generated documentation. */
+:root {
+  --sl-font: ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+html {
+  scroll-behavior: auto;
+  scroll-padding-block-start: calc(var(--sl-nav-height) + 1.5rem);
+}
+main {
+  min-inline-size: 0;
+}
+main :is(h1, h2, h3, h4) {
+  overflow-wrap: anywhere;
+}
+main :is(img, video) {
+  max-inline-size: 100%;
+  block-size: auto;
+}
+.sidebar-content a {
+  min-block-size: 2.75rem;
+  display: flex;
+  align-items: center;
+}
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 3px;
+  }
+}
+@media print {
+  :root,
+  :root[data-theme="dark"] {
+    color-scheme: light;
+    --sl-color-black: #fff;
+    --sl-color-white: #000;
+    --sl-color-gray-1: #111;
+    --sl-color-gray-2: #222;
+    --sl-color-gray-3: #444;
+    --sl-content-inline-start: 0rem;
+    --sl-sidebar-width: 0rem;
+    --sl-content-width: 100%;
+  }
+  body,
+  .main-pane {
+    color: #000;
+    background: #fff;
+  }
+  main pre,
+  main code,
+  main pre span {
+    color: #000 !important;
+    background: transparent !important;
+  }
+  .page > header,
+  .sidebar-pane,
+  starlight-menu-button,
+  .pagination-links {
+    display: none;
+  }
+  .main-frame,
+  .main-pane {
+    margin: 0;
+    padding: 0;
+  }
+  main {
+    max-inline-size: none;
+  }
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  :is(h1, h2, h3) {
+    break-after: avoid;
+  }
+  :is(pre, table, figure) {
+    break-inside: avoid;
   }
 }
