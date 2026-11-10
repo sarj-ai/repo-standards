@@ -7,7 +7,11 @@ import { catalog } from '../lib/catalog';
 <ReferencePage title="Page not found" description={catalog.product.summary} hasSidebar={false} noindex>
   <div class="not-found">
     <h1>Page not found</h1>
-    <p>That address does not match a page.</p>
-    <a class="primary-action" href={siteHref("/rules/")}>Browse rules</a>
+    <p>This page may have moved. Choose a starting point below.</p>
+    <div class="hero-actions">
+      <a class="primary-action" href={siteHref('/getting-started/')}>Get started</a>
+      <a class="secondary-action" href={siteHref('/rules/')}>Find a rule</a>
+      <a class="secondary-action" href={siteHref('/cli/')}>CLI reference</a>
+    </div>
   </div>
 </ReferencePage>

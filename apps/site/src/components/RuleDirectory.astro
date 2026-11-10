@@ -8,6 +8,10 @@ interface Props {
 }
 
 const { rows } = Astro.props;
+const topics = [...new Map(rows.map(({ rule, topic }) => [rule["topic_id"], topic]))];
+function ruleSummary(description: string): string {
+  return description.split(/(?<=[.!?])\s+(?=[A-Z])/u)[0] ?? description;
+}
 const orderedRows = rows.toSorted((left, right) => compareRules(
   { name: left.rule.title, key: left.rule["rule_id"], introducedAt: left.introduction?.introducedAt ?? null },
   { name: right.rule.title, key: right.rule["rule_id"], introducedAt: right.introduction?.introducedAt ?? null },
@@ -16,21 +20,40 @@ const orderedRows = rows.toSorted((left, right) => compareRules(
 ---
 
 <div class="rule-directory">
+  <form class="directory-filters" data-rule-filters role="search" aria-label="Filter rules" hidden>
+    <div class="directory-field directory-search">
+      <label for="rule-query">Search rules</label>
+      <input id="rule-query" type="search" name="q" placeholder="Name, ID, or keyword…" maxlength="200" autocomplete="off" aria-controls="rule-results" />
+    </div>
+    <div class="directory-field">
+      <label for="rule-topic">Topic</label>
+      <select id="rule-topic" name="topic"><option value="">All topics</option>{topics.map(([id, label]) => <option value={id}>{label}</option>)}</select>
+    </div>
+    <div class="directory-field">
+      <label for="rule-severity">Severity</label>
+      <select id="rule-severity" name="severity"><option value="">All severities</option><option value="error">Error</option><option value="warning">Warning</option></select>
+    </div>
+    <div class="directory-field">
+      <label for="rule-sort">Sort by</label>
+      <select id="rule-sort" name="sort" data-rule-sort><option value="name">Rule name</option><option value="newest">Introduced: newest first</option><option value="oldest">Introduced: oldest first</option></select>
+    </div>
+    <button type="reset">Clear filters</button>
+  </form>
   <div class="directory-toolbar">
-    <p>{rows.length} {rows.length === 1 ? 'rule' : 'rules'}</p>
-    <label>Sort by<select data-rule-sort><option value="name">Rule name</option><option value="newest">Introduced: newest first</option><option value="oldest">Introduced: oldest first</option></select></label>
+    <p role="status" aria-live="polite" aria-atomic="true" data-rule-count>{rows.length} {rows.length === 1 ? 'rule' : 'rules'}</p>
   </div>
-  <ul class="rule-table" data-rule-list>
-    {orderedRows.map(({ rule, href, category, introduction }) => (
-      <li data-rule-key={rule["rule_id"]} data-rule-name={rule.title} data-introduced-at={introduction?.introducedAt}>
+  <p class="directory-empty" data-rule-empty hidden>No matching rules. Try fewer words or clear the filters.</p>
+  <ul class="rule-table" id="rule-results" data-rule-list>
+    {orderedRows.map(({ rule, href, category, topic, introduction }) => (
+      <li data-rule-key={rule["rule_id"]} data-rule-name={rule.title} data-introduced-at={introduction?.introducedAt} data-topic={rule["topic_id"]} data-severity={rule["default_severity"]} data-search={`${rule.title} ${rule.description} ${rule["rule_id"]} ${category} ${topic}`}>
         <a class="rule-row" href={href} data-rule-id={rule["rule_id"]}>
           <RuleTypeMark categoryId={rule["category_id"]} label={category} />
           <span class="rule-row__main">
             <strong>{rule.title}</strong>
-            <span>{rule.description}</span>
+            <span>{ruleSummary(rule.description)}</span>
             <small class="rule-row__introduced">Introduced {introduction ? <time datetime={introduction.introducedAt}>{introduction.introducedAt.slice(0, 10)}</time> : 'date unavailable'}</small>
           </span>
-          <code>{rule.slug}</code>
+          <code title={rule["rule_id"]}>{rule.slug}</code>
           <span class:list={['severity', `severity--${rule["default_severity"]}`]}>{rule["default_severity"]}</span>
         </a>
       </li>
@@ -44,20 +67,58 @@ const orderedRows = rows.toSorted((left, right) => compareRules(
   for (const directory of document.querySelectorAll('.rule-directory')) {
     if (!(directory instanceof HTMLElement) || directory.dataset.sortReady === 'true') continue;
     directory.dataset.sortReady = 'true';
+    const form = directory.querySelector('[data-rule-filters]');
+    const search = directory.querySelector('input[name="q"]');
+    const topic = directory.querySelector('select[name="topic"]');
+    const severity = directory.querySelector('select[name="severity"]');
     const select = directory.querySelector('[data-rule-sort]');
     const list = directory.querySelector('[data-rule-list]');
-    if (!(select instanceof HTMLSelectElement) || !(list instanceof HTMLUListElement)) continue;
+    const count = directory.querySelector('[data-rule-count]');
+    const empty = directory.querySelector('[data-rule-empty]');
+    if (!(form instanceof HTMLFormElement) || !(search instanceof HTMLInputElement) || !(topic instanceof HTMLSelectElement) || !(severity instanceof HTMLSelectElement) || !(select instanceof HTMLSelectElement) || !(list instanceof HTMLUListElement) || !(count instanceof HTMLElement) || !(empty instanceof HTMLElement)) continue;
     const rows = [...list.children].filter((row): row is HTMLLIElement => row instanceof HTMLLIElement);
-    select.value = ruleSort(new URLSearchParams(location.search).get('sort'));
     const apply = () => {
       const selected = ruleSort(select.value);
+      const query = search.value.trim();
+      const words = query.toLocaleLowerCase('en').split(/\s+/u).filter(Boolean);
       const key = (row: HTMLLIElement) => ({ name: row.dataset.ruleName ?? '', key: row.dataset.ruleKey ?? '', introducedAt: row.dataset.introducedAt ?? null });
       list.append(...rows.toSorted((left, right) => compareRules(key(left), key(right), selected)));
+      let visible = 0;
+      for (const row of rows) {
+        const text = (row.dataset.search ?? '').toLocaleLowerCase('en');
+        row.hidden = !words.every((word) => text.includes(word)) || (topic.value !== '' && topic.value !== row.dataset.topic) || (severity.value !== '' && severity.value !== row.dataset.severity);
+        if (!row.hidden) visible += 1;
+      }
+      count.textContent = `${visible} of ${rows.length} rules`;
+      empty.hidden = visible !== 0;
+      list.hidden = visible === 0;
       const next = new URL(location.href);
-      selected !== 'name' ? next.searchParams.set('sort', selected) : next.searchParams.delete('sort');
+      for (const [name, value] of [['q', query], ['topic', topic.value], ['severity', severity.value], ['sort', selected === 'name' ? '' : selected]]) {
+        value ? next.searchParams.set(name, value) : next.searchParams.delete(name);
+      }
       history.replaceState(null, '', next);
     };
-    select.addEventListener('change', apply);
-    apply();
+    const restore = () => {
+      const params = new URLSearchParams(location.search);
+      search.value = (params.get('q') ?? '').slice(0, 200);
+      topic.value = params.get('topic') ?? '';
+      severity.value = params.get('severity') ?? '';
+      select.value = ruleSort(params.get('sort'));
+      apply();
+    };
+    form.addEventListener('submit', (event) => { event.preventDefault(); apply(); });
+    form.addEventListener('input', apply);
+    form.addEventListener('reset', (event) => {
+      event.preventDefault();
+      search.value = '';
+      topic.value = '';
+      severity.value = '';
+      select.value = 'name';
+      apply();
+      search.focus();
+    });
+    window.addEventListener('popstate', restore);
+    form.hidden = false;
+    restore();
   }
 </script>

@@ -50,6 +50,7 @@ export interface RuleView {
   readonly rule: Rule;
   readonly href: string;
   readonly category: string;
+  readonly topic: string;
   readonly introduction: RuleIntroduction | null;
 }
 
@@ -91,6 +92,7 @@ export const referenceCatalog: readonly CategoryView[] = catalog.categories
             rule,
             href: ruleHref(rule),
             category: categoryValue.label,
+            topic: topicValue.label,
             introduction: introductions.get(rule["rule_id"]) ?? null,
           }));
         if (rules.length === 0)
@@ -138,7 +140,8 @@ export function rulePage(rule: Rule) {
 
 export function referenceSidebar() {
   return [
-    { label: "About", link: "/" },
+    { label: "Overview", link: "/" },
+    { label: "Getting started", link: "/getting-started/" },
     {
       label: "Rules",
       items: [

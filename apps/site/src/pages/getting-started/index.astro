@@ -1,0 +1,78 @@
+---
+import { Code } from '@astrojs/starlight/components';
+
+import ReferencePage from '../../components/ReferencePage.astro';
+import { siteHref } from '../../lib/site';
+
+const setup = 'uvx --no-config --isolated --python 3.14 --from code-standards code-standards setup\ncode-standards doctor';
+const standalone = 'uv tool install repo-standards\nrepo-standards pull-request size . --base origin/main';
+const manifest = 'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]';
+const workflow = `name: Pull-request size
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  size:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: sarj-ai/repo-standards@9ec36427f34bab43589129d85d571dd476061c8e # v6.22.3`;
+---
+
+<ReferencePage title="Getting started" description="Set up local hooks, run a size check, and explicitly enable reviewed repository rules.">
+  <article class="guide-page">
+    <header class="section-heading">
+      <p class="eyebrow">Setup</p>
+      <h1>Getting started</h1>
+      <p class="lede">Start with local feedback. Enable repository rules when you are ready.</p>
+    </header>
+
+    <nav class="command-index" aria-label="On this page">
+      <a href="#install">1. Install</a><a href="#enable-rules">2. Choose rules</a><a href="#ci">3. Add CI</a>
+    </nav>
+
+    <section id="install" aria-labelledby="install-heading">
+      <h2 id="install-heading">1. Install local checks</h2>
+      <p>Install <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a>, then run from your Git repository. Sarj repositories use the shared Code Standards setup:</p>
+      <Code code={setup} lang="bash" frame="terminal" wrap />
+      <p>This installs staged repository checks, commit-message validation, and the pull-request history workflow in one environment.</p>
+      <details class="disclosure">
+        <summary>Standalone installation</summary>
+        <p>For consumers using Repo Standards directly:</p>
+        <Code code={standalone} lang="bash" frame="terminal" wrap />
+        <p>Replace <code>origin/main</code> with your target branch. Upgrade with <code>uv tool upgrade repo-standards</code>; pin the package version in automation.</p>
+      </details>
+    </section>
+
+    <section id="enable-rules" aria-labelledby="enable-rules-heading">
+      <h2 id="enable-rules-heading">2. Choose repository rules</h2>
+      <p>Rules are disabled by default. <a href={siteHref('/rules/')}>Review a rule and its examples</a>, then add its stable ID to <code>.repo-standards/repository.toml</code>:</p>
+      <Code code={manifest} lang="toml" frame="none" wrap />
+      <Code code="repo-standards check ." lang="bash" frame="terminal" />
+      <p>The manifest must be tracked in Git. Checks read committed <code>HEAD</code>; use <code>--staged</code> after staging both the manifest and files to check the index.</p>
+      <p class="muted">The installed release supplies the implementation. IDs stay versionless. <code>--enable-rule</code> selects a rule for one run.</p>
+    </section>
+
+    <section id="ci" aria-labelledby="ci-heading">
+      <h2 id="ci-heading">3. Measure pull-request size in CI</h2>
+      <p>Save this workflow in <code>.github/workflows/pr-size.yml</code>. The size Action enables no repository rules; thresholds, labels, and approvals remain consumer policy.</p>
+      <details class="disclosure">
+        <summary>GitHub Actions workflow</summary>
+        <Code code={workflow} lang="yaml" frame="none" wrap />
+      </details>
+      <p>Keep the full commit pins and complete Git history. Use <code>pull_request</code>; the size metric is not a security gate.</p>
+      <p>To exclude generated files, commit the attribute in the trusted base revision:</p>
+      <Code code="path/to/generated/** pr-size-excluded" lang="text" frame="none" wrap />
+    </section>
+
+    <aside class="callout" aria-labelledby="next-step">
+      <h2 id="next-step">Next: prepare a pull request</h2>
+      <p><a href={siteHref('/git-policies/')}>Git policies</a> covers headers, descriptions, and history. Use the <a href={siteHref('/cli/')}>CLI reference</a> for command options.</p>
+    </aside>
+  </article>
+</ReferencePage>

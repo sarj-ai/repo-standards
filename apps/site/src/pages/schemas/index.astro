@@ -2,19 +2,29 @@
 import { siteHref } from '../../lib/site';
 import ReferencePage from '../../components/ReferencePage.astro';
 import { catalog } from '../../lib/catalog';
+import { Code } from '@astrojs/starlight/components';
+
+const descriptions: Readonly<Record<string, string>> = {
+  baseline: 'Record reviewed findings for future ratchet comparisons.',
+  report: 'Validate repository findings, completion state, and provenance.',
+  catalog: 'Discover the public rules, commands, and machine contracts.',
+};
 ---
 
 <ReferencePage title="Schemas" description={`${catalog.schemas.length} machine contracts.`}>
-  <h1 class="sarj-visually-hidden">Schemas</h1>
+  <header class="section-heading">
+    <p class="eyebrow">Machine-readable reference</p>
+    <h1>Schemas</h1>
+    <p class="lede">Validate reports, baselines, and the public catalog with JSON Schema.</p>
+    <p><a href={siteHref('/api/catalog.json')}>Open catalog JSON</a> · <a href={siteHref('/api/catalog.schema.json')}>Catalog schema</a></p>
+  </header>
   <div class="schema-list">
     {catalog.schemas.map((schema) => (
       <article>
         <h2>{schema.title}</h2>
-        <dl class="metadata">
-          <dt>ID</dt><dd><code>{schema["schema_id"]}</code></dd>
-          <dt>CLI</dt><dd><code>repo-standards schema {schema["cli_selector"]}</code></dd>
-        </dl>
-        <a href={siteHref(`/api/schemas/${encodeURIComponent(schema["schema_id"])}.schema.json`)}>JSON Schema</a>
+        <p>{descriptions[schema["schema_id"]]}</p>
+        <Code code={`repo-standards schema ${schema["cli_selector"]}`} lang="bash" frame="none" wrap />
+        <a href={siteHref(`/api/schemas/${encodeURIComponent(schema["schema_id"])}.schema.json`)}>Open {schema["schema_id"]} JSON Schema <span aria-hidden="true">↗</span></a>
       </article>
     ))}
   </div>

@@ -10,6 +10,7 @@ const lines = [
   "",
   "## Reference",
   "",
+  `- [Getting started](${siteUrl("/getting-started/")})`,
   `- [Rules](${siteUrl("/rules/")})`,
   `- [Git policies](${siteUrl("/git-policies/")})`,
   `- [CLI](${siteUrl("/cli/")})`,

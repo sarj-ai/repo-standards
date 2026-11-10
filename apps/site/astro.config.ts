@@ -58,7 +58,8 @@ export default defineConfig({
       disable404Route: true,
       customCss: ["./src/styles/global.css"],
       sidebar: [
-        { label: "About", link: "/" },
+        { label: "Overview", link: "/" },
+        { label: "Getting started", link: "/getting-started/" },
         { label: "Rules", link: "/rules/" },
         { label: "Git policies", link: "/git-policies/" },
         { label: "CLI", link: "/cli/" },
