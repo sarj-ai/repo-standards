@@ -1,17 +1,7 @@
 ---
 import { siteHref } from '../lib/site';
-import { Code } from '@astrojs/starlight/components';
 
 import ReferencePage from '../components/reference-page.astro';
-import { catalog } from '../lib/catalog';
-
-const quickStart = `uvx --from ${catalog.product.distribution} repo-standards pull-request size . --base origin/main`;
-const tasks = [
-  { href: '/rules/', title: 'Find a rule', description: 'Search checks, compare examples, and choose what to enable.', meta: `${catalog.rules.length} opt-in rules` },
-  { href: '/git-policies/', title: 'Prepare a pull request', description: 'Check commit headers, PR descriptions, and review history.', meta: 'Local hooks + CI' },
-  { href: '/cli/', title: 'Run a command', description: 'Start with an example, then inspect options and defaults.', meta: `${catalog.commands.length} commands` },
-  { href: '/schemas/', title: 'Build an integration', description: 'Read the catalog and validate reports or baselines.', meta: 'JSON contracts' },
-];
 ---
 
 <ReferencePage title="Repo Standards" description="Check repository structure, pull-request size, and Git policies from exact Git evidence.">
@@ -25,40 +15,5 @@ const tasks = [
         <a class="secondary-action" href={siteHref('/rules/')}>Browse rules</a>
       </div>
     </header>
-
-    <section aria-labelledby="quick-start">
-      <h2 id="quick-start">Try a size check</h2>
-      <p>Run from a Git repository with <code>uv</code> installed. Use your target branch in place of <code>origin/main</code>.</p>
-      <Code code={quickStart} lang="bash" frame="terminal" wrap />
-      <p class="muted">Reports counted, excluded, and total changed lines. Repository rules stay disabled until you enable them.</p>
-    </section>
-
-    <section aria-labelledby="find-your-path">
-      <h2 id="find-your-path">What do you need to do?</h2>
-      <div class="task-grid">
-        {tasks.map((task) => (
-          <a class="task-card" href={siteHref(task.href)}>
-            <span class="eyebrow">{task.meta}</span>
-            <h3>{task.title} <span aria-hidden="true">↗</span></h3>
-            <p>{task.description}</p>
-          </a>
-        ))}
-      </div>
-    </section>
-
-    <section aria-labelledby="how-it-works">
-      <h2 id="how-it-works">From Git evidence to a finding</h2>
-      <ol class="process-flow">
-        <li><strong>Read</strong><span>One exact Git tree or staged index.</span></li>
-        <li><strong>Check</strong><span>The rules and policy you selected.</span></li>
-        <li><strong>Report</strong><span>Findings and any missing evidence.</span></li>
-      </ol>
-      <p class="muted">Repository checks parse files as data without executing repository code.</p>
-    </section>
-
-    <section aria-labelledby="related-standards">
-      <h2 id="related-standards">Choosing the right standards</h2>
-      <p>File placement, tracked artifacts, and Git evidence belong here. For source and configuration semantics, use <a href="https://engineering.sarj.ai/projects/code-standards/">Code Standards</a>.</p>
-    </section>
   </article>
 </ReferencePage>
