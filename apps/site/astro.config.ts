@@ -76,7 +76,11 @@ export default defineConfig({
       tableOfContents: false,
       credits: false,
       components: {
-        PageTitle: "./src/components/PageTitle.astro",
+        Search: "./src/components/disabled-feature.astro",
+        TableOfContents: "./src/components/disabled-feature.astro",
+        MobileTableOfContents: "./src/components/disabled-feature.astro",
+        SiteTitle: "./src/components/project-navigation.astro",
+        PageTitle: "./src/components/page-title.astro",
       },
     }),
   ],

@@ -24,8 +24,6 @@ export function compareRules(
     );
     if (dates !== 0) return order === "newest" ? -dates : dates;
   }
-  return (
-    left.name.localeCompare(right.name, "en") ||
-    left.key.localeCompare(right.key, "en")
-  );
+  const names = left.name.localeCompare(right.name, "en");
+  return names === 0 ? left.key.localeCompare(right.key, "en") : names;
 }

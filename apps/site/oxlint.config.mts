@@ -49,7 +49,10 @@ export default defineConfig({
         "scripts/finalize-cloudflare-artifacts.ts",
         "scripts/verify-deployment.ts",
       ],
-      rules: { "@sarj/no-runtime-typeof": "off" },
+      rules: {
+        "@sarj/no-runtime-typeof": "off",
+        "@sarj/no-explicit-type-predicate": "off",
+      },
     },
     {
       // The retry waits for each result; history workers each own one Git process.
