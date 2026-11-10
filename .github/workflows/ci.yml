@@ -121,11 +121,9 @@ jobs:
           version: '0.13.5'
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - name: Render exact main release identity
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Render exact release identity
         run: >-
-          python release_reconciliation.py prepare-readme --readme README.md
-          --version "$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          uv run --frozen --no-dev --group artifacts python release_readme.py --readme README.md
           --source-sha "$GITHUB_SHA"
       - name: Build distribution
         run: uv build --no-sources --out-dir dist/repo-standards

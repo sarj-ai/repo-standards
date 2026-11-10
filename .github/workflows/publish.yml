@@ -101,6 +101,11 @@ jobs:
           python ci_artifacts.py --repository "$GITHUB_REPOSITORY" --sha "$SOURCE_SHA"
           --kind packages --destination "$RUNNER_TEMP/tested-repo-standards"
           --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Keep current release documentation tooling
+        if: needs.detect.outputs.artifact_source == 'build' && steps.reuse.outputs.reused != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/repo-standards-release-tools"
+          cp release_readme.py release_reconciliation.py "$RUNNER_TEMP/repo-standards-release-tools/"
       - name: Check out release revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -130,7 +135,7 @@ jobs:
       - name: Render exact release identity
         if: needs.detect.outputs.artifact_source == 'build' && steps.reuse.outputs.reused != 'true'
         run: >-
-          python release_reconciliation.py prepare-readme
+          uv run --no-sync python "$RUNNER_TEMP/repo-standards-release-tools/release_readme.py"
           --readme README.md
           --version "${{ needs.detect.outputs.version }}"
           --source-sha "${{ needs.detect.outputs.source_sha }}"
