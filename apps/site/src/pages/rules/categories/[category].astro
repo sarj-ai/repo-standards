@@ -20,10 +20,9 @@ const ruleCount = category.ruleCount;
 ---
 
 <ReferencePage title={category.category.label} description={`${ruleCount} repository rules.`}>
-  <Breadcrumbs ancestors={[{ label: 'Rules', href: siteHref('/rules/') }]} current={category.category.label} />
-  <header class="section-heading">
-    <h1>{category.category.label}</h1>
-    <p class="lede">{ruleCount} opt-in checks for tracked repository artifacts and documentation.</p>
+  <header class="directory-heading">
+    <h1 class="engineering-visually-hidden">{category.category.label}</h1>
+    <Breadcrumbs ancestors={[{ label: 'Rules', href: siteHref('/rules/') }]} current={category.category.label} />
   </header>
   <div class="rule-catalog" data-category-id={category.category["category_id"]}>
     <RuleDirectory rows={rows} />
