@@ -130,7 +130,7 @@ jobs:
       - name: Render exact release identity
         if: needs.detect.outputs.artifact_source == 'build' && steps.reuse.outputs.reused != 'true'
         run: >-
-          python release_reconciliation.py prepare-readme
+          uv run --frozen --no-dev --group artifacts python release_readme.py
           --readme README.md
           --version "${{ needs.detect.outputs.version }}"
           --source-sha "${{ needs.detect.outputs.source_sha }}"
