@@ -1,6 +1,7 @@
 ---
 import { siteHref } from '../../lib/site';
 import RulePager from '@sarj/design/RulePager.astro';
+import { Code } from '@astrojs/starlight/components';
 
 import ReferencePage from '../../components/ReferencePage.astro';
 import RuleExamplePair from '../../components/RuleExamplePair.astro';
@@ -65,11 +66,11 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
       <h1>{rule.slug}</h1>
       <p class="lede" data-rule-description>{description}</p>
       <div class="rule-header-links" aria-label="Rule links">
+        <span class:list={['rule-fact', `severity--${rule["default_severity"]}`]}>{rule["default_severity"]}</span>
+        <a href="#enable-rule">Enable rule</a>
         <code>{rule["rule_id"]}</code>
         <a href={sourceUrl}>Rule source</a>
         <a href={ruleJsonUrl}>Rule JSON</a>
-        <a href={siteHref("/api/catalog.json")}>Catalog JSON</a>
-        {referenceLinks.map(({ href, label }) => <a href={href}>{label}</a>)}
       </div>
     </header>
 
@@ -97,6 +98,20 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
           </details>
         )}
       </section>
+    )}
+
+    <section class="rule-activation" aria-labelledby="enable-rule">
+      <h2 id="enable-rule">Enable this rule</h2>
+      <p>Add the stable ID to <code>enabled_rules</code> in your tracked <code>.repo-standards/repository.toml</code>:</p>
+      <Code code={`enabled_rules = ["${rule["rule_id"]}"]`} lang="toml" frame="none" wrap />
+      <p>Keep any IDs already enabled. <a href={siteHref('/getting-started/#enable-rules')}>Setup and staged checks</a></p>
+    </section>
+
+    {referenceLinks.length > 0 && (
+      <details class="disclosure">
+        <summary>References</summary>
+        <ul>{referenceLinks.map(({ href, label }) => <li><a href={href}>{label}</a></li>)}</ul>
+      </details>
     )}
   </article>
 </ReferencePage>

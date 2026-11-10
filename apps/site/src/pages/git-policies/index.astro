@@ -1,13 +1,10 @@
 ---
-import { siteHref } from '../../lib/site';
 import { Code } from '@astrojs/starlight/components';
 
 import ReferencePage from '../../components/ReferencePage.astro';
+import { siteHref } from '../../lib/site';
 
 const commitGrammar = '[(i/N) ][TICKET] type(scope)!: description';
-const hookCommand = 'repo-standards commit-message .git/COMMIT_EDITMSG --fix-safe';
-const textCommand = 'repo-standards pull-request text PR_BODY.txt';
-const skillCommand = 'npx skills add sarj-ai/repo-standards --skill create-pr --skill merge-risk --global';
 const mergeRiskExample = `## Merge Risk
 
 **Merge risk: medium**
@@ -16,65 +13,144 @@ const mergeRiskExample = `## Merge Risk
 **Verification:** decent 👀
 **Rollback cost:** low ✅
 **Error detection:** good ✅`;
+const transitions = `[commit_message]
+enforcement = "strict" # use "observe" only for measured migrations
+
+[pull_request.commit_history]
+advisory_base_ref = "dev"
+# maximum_commits = 5
+
+[[pull_request.commit_history.transitions]]
+id = "dev-preview"
+source_ref = "dev"
+base_ref = "preview"
+head_prefix = "automation/promote-dev-"
+# sha_prefix_length = 12`;
+const action = `on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  merge_group:
+    types: [checks_requested]
+
+# Add these steps to an existing required job.
+steps:
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    with:
+      fetch-depth: 0
+      persist-credentials: false
+  - uses: sarj-ai/repo-standards/pull-request-commits@9ec36427f34bab43589129d85d571dd476061c8e # v6.22.3`;
 ---
 
-<ReferencePage
-  title="Git policies"
-  description="Commit-message, PR text and history policies outside the repository rule registry."
->
-  <article class="git-policies">
+<ReferencePage title="Git policies" description="Prepare commit headers, concise PR descriptions, and reviewable history with local feedback and authoritative CI.">
+  <article class="guide-page git-policies">
     <header class="section-heading">
-      <p class="eyebrow">Version-control contracts</p>
+      <p class="eyebrow">Before review</p>
       <h1>Git policies</h1>
-      <p class="lede">Commit messages, PR text and history are checked outside the repository rule registry. They are commands and hooks, so they do not appear in the rule count.</p>
+      <p class="lede">Write a clear header, preview the description, and keep history reviewable.</p>
+      <p class="muted">They are commands and hooks, so they do not appear in the rule count.</p>
     </header>
 
-    <section class="git-policy-grammar" aria-labelledby="commit-header-grammar">
-      <p class="eyebrow">Commit header grammar</p>
-      <h2 id="commit-header-grammar"><code>{commitGrammar}</code></h2>
-      <p>The optional series marker comes first, followed by an optional ticket, a conventional-commit type, optional scope and breaking marker, then a concise description.</p>
+    <nav class="command-index" aria-label="On this page">
+      <a href="#managed-commit-headers">Commit headers</a>
+      <a href="#compact-pr-descriptions">PR descriptions</a>
+      <a href="#merge-risk-ratings">Merge risk</a>
+      <a href="#reviewable-pr-history">History</a>
+      <a href="#ci-and-hooks">CI and hooks</a>
+    </nav>
+
+    <dl class="policy-snapshot">
+      <div><dt>Unnumbered commits</dt><dd>5 <span>default maximum</span></dd></div>
+      <div><dt>Descriptive subject</dt><dd>72 <span>characters · advisory</span></dd></div>
+      <div><dt>PR prose</dt><dd>500 <span>characters · default</span></dd></div>
+      <div><dt>Entire PR body</dt><dd>2,000 <span>characters · default</span></dd></div>
+    </dl>
+
+    <section aria-labelledby="managed-commit-headers">
+      <h2 id="managed-commit-headers">Write a commit header</h2>
+      <Code code="docs(site): clarify rule activation" lang="text" frame="none" wrap />
+      <p>Grammar: <code>{commitGrammar}</code>. The series marker, ticket, scope, and <code>!</code> are optional. The type and description are required.</p>
+      <Code code="repo-standards commit-message .git/COMMIT_EDITMSG --fix-safe" lang="bash" frame="terminal" wrap />
+      <p>Safe fixing normalizes only unambiguous type casing and structural spacing. Bodies and trailers stay untouched.</p>
+      <details class="disclosure">
+        <summary>Types, length advice, and temporary messages</summary>
+        <p>Types: <code>build</code>, <code>chore</code>, <code>ci</code>, <code>docs</code>, <code>feat</code>, <code>fix</code>, <code>perf</code>, <code>refactor</code>, <code>revert</code>, <code>style</code>, <code>test</code>.</p>
+        <p>The shipped hook includes subject-length advice; standalone calls opt in with <code>--advise</code>. The 72-character target counts the descriptive subject after recognized series, ticket, type, and scope prefixes. Trailing <code>(#123)</code> and <code>(GH-123)</code> references do not count. Advice preserves syntax results and message bytes; keep essential identifiers.</p>
+        <p>Local hooks accept <code>fixup!</code>, <code>squash!</code>, and <code>amend!</code> for autosquash. Exact PR CI rejects them if they remain in review history. Real merge messages require Git's <code>MERGE_HEAD</code> as evidence.</p>
+      </details>
+      <p><a href={siteHref('/cli/#commit-message')}>Commit-message options</a></p>
     </section>
 
-    <div class="capability-grid git-policy-grid">
-      <section class="capability-card" aria-labelledby="compact-pr-descriptions">
-        <p class="data-line">PR text · advisory preflight</p>
-        <h2 id="compact-pr-descriptions">Preview a compact description</h2>
-        <p>Check a UTF-8 body file before publishing. Default budgets allow 500 rendered prose characters and 2,000 total characters, including links, comments and automation markup. A complete top-level Blacksmith <code>codesmith:footer</code> block is excluded; text outside it still counts.</p>
-        <Code code={textCommand} lang="bash" frame="terminal" wrap />
-        <p>Link detailed evidence and retain the outcome, validation and material caveats. Nonempty, closed code fences need a language tag.</p>
-        <p>Warnings exit zero. Unreadable, oversized or invalid input exits two. This preview uses default budgets; the configured review-policy check remains authoritative.</p>
-        <p>The shared pull-request commit action runs this advice automatically on PR events, including metadata edits. It emits warnings without changing the PR or the commit-policy verdict.</p>
-        <p>Pass <code>--title</code> to preview a title. Descriptive subjects above 72 characters receive advice. Recognized ticket, series, type and scope prefixes and trailing <code>(#123)</code> or <code>(GH-123)</code> references do not spend that target.</p>
-        <p>PR titles may also start with <code>gh-123:</code> or <code>bpo-123:</code>, optionally after a branch label such as <code>[3.14]</code>. These prefixes do not spend the target. GitHub reference spelling is case-insensitive.</p>
-      </section>
+    <section aria-labelledby="compact-pr-descriptions">
+      <h2 id="compact-pr-descriptions">Preview the PR description</h2>
+      <p>Keep the outcome, validation, and material caveats. Link detailed evidence.</p>
+      <Code code={'repo-standards pull-request text PR_BODY.txt --title "docs: clarify setup"'} lang="bash" frame="terminal" wrap />
+      <p>Preview uses default budgets: 500 rendered prose characters and 2,000 total characters. The configured Review Policy check is authoritative.</p>
+      <details class="disclosure">
+        <summary>Counting, formatting, and exit codes</summary>
+        <p>Total length includes links, comments, and automation markup. A complete top-level Blacksmith <code>codesmith:footer</code> block is excluded; surrounding text still counts. Nonempty code fences must be closed and language-tagged.</p>
+        <p>Warnings exit <code>0</code>. Unreadable, oversized, or invalid input exits <code>2</code>. The shared commit Action runs advice on PR events, including metadata edits, without changing the PR or the commit-policy verdict.</p>
+        <p>Titles receive the same descriptive-subject advice. They also accept case-insensitive <code>gh-123:</code> and <code>bpo-123:</code> prefixes, optionally after a branch label such as <code>[3.14]</code>; these prefixes do not spend the target.</p>
+      </details>
+      <p><a href={siteHref('/cli/#pull-request.text')}>PR text options</a></p>
+    </section>
 
-      <section class="capability-card" aria-labelledby="merge-risk-ratings">
-        <p class="data-line">Review Policy · required description section</p>
-        <h2 id="merge-risk-ratings">Run the skill before publishing</h2>
-        <p>The author runs the original Warp merge-risk skill. Its instructions are vendored byte for byte, alongside its license and pinned source checksum; the separate create-pr skill publishes only its overall rating and five verdicts.</p>
-        <Code code={skillCommand} lang="bash" frame="terminal" wrap />
-        <Code code={mergeRiskExample} lang="markdown" frame="none" />
-        <p>The existing Review Policy check requires this section even when no other headings are configured. Missing, duplicate, malformed or incomplete verdicts fail the check. Explanations and numerical scores stay out of the section; CI validates format and runs no model.</p>
-        <p>Install a release containing this policy through the repository's pinned Review Policy action. Existing verified transition exemptions are preserved.</p>
-      </section>
+    <section aria-labelledby="merge-risk-ratings">
+      <h2 id="merge-risk-ratings">Include merge-risk verdicts</h2>
+      <p>Run the <code>merge-risk</code> skill before publishing. The <code>create-pr</code> skill adds its overall rating and five category verdicts:</p>
+      <Code code="npx skills add sarj-ai/repo-standards --skill create-pr --skill merge-risk --global" lang="bash" frame="terminal" wrap />
+      <Code code={mergeRiskExample} lang="markdown" frame="none" wrap />
+      <p>Use the verdicts from your assessment. Keep explanations and numerical scores outside this section.</p>
+      <details class="disclosure">
+        <summary>What Review Policy validates</summary>
+        <p>This section is required even when no other headings are configured. Missing, duplicate, malformed, or incomplete verdicts fail. CI validates format and runs no model.</p>
+        <p>The original Warp merge-risk instructions are vendored byte for byte with their license and pinned source checksum. Install a release containing this policy through the pinned Review Policy Action. Existing verified transition exemptions remain supported.</p>
+      </details>
+    </section>
 
-      <section class="capability-card" aria-labelledby="managed-commit-headers">
-        <p class="data-line">commit-msg · local and CI</p>
-        <h2 id="managed-commit-headers">Managed commit headers</h2>
-        <p>The hook validates new commit headers. Safe fixing normalizes only casing and spacing; commit bodies and trailers remain untouched.</p>
-        <p>The shipped commit hook includes subject-length advice; standalone calls opt in with <code>--advise</code>. Advice preserves strict syntax results and message bytes. Keep essential identifiers even when the subject needs extra space.</p>
-        <Code code={hookCommand} lang="bash" frame="terminal" wrap />
-        <p>CI validates every direct non-merge commit, including commits created before a contributor installed the hook.</p>
-        <p><a href={siteHref("/cli/#commit-message")}>Commit-message command reference</a></p>
-      </section>
+    <section aria-labelledby="reviewable-pr-history">
+      <h2 id="reviewable-pr-history">Keep history reviewable</h2>
+      <p>Count only non-merge commits.</p>
+      <ol class="process-flow history-flow">
+        <li><strong>Up to 5 commits</strong><span>No series numbering required by default.</span></li>
+        <li><strong>More than 5</strong><span>Number every subject <code>(1/N)</code> through <code>(N/N)</code>.</span></li>
+        <li><strong>Before merge</strong><span>CI checks the PR's direct base-to-head history.</span></li>
+      </ol>
+      <p>Series markers must form a complete, ordered ASCII series with unique indices and the actual total. Partial or zero-padded markers fail.</p>
+      <Code code="repo-standards pull-request commits . --advisory --quiet" lang="bash" frame="terminal" wrap />
+      <p><code>--quiet</code> suppresses only a completed pass. Findings and missing evidence stay visible.</p>
+      <details class="disclosure">
+        <summary>Trusted configuration and transition exemptions</summary>
+        <p>Set local base discovery and narrowly scoped promotion edges in <code>.repo-standards/repository.toml</code>:</p>
+        <Code code={transitions} lang="toml" frame="none" wrap />
+        <p>Strict CI reads the manifest from the exact PR base commit. A PR cannot raise its own limit or grant itself an exemption. Missing configuration keeps the five-commit default with no transition exemptions.</p>
+        <p>Each edge requires the configured destination, a same-repository PR, an immutable source-SHA branch suffix matching the PR head, and proof of source ancestry. Protect automation branch namespaces so only the promotion app can update them. Actors, bot identities, branch names alone, and forks grant no exemption.</p>
+        <p>Repeat one table per trusted edge. Ambiguous prefixes, unsafe refs, duplicate IDs, and more than 64 transitions are rejected. Explicit evidence and JSON transition flags remain available for non-GitHub providers.</p>
+      </details>
+      <p><a href={siteHref('/cli/#pull-request.commits')}>Commit-history options</a></p>
+    </section>
 
-      <section class="capability-card" aria-labelledby="reviewable-pr-history">
-        <p class="data-line">pull-request history · CI authoritative</p>
-        <h2 id="reviewable-pr-history">Reviewable pull-request history</h2>
-        <p>Pull requests may contain up to five direct commits by default. Longer histories must use a complete, ordered <code>(1/N)</code> through <code>(N/N)</code> series.</p>
-        <p>The local hook is advisory because it cannot know the final base and head refs. CI evaluates the direct commits in the submitted pull request.</p>
-        <p><a href={siteHref("/cli/#pull-request.commits")}>Pull-request commit command reference</a></p>
-      </section>
-    </div>
+    <section aria-labelledby="ci-and-hooks">
+      <h2 id="ci-and-hooks">Connect local feedback and CI</h2>
+      <table class="policy-table">
+        <caption>Where each check runs</caption>
+        <thead><tr><th scope="col">Stage</th><th scope="col">What runs</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>pre-commit</code></th><td>Exact staged repository checks; advisory history feedback.</td></tr>
+          <tr><th scope="row"><code>commit-msg</code></th><td>Header validation and safe normalization.</td></tr>
+          <tr><th scope="row"><code>pre-push</code></th><td>Advisory history check, including the latest commit.</td></tr>
+          <tr><th scope="row">PR CI</th><td>Authoritative direct history and every non-merge commit header.</td></tr>
+        </tbody>
+      </table>
+      <p><a href={siteHref('/getting-started/#install')}>Shared setup</a> installs the canonical hooks. Local history is advisory because refs may be stale or shallow and <code>pre-commit</code> runs before the pending commit exists.</p>
+      <details class="disclosure">
+        <summary>GitHub Actions integration</summary>
+        <Code code={action} lang="yaml" frame="none" wrap />
+        <p>Pass the event payload as a file for direct CLI use:</p>
+        <Code code={'repo-standards pull-request commits . --github-event "$GITHUB_EVENT_PATH"'} lang="bash" frame="terminal" wrap />
+        <p>CI uses exact direct base/head objects, refs, and numeric repository identities, never the synthetic merge commit in <code>GITHUB_SHA</code>. Exit <code>1</code> means a policy violation; <code>2</code> means incomplete evidence.</p>
+        <p>Stacked PRs use each PR's direct base. The Action marks <code>merge_group</code> as not applicable because those PRs were already evaluated; keep the containing required workflow enabled for it. The <code>edited</code> activity rechecks retargeted PRs.</p>
+        <p>Consumers that already lock Repo Standards can invoke its commands from their existing hook manager to share one environment.</p>
+      </details>
+    </section>
   </article>
 </ReferencePage>

@@ -1,6 +1,27 @@
 ---
 import ReferencePage from '../../components/ReferencePage.astro';
 import { catalog, type Parameter } from '../../lib/catalog';
+import { Code } from '@astrojs/starlight/components';
+import { siteHref } from '../../lib/site';
+
+const examples: Readonly<Record<string, string>> = {
+  baseline: 'repo-standards baseline .',
+  capabilities: 'repo-standards capabilities',
+  catalog: 'repo-standards catalog',
+  check: 'repo-standards check . --staged',
+  'commit-message': 'repo-standards commit-message .git/COMMIT_EDITMSG --fix-safe',
+  explain: 'repo-standards explain repository/artifacts/bespoke-iac-verifiers',
+  inspect: 'repo-standards inspect . --kind workflow',
+  'pull-request.commits': 'repo-standards pull-request commits . --advisory',
+  'pull-request.documentation': 'repo-standards pull-request documentation . --base origin/main',
+  'pull-request.size': 'repo-standards pull-request size . --base origin/main',
+  'pull-request.text': 'repo-standards pull-request text PR_BODY.txt --title "docs: clarify setup"',
+  report: 'repo-standards report . --format json',
+  'rest.discover': 'repo-standards rest discover .',
+  'rest.doctor': 'repo-standards rest doctor .',
+  rules: 'repo-standards rules --severity error',
+  schema: 'repo-standards schema report',
+};
 
 function parameterLabel(parameter: Parameter): string {
   return parameter.names.join(', ');
@@ -14,22 +35,43 @@ function parameterDetails(parameter: Parameter): string {
 }
 ---
 
-<ReferencePage title="CLI" description={`${catalog.commands.length} cataloged commands.`}>
-  <h1 class="sarj-visually-hidden">CLI</h1>
+<ReferencePage title="CLI reference" description="Command examples, arguments, options, and defaults generated from the installed CLI.">
+  <header class="section-heading">
+    <p class="eyebrow">Command reference</p>
+    <h1>CLI reference</h1>
+    <p class="lede">{catalog.commands.length} commands. Start with an example; expand the options when you need them.</p>
+    <p class="muted">Run from your repository root. <a href={siteHref('/getting-started/')}>Installation and rule activation</a> · <a href={siteHref('/schemas/')}>JSON contracts</a></p>
+  </header>
+  <nav class="task-shortcuts" aria-label="Common commands">
+    <a href="#pull-request.size">Measure a PR <span aria-hidden="true">↓</span></a>
+    <a href="#check">Check staged files <span aria-hidden="true">↓</span></a>
+    <a href="#pull-request.text">Preview a description <span aria-hidden="true">↓</span></a>
+  </nav>
   <nav class="command-index" aria-label="Commands">
     {catalog.commands.map((command) => <a href={`#${command["command_id"]}`}>{command.path.join(' ')}</a>)}
   </nav>
   {catalog.commands.map((command) => (
-    <section class="command" id={command["command_id"]}>
+    <section class="command" id={command["command_id"]} aria-label={command.path.join(' ')}>
       <h2><code>repo-standards {command.path.join(' ')}</code></h2>
-      <p>{command.summary}</p>
+      <p>{command.summary.split(/\n\s*\n/u)[0]}</p>
+      {examples[command["command_id"]] && <Code code={examples[command["command_id"]]} lang="bash" frame="terminal" wrap />}
+      {command["command_id"] === 'pull-request.review-policy' && <p>Use the <a href={`${catalog.product["repository_url"]}/tree/main/pull-request-review-policy`}>Review Policy Action</a> to collect trusted provider evidence. <code>--base</code> and <code>--head</code> require full commit SHAs.</p>}
+      {command.summary.includes('\n\n') && (
+        <details class="disclosure command-notes">
+          <summary>Usage notes</summary>
+          {command.summary.split(/\n\s*\n/u).slice(1).map((paragraph) => <p>{paragraph.replaceAll('\\[', '[').replaceAll('\\]', ']')}</p>)}
+        </details>
+      )}
       {[...command.arguments, ...command.options].length > 0 && (
-        <dl class="parameters">
+        <details class="disclosure">
+          <summary>Arguments and options <span class="muted">({command.arguments.length + command.options.length})</span></summary>
+          <dl class="parameters">
           {[...command.arguments, ...command.options].map((parameter) => <>
             <dt><code>{parameterLabel(parameter)}</code></dt>
-            <dd><span>{parameterDetails(parameter)}</span>{parameter.help && <p>{parameter.help}</p>}</dd>
+            <dd><span class="parameter-type">{parameterDetails(parameter)}</span>{parameter.help && <p>{parameter.help}</p>}{parameter.default !== null && <p class="parameter-default">Default: <code>{JSON.stringify(parameter.default)}</code></p>}</dd>
           </>)}
-        </dl>
+          </dl>
+        </details>
       )}
     </section>
   ))}
