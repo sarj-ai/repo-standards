@@ -1,78 +1,65 @@
 # repo-standards
 
-Check repository structure, pull-request size, commit messages, and Git history from exact
-Git evidence. Repository rules are opt-in: review each rule before enabling its stable ID.
+`repo-standards` measures pull-request review size without executing repository code. Its
+repository rules are available for review but remain disabled until individually approved
+and explicitly activated by a consumer.
 
-[Get started](https://engineering.sarj.ai/projects/repo-standards/getting-started/) ·
-[Rules](https://engineering.sarj.ai/projects/repo-standards/rules/) ·
-[Git policies](https://engineering.sarj.ai/projects/repo-standards/git-policies/) ·
-[CLI](https://engineering.sarj.ai/projects/repo-standards/cli/) ·
-[Schemas](https://engineering.sarj.ai/projects/repo-standards/schemas/)
+## Where rules belong
 
-## Run a size check
+- Exact tracked-tree facts—filenames, placement, topology, migrations, pull-request size,
+  ownership, delivery/GitHub state, and repository-wide API/document sets—belong here.
+- Source and configuration semantics for Python, TypeScript, SQL, Terraform/HCL, Markdown,
+  YAML, JSON, and shell belong in `sarj-ai/code-standards`.
 
-From a Git repository with [uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
+## Run it
 
-```bash
-uvx --from repo-standards repo-standards pull-request size . --base origin/main
-```
-
-Replace `origin/main` with your target branch. Output includes counted, excluded, and total
-changed lines. The size metric enables no repository rules.
-
-## Set up local checks
-
-Sarj repositories use the shared Code Standards setup for staged checks, commit-message
-validation, and the authoritative pull-request history workflow:
+Sarj repositories should use the single Code Standards setup path. It installs the canonical
+staged repository check, managed commit-message check, and authoritative pull-request history
+workflow without creating a second Python environment:
 
 ```bash
 uvx --no-config --isolated --python 3.14 --from code-standards code-standards setup
 code-standards doctor
 ```
 
-For standalone installation, rule activation, and pinned GitHub Actions examples, use the
-[setup guide](https://engineering.sarj.ai/projects/repo-standards/getting-started/).
-The [Git policy guide](https://engineering.sarj.ai/projects/repo-standards/git-policies/)
-covers headers, PR descriptions, merge-risk verdicts, and trusted history checks.
+Use the current release without installing it:
 
-## Where rules belong
+```bash
+uvx --from repo-standards repo-standards pull-request size . --base origin/main
+```
 
-| Required evidence | Owner |
-| --- | --- |
-| Tracked filenames, placement, topology, migrations, ownership, delivery/GitHub state, or repository-wide API/document sets | Repo Standards |
-| Source or configuration semantics in Python, TypeScript, SQL, Terraform/HCL, Markdown, YAML, JSON, or shell | [Code Standards](https://github.com/sarj-ai/code-standards) |
+For a persistent user installation:
 
-If the path alone proves the finding, use Repo Standards. Route source and configuration
-semantics to Code Standards.
+```bash
+uv tool install repo-standards
+repo-standards pull-request size . --base origin/main
+```
 
-## Evidence and safety
+Upgrade with `uv tool upgrade repo-standards`. Automation should pin the package version or
+the GitHub Action's full commit SHA.
 
-Repository checks read one exact Git tree or staged index and parse files as inert data.
-They execute no repository code and provide no autofix. The commit-message hook separately
-supports bounded casing and whitespace normalization with `--fix-safe`.
+## Safety model
 
-Missing required evidence produces an inconclusive result. Local history feedback is advisory;
-CI checks the exact PR base and head with policy from the trusted base revision.
+- Repository contents come from one exact Git tree.
+- Workflow YAML and API descriptions are parsed as inert data.
+- Missing required evidence produces an inconclusive result rather than a false pass.
+- Advisory commit-history analysis reports incomplete evidence without blocking local commits.
+- The linter has no autofix or repository mutation mode.
 
 ## Development
 
 ```bash
 uv sync --locked
+uv run pytest
 uv run ruff check .
 uv run basedpyright
-uv run pytest
 ```
 
-For site changes, install locked dependencies and run the documentation checks:
+Build the same wheel and source distribution used by publishing:
 
 ```bash
-npm --prefix apps/site ci --ignore-scripts --no-audit --no-fund
-npm --prefix apps/site run lint
-npm --prefix apps/site run check
-npm --prefix apps/site test
-npm --prefix apps/site run build
+uv build --no-sources
 ```
 
-Preview with `npm --prefix apps/site run dev`. Build release artifacts with
-`uv build --no-sources`. The protected release workflow can repair a missing PyPI publication
-or GitHub Release from the same verified source revision.
+Releases are reconcilable. The protected workflow independently repairs a missing PyPI
+publication or GitHub Release from the same verified source revision.
