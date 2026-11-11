@@ -2,6 +2,7 @@
 import type { RuleView } from '../lib/catalog';
 import RuleTypeMark from './rule-type-mark.astro';
 import { compareRules } from '../lib/rule-sort';
+import { ruleDescription } from '../lib/rule-view';
 
 interface Props {
   rows: readonly RuleView[];
@@ -9,9 +10,6 @@ interface Props {
 
 const { rows } = Astro.props;
 const topics = [...new Map(rows.map(({ rule, topic }) => [rule["topic_id"], topic]))];
-function ruleSummary(description: string): string {
-  return description.split(/(?<=[.!?])\s+(?=[A-Z])/u)[0] ?? description;
-}
 const orderedRows = rows.toSorted((left, right) => compareRules(
   { name: left.rule.title, key: left.rule["rule_id"], introducedAt: left.introduction?.introducedAt ?? null },
   { name: right.rule.title, key: right.rule["rule_id"], introducedAt: right.introduction?.introducedAt ?? null },
@@ -50,7 +48,7 @@ const orderedRows = rows.toSorted((left, right) => compareRules(
           <RuleTypeMark categoryId={rule["category_id"]} label={category} />
           <span class="rule-row__main">
             <strong>{rule.title}</strong>
-            <span>{ruleSummary(rule.description)}</span>
+            <span>{ruleDescription(rule)}</span>
             <small class="rule-row__introduced">Introduced {introduction ? <time datetime={introduction.introducedAt}>{introduction.introducedAt.slice(0, 10)}</time> : 'date unavailable'}</small>
           </span>
           <code title={rule["rule_id"]}>{rule.slug}</code>
