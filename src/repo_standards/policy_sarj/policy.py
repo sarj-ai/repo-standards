@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from itertools import pairwise
 from pathlib import PurePosixPath
 import re
 from types import MappingProxyType
@@ -137,6 +138,7 @@ _EXECUTABLE_SCRIPT_EXTENSIONS = frozenset(
     {"bash", "cjs", "cts", "jq", "js", "jsx", "mjs", "mts", "py", "sh", "ts", "tsx", "zsh"}
 )
 _PACKAGE_TEST_DIRECTORY_NAMES = frozenset({"spec", "specs", "test", "tests", "__tests__"})
+_SCRIPT_TEST_DIRECTORIES_RULE_ID = RuleId("repository/artifacts/script-test-directories")
 _CONVENTIONAL_OPERATIONAL_ROOTS = frozenset(
     {
         "cloudbuild",
@@ -562,6 +564,40 @@ RULES = (
         ),
     ),
     Rule(
+        rule_id=_SCRIPT_TEST_DIRECTORIES_RULE_ID,
+        version=1,
+        default_severity="error",
+        title="Keep test code out of script test directories",
+        description=(
+            "Prohibit script-language source under scripts/{test,tests,spec,specs,__tests__}, "
+            "including nested roots and support files, case-insensitively. Documentation and "
+            "data remain allowed. Exact-content fingerprints bind legacy baselines."
+        ),
+        why=(
+            "An explicit directory policy prevents a growing parallel script-test suite. "
+            "This is a placement gate, not evidence that an existing test lacks value or "
+            "that a one-off change needs a new unit test."
+        ),
+        fix=(
+            "Reuse native lint, type, build, plan or smoke checks when they establish a one-off "
+            "change's contract. Put distinct durable coverage in its owning package or shared "
+            "policy suite. Retain legacy safety coverage through a reviewed exact-content "
+            "baseline or exception. Delete tests only when their contracts are retired or "
+            "retained coverage rejects the same wrong outcomes; renaming duplicates "
+            "is not remediation."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-artifact-script-test-directories",
+                title="Script test code belongs with its durable owner",
+                language="text",
+                before="python/scripts/tests/test_release.py",
+                after="python/release/tests/test_release.py",
+            ),
+        ),
+    ),
+    Rule(
         rule_id=RuleId("repository/artifacts/terraform-test-files"),
         version=2,
         default_severity="error",
@@ -727,6 +763,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         RuleId("repository/artifacts/schema-derived-config-examples"): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/operational-script-tests"): RuleClassification.JUDGMENT,
+        _SCRIPT_TEST_DIRECTORIES_RULE_ID: RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/terraform-test-files"): RuleClassification.OBJECTIVE,
         MAKEFILE_GROWTH_RULE_ID: RuleClassification.JUDGMENT,
         RuleId("repository/documentation/placement"): RuleClassification.OBJECTIVE,
@@ -743,6 +780,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         RuleId("repository/artifacts/schema-derived-config-examples"): 44,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
         RuleId("repository/artifacts/operational-script-tests"): 46,
+        _SCRIPT_TEST_DIRECTORIES_RULE_ID: 55,
         RuleId("repository/artifacts/terraform-test-files"): 47,
         MAKEFILE_GROWTH_RULE_ID: 48,
         RuleId("repository/documentation/placement"): 50,
@@ -838,6 +876,50 @@ def _repository_artifact_diagnostics(
     return tuple(
         sorted(diagnostics, key=lambda item: (item.path, item.rule_id, item.manifest_anchor))
     )
+
+
+def _script_test_directory_diagnostics(
+    snapshot: RepositorySnapshot, *, rule: Rule
+) -> tuple[Diagnostic, ...]:
+    components = ComponentIndex(snapshot.manifest.components)
+    diagnostics: list[Diagnostic] = []
+    for tracked in snapshot.inspection.tracked_files:
+        path = PurePosixPath(tracked.path.casefold())
+        if path.suffix.lstrip(".") not in _EXECUTABLE_SCRIPT_EXTENSIONS or not any(
+            parent == "scripts" and child in _PACKAGE_TEST_DIRECTORY_NAMES
+            for parent, child in pairwise(path.parts[:-1])
+        ):
+            continue
+        component = components.nearest(tracked.path)
+        diagnostics.append(
+            Diagnostic(
+                rule_id=rule.rule_id,
+                rule_version=rule.version,
+                severity=rule.severity,
+                evidence_level="verified",
+                component_id=component.component_id if component else ComponentId("repository"),
+                subject_kind="tracked-script-test-directory-source",
+                observed=tracked.path,
+                observed_value={"path": tracked.path, "object_id": tracked.object_id},
+                expected="no new or changed source in a scripts test directory",
+                message="source is prohibited by the enabled script test-directory policy",
+                path=tracked.path,
+                manifest_anchor=f"tracked_files.{tracked.path}",
+                remediation=Remediation(
+                    summary="Use native checks or the durable contract's owning test suite.",
+                    steps=(
+                        "Identify the wrong outcome and whether existing checks reject it.",
+                        "A one-off change alone does not require a unit test.",
+                        "Retain safety coverage until retired or equivalently covered.",
+                        "Review exact-content baselines or exceptions for required legacy changes.",
+                    ),
+                    validation=(
+                        "Run the owning checks and rerun repo-standards on the selected Git tree.",
+                    ),
+                ),
+            )
+        )
+    return tuple(sorted(diagnostics, key=lambda item: item.path))
 
 
 def _tracked_artifact_diagnostics(
@@ -1471,6 +1553,7 @@ class SarjPolicy:
             UNDECLARED_IMAGES_RULE_ID,
             LOCAL_RESIDUE_RULE_ID,
             MAKEFILE_GROWTH_RULE_ID,
+            _SCRIPT_TEST_DIRECTORIES_RULE_ID,
         }
         diagnostics = _repository_artifact_diagnostics(snapshot) if enabled - separate_rules else ()
         for rule_id, evaluate in (
@@ -1479,9 +1562,22 @@ class SarjPolicy:
             (UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics),
             (UNDECLARED_IMAGES_RULE_ID, image_diagnostics),
             (LOCAL_RESIDUE_RULE_ID, local_residue_diagnostics),
+            (_SCRIPT_TEST_DIRECTORIES_RULE_ID, _script_test_directory_diagnostics),
         ):
             if rule_id in enabled:
                 diagnostics += evaluate(snapshot, rule=_rule(rule_id))
         if MAKEFILE_GROWTH_RULE_ID in enabled and snapshot.makefile_comparison is not None:
             diagnostics += makefile_diagnostics(snapshot, rule=_rule(MAKEFILE_GROWTH_RULE_ID))
-        return tuple(item for item in diagnostics if item.rule_id in enabled)
+        strict_paths = {
+            item.path for item in diagnostics if item.rule_id == _SCRIPT_TEST_DIRECTORIES_RULE_ID
+        }
+        overlap_rules = {
+            "repository/artifacts/operational-script-tests",
+            "repository/artifacts/bespoke-iac-verifiers",
+        }
+        return tuple(
+            item
+            for item in diagnostics
+            if item.rule_id in enabled
+            and (item.path not in strict_paths or item.rule_id not in overlap_rules)
+        )

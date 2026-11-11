@@ -109,6 +109,36 @@ def test_default_baseline_and_ratchet_preserve_error_only_behavior(tmp_path: Pat
     assert '"include_warnings":false' in checked.stdout
 
 
+def test_script_test_gate_blocks_new_tests_inside_a_baselined_file(tmp_path: Path) -> None:
+    root = _repository(tmp_path, javascript=False)
+    manifest = root / ".repo-standards/repository.toml"
+    manifest.write_text(
+        _MANIFEST.replace(_RULE_ID, "repository/artifacts/script-test-directories"),
+        encoding="utf-8",
+    )
+    test = root / "python/scripts/tests/test_release.py"
+    test.parent.mkdir(parents=True)
+    test.write_text("def test_legacy():\n    run_release_fixture()\n", encoding="utf-8")
+    _commit(root)
+    _baseline(root, include_warnings=False)
+    assert _check(root).exit_code == 0
+
+    test.write_text(test.read_text() + "\ndef test_added():\n    run_other_fixture()\n")
+    _git(root, "add", str(test.relative_to(root)))
+    assert _check(root).exit_code == 0
+    staged = _check(root, staged=True)
+    assert staged.exit_code == 2, staged.stdout
+    assert "resolved fingerprints" in staged.stdout
+
+    test.write_text("def test_legacy():\n    run_release_fixture()\n", encoding="utf-8")
+    _git(root, "add", str(test.relative_to(root)))
+    assert _check(root, staged=True).exit_code == 0
+    added = test.with_name("test_other.py")
+    added.write_text("def test_other():\n    run_other_fixture()\n", encoding="utf-8")
+    _git(root, "add", str(added.relative_to(root)))
+    assert _check(root, staged=True).exit_code == 1
+
+
 def test_opted_in_ratchet_blocks_a_new_warning_from_a_zero_baseline(tmp_path: Path) -> None:
     root = _repository(tmp_path, javascript=False)
     payload = parse_json_object(_baseline(root, include_warnings=True).encode())
