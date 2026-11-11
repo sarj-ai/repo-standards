@@ -135,7 +135,6 @@ main :is(a, button, input, select, summary):focus-visible {
 .schema-list > article,
 .process-flow > li,
 .policy-snapshot > div,
-.rule-prose > div,
 .rule-table > li,
 .directory-filters > *,
 .rule-row__main > * {
@@ -497,21 +496,9 @@ main :is(a, button, input, select, summary):focus-visible {
   font-weight: 700;
   text-transform: capitalize;
 }
-.rule-prose {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2rem;
-  margin-top: 2rem;
-}
-.rule-prose h2,
 .examples-section > h2 {
   margin: 0;
   font-size: 1.3rem;
-}
-.rule-prose p {
-  margin: 0.5rem 0 0;
-  color: var(--sl-color-gray-2);
-  line-height: 1.65;
 }
 .examples-section {
   margin-top: 2rem;
@@ -522,12 +509,6 @@ main :is(a, button, input, select, summary):focus-visible {
   margin-top: 0.8rem;
 }
 
-@media (max-width: 56rem) {
-  .rule-prose {
-    grid-template-columns: 1fr;
-    gap: 1.25rem;
-  }
-}
 @media (max-width: 52rem) {
   .page > header.header {
     width: 100dvw;
