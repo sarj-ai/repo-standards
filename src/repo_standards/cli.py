@@ -9,13 +9,14 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import Annotated, ClassVar, Literal, NamedTuple, NewType, NoReturn, TypeGuard
+from typing import Annotated, ClassVar, Literal, NamedTuple, NewType, NoReturn, NotRequired
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError
 import typer
 
 from repo_standards._machine import (
     MAX_PAGE_SIZE as _MAX_PAGE_SIZE,
+    CommandEnvelope,
     capabilities_payload,
     envelope as _envelope,
     installed_version as _installed_version,
@@ -41,6 +42,7 @@ from repo_standards.core.models import (
     ExecutionIssue,
     GitObjectId,
     IncompleteReport,
+    JSONValue,
     MigrationCouplingException,
     Mode,
     Policy,
@@ -50,6 +52,7 @@ from repo_standards.core.models import (
     RepositoryId,
     RepositoryInspection,
     Rule,
+    RuleId,
 )
 from repo_standards.core.parser import load_manifest
 from repo_standards.core.pull_request_body import missing_required_body_sections
@@ -139,8 +142,48 @@ _MAX_REVIEW_POLICY_EVIDENCE_BYTES = 1_048_576
 class _CompletedAnalysis(NamedTuple):
     report: AnalysisReport
     regressions: tuple[Diagnostic, ...]
-    baseline_state: Mapping[str, object]
-    ratchet_state: Mapping[str, object]
+    baseline_state: Mapping[str, JSONValue]
+    ratchet_state: Mapping[str, JSONValue]
+
+
+class _PolicyPayload(CommandEnvelope):
+    policy: dict[str, JSONValue]
+    summary: dict[str, JSONValue]
+
+
+class _CommitMessagePayload(_PolicyPayload):
+    findings: list[dict[str, JSONValue]]
+
+
+class _PullRequestSizePayload(_PolicyPayload):
+    categories: list[dict[str, JSONValue]]
+    directories: list[dict[str, JSONValue]]
+    files: list[dict[str, JSONValue]]
+    largest_counted_files: list[dict[str, JSONValue]]
+
+
+class _DocumentationPayload(_PolicyPayload):
+    findings: list[str]
+    content_findings: list[str]
+    exemptions: list[str]
+
+
+class _ReviewPolicyPayload(_PolicyPayload):
+    counts: dict[str, JSONValue]
+    earlier_approvals: list[dict[str, JSONValue]]
+    size: dict[str, JSONValue]
+    files: list[dict[str, JSONValue]]
+
+
+class _CommitsPayload(_PolicyPayload):
+    commit_message_findings: NotRequired[list[dict[str, JSONValue]]]
+
+
+class _InspectionPayload(CommandEnvelope):
+    summary: dict[str, JSONValue]
+    filters: dict[str, JSONValue]
+    page: dict[str, JSONValue]
+    items: list[Mapping[str, JSONValue]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,7 +365,7 @@ def _commit_message_payload(
     result: CommitMessageResult,
     *,
     fix_safe_enabled: bool,
-) -> Mapping[str, object]:
+) -> _CommitMessagePayload:
     return {
         **_envelope(
             "commit-message",
@@ -520,7 +563,9 @@ def pull_request_size_command(  # ruff: ignore[too-many-arguments,too-many-posit
         typer.echo(canonical_json(payload) + "\n", nl=False)
 
 
-def _pull_request_size_payload(result: PullRequestSize, *, top_files: int) -> Mapping[str, object]:
+def _pull_request_size_payload(
+    result: PullRequestSize, *, top_files: int
+) -> _PullRequestSizePayload:
     category_lines = result.category_lines()
     summary = result.summary
     largest = _largest_counted_files(result, top_files)
@@ -539,7 +584,7 @@ def _pull_request_size_payload(result: PullRequestSize, *, top_files: int) -> Ma
             "excluded_lines": summary.excluded_lines,
             "total_lines": summary.total_lines,
             "changed_files": summary.changed_files,
-            "categories": category_lines,
+            "categories": {**category_lines},
             "additions": summary.additions,
             "deletions": summary.deletions,
             "counted_files": summary.counted_files,
@@ -669,7 +714,7 @@ def pull_request_documentation_command(
 
 def _pull_request_documentation_payload(
     result: PullRequestDocumentation,
-) -> Mapping[str, object]:
+) -> _DocumentationPayload:
     return {
         **_envelope(
             "pull-request documentation",
@@ -1046,6 +1091,12 @@ def _matching_review_policy_transition(
             for transition in configured_pull_request.commit_history.transitions
             if transition.transition_id in exemptions
         ),
+        reviewed_resolution=any(
+            review.state is ReviewState.APPROVED
+            and review.commit_sha == provider.evaluated_head_sha
+            and not review.reviewer_is_bot
+            for review in provider.latest_human_reviews
+        ),
     )
 
 
@@ -1091,7 +1142,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
     result: ReviewPolicyResult,
     missing_sections: tuple[str, ...],
     transition_exemption: str | None,
-) -> Mapping[str, object]:
+) -> _ReviewPolicyPayload:
     merge_ready = _review_policy_merge_ready(
         result=result,
         provider=provider,
@@ -1156,7 +1207,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             else None,
             "transition_exemption": transition_exemption,
             "missing_body_sections": list(missing_sections),
-            "reasons": reasons,
+            "reasons": [*reasons],
         },
         "counts": {
             "changed_files": summary.changed_files if summary is not None else None,
@@ -1193,7 +1244,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
                 "counted_deletions": summary.counted_deletions,
                 "excluded_additions": summary.excluded_additions,
                 "excluded_deletions": summary.excluded_deletions,
-                "categories": size.category_lines(),
+                "categories": {**size.category_lines()},
             }
             if size is not None and summary is not None
             else {
@@ -1259,8 +1310,11 @@ def pull_request_commits_command(  # ruff: ignore[too-many-arguments,too-many-po
     base_ref: Annotated[str | None, typer.Option(help="Pull-request base ref name.")] = None,
     head_ref: Annotated[str | None, typer.Option(help="Pull-request head ref name.")] = None,
     repository_id: Annotated[
-        str | None,
-        typer.Option(help="Exact PR head owner/name identity used by transition exemptions."),
+        RepositoryId | None,
+        typer.Option(
+            parser=RepositoryId,
+            help="Exact PR head owner/name identity used by transition exemptions.",
+        ),
     ] = None,
     maximum_commits: Annotated[
         int,
@@ -1365,7 +1419,7 @@ def _resolve_pull_request_commits_request(  # ruff: ignore[too-many-arguments] -
     head: str,
     base_ref: str | None,
     head_ref: str | None,
-    repository_id: str | None,
+    repository_id: RepositoryId | None,
     maximum_commits: int,
     exemptions: tuple[TransitionExemption, ...],
     github_event: Path | None,
@@ -1476,7 +1530,9 @@ def _analyze_resolved_pull_request_inputs(
     history = configured.commit_history if configured is not None else None
     maximum_commits = history.maximum_commits if history is not None else DEFAULT_MAXIMUM_COMMITS
     repository_id = (
-        str(context.head_repository_id) if context.head_repository_id is not None else None
+        RepositoryId(str(context.head_repository_id))
+        if context.head_repository_id is not None
+        else None
     )
     transition_exemptions = ()
     if history is not None and context.base_repository_id is not None:
@@ -1585,15 +1641,15 @@ def _pull_request_commits_payload(
     result: PullRequestCommits,
     *,
     advisory: bool,
-) -> Mapping[str, object]:
-    summary: dict[str, object] = {
+) -> _CommitsPayload:
+    summary: dict[str, JSONValue] = {
         "commit_count": result.commit_count,
         "satisfied": result.satisfied,
         "disposition": result.disposition,
         "numbering_issue": result.numbering_issue,
         "exemption_id": result.exemption_id,
     }
-    payload: dict[str, object] = {
+    payload: _CommitsPayload = {
         **_envelope(
             "pull-request commits",
             conclusion="findings" if result.has_findings else "passed",
@@ -1734,7 +1790,7 @@ def _inspection_payload(
     path_prefix: str | None,
     limit: int,
     offset: int,
-) -> Mapping[str, object]:
+) -> _InspectionPayload:
     if kind not in _INSPECTION_KINDS:
         message = f"--kind must be one of: {', '.join(sorted(_INSPECTION_KINDS))}"
         raise RequestError(message)
@@ -1787,8 +1843,8 @@ def _inspection_payload(
     }
 
 
-def _inspection_items(inspection: RepositoryInspection) -> list[Mapping[str, object]]:
-    items: list[Mapping[str, object]] = [
+def _inspection_items(inspection: RepositoryInspection) -> list[Mapping[str, JSONValue]]:
+    items: list[Mapping[str, JSONValue]] = [
         {
             "kind": "project",
             "ecosystem": item.ecosystem,
@@ -1850,7 +1906,7 @@ def _is_rest_detection_path(path: str) -> bool:
     )
 
 
-def _git_provenance(identity: GitIdentity | None) -> Mapping[str, object]:
+def _git_provenance(identity: GitIdentity | None) -> Mapping[str, JSONValue]:
     return {
         "kind": "git-tree",
         "source_revision": identity.source_revision if identity is not None else None,
@@ -2010,7 +2066,7 @@ def _issue_payload(
     phase: str,
     message: str,
     remediation: str,
-) -> Mapping[str, object]:
+) -> Mapping[str, JSONValue]:
     return {
         "code": code,
         "phase": phase,
@@ -2194,11 +2250,11 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
     include_warnings: bool = False,
 ) -> int:
     command = "report" if mode is Mode.REPORT else "check"
-    baseline_state: Mapping[str, object] = {
+    baseline_state: Mapping[str, JSONValue] = {
         "status": "not-requested" if mode is not Mode.RATCHET else "not-evaluated",
         "path": baseline_path if mode is Mode.RATCHET else None,
     }
-    ratchet_state: Mapping[str, object] = {"status": "not-requested"}
+    ratchet_state: Mapping[str, JSONValue] = {"status": "not-requested"}
     try:
         if include_warnings and mode is not Mode.RATCHET:
             ConfigurationError.fail("--ratchet-warnings requires --mode ratchet")
@@ -2328,14 +2384,14 @@ def _complete_ratchet_analysis(
         "ratchet_known": max(active_count - new_count, 0),
     }
     report = replace(report, summary=ratchet_summary, ratchet=None)
-    baseline_state: Mapping[str, object] = {
+    baseline_state: Mapping[str, JSONValue] = {
         "status": "verified",
         "path": baseline_path,
         "fingerprints": len(baseline.fingerprints),
         "scope_digest": baseline.scope_digest,
         "include_warnings": baseline.include_warnings,
     }
-    ratchet_state: Mapping[str, object] = {
+    ratchet_state: Mapping[str, JSONValue] = {
         "status": "regressions" if regressions else "clean",
         "known": max(active_count - new_count, 0),
         "new": new_count,
@@ -2391,8 +2447,8 @@ def _render(  # ruff: ignore[too-many-arguments] - stable report envelope inputs
     *,
     command: str,
     manifest_path: str,
-    baseline: Mapping[str, object],
-    ratchet: Mapping[str, object],
+    baseline: Mapping[str, JSONValue],
+    ratchet: Mapping[str, JSONValue],
 ) -> str:
     if output_format is OutputFormat.TEXT:
         return render_text(report, max_diagnostics=_TEXT_DIAGNOSTIC_LIMIT)
@@ -2413,12 +2469,11 @@ def _report_payload(
     *,
     command: str,
     manifest_path: str,
-    baseline: Mapping[str, object],
-    ratchet: Mapping[str, object],
-) -> Mapping[str, object]:
+    baseline: Mapping[str, JSONValue],
+    ratchet: Mapping[str, JSONValue],
+) -> Mapping[str, JSONValue]:
     payload = dict(report_dict(report))
-    raw_issues = payload.pop("execution_issues")
-    issues = _mapping_list(raw_issues)
+    payload.pop("execution_issues")
     provenance: dict[str, object] = {
         "kind": "repository-manifest",
         "manifest_path": manifest_path,
@@ -2429,23 +2484,29 @@ def _report_payload(
         provenance["kind"] = report.input_provenance.mode
         provenance["source_revision"] = report.input_provenance.source_revision
         provenance["tree_digest"] = report.input_provenance.tree_digest
-    return {
-        **_envelope(
-            command,
-            completion=report.completion,
-            conclusion=report.conclusion,
-            provenance=provenance,
-            issues=issues,
-        ),
-        **payload,
-        "baseline": dict(baseline),
-        "ratchet": dict(ratchet),
-    }
+    return (
+        RootModel[dict[str, JSONValue]]
+        .model_validate(
+            {
+                **_envelope(
+                    command,
+                    completion=report.completion,
+                    conclusion=report.conclusion,
+                    provenance=provenance,
+                    issues=[asdict(issue) for issue in report.execution_issues],
+                ),
+                **payload,
+                "baseline": dict(baseline),
+                "ratchet": dict(ratchet),
+            }
+        )
+        .root
+    )
 
 
 @app.command("explain")
 def explain_rule(
-    rule_id: Annotated[str, typer.Argument()],
+    rule_id: Annotated[RuleId, typer.Argument(parser=RuleId)],
 ) -> None:
     """Explain one immutable rule."""
     try:
@@ -2571,29 +2632,10 @@ def print_schema(
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
-def _report_schema() -> Mapping[str, object]:
+def _report_schema() -> Mapping[str, JSONValue]:
     from repo_standards.catalog import report_schema  # ruff: ignore[import-outside-top-level] -- schema generation is a dedicated command.
 
     return report_schema()
-
-
-def _mapping_list(value: object) -> list[Mapping[str, object]]:
-    if not _is_object_list(value):
-        return []
-    result: list[Mapping[str, object]] = []
-    for candidate in value:
-        if not _is_object_mapping(candidate):
-            continue
-        result.append({key: item for key, item in candidate.items() if isinstance(key, str)})
-    return result
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
-    return isinstance(value, Mapping)
 
 
 def _page_options(limit: str, cursor: str | None) -> _PageOptions:

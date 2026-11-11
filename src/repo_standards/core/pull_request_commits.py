@@ -31,6 +31,7 @@ _CONTROL_CHARACTER_LIMIT = 32
 _REVISION_METADATA_LINES = 3
 _MERGE_METADATA_LINES = 2
 _MERGE_PARENT_COUNT = 2
+_MAXIMUM_TRANSITION_REFRESHES = 10
 _MAXIMUM_GIT_OUTPUT_BYTES = 16 * 1024 * 1024
 _GIT_TIMEOUT = timedelta(seconds=10)
 _READ_CHUNK_BYTES = 64 * 1024
@@ -136,7 +137,7 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
     base: str,
     head: str = "HEAD",
     maximum_commits: int = DEFAULT_MAXIMUM_COMMITS,
-    repository_id: str | None = None,
+    repository_id: RepositoryId | None = None,
     base_ref: str | None = None,
     head_ref: str | None = None,
     transition_exemptions: tuple[TransitionExemption, ...] = (),
@@ -184,7 +185,7 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
         resolved,
         base_object_id=base_object_id,
         head_object_id=head_object_id,
-        repository_id=None if repository_id is None else RepositoryId(repository_id),
+        repository_id=repository_id,
         base_ref=base_ref,
         head_ref=head_ref,
         exemptions=transition_exemptions,
@@ -349,6 +350,7 @@ def matching_transition_exemption(  # ruff: ignore[too-many-arguments] - identit
     base_ref: str | None,
     head_ref: str | None,
     exemptions: tuple[TransitionExemption, ...],
+    reviewed_resolution: bool = False,
 ) -> TransitionExemptionId | None:
     if repository_id is None or base_ref is None or head_ref is None:
         return None
@@ -365,7 +367,10 @@ def matching_transition_exemption(  # ruff: ignore[too-many-arguments] - identit
             continue
         _safe_revision(exemption.source_ref, name="source")
         source_object_id = _resolve_source(root, exemption.source_ref)
-        snapshot = _transition_snapshot(root, base_object_id, head_object_id, snapshot_prefix)
+        snapshot_reader = (
+            _reviewed_transition_snapshot if reviewed_resolution else _transition_snapshot
+        )
+        snapshot = snapshot_reader(root, base_object_id, head_object_id, snapshot_prefix)
         if snapshot is not None and _is_ancestor(root, snapshot, source_object_id):
             return exemption.exemption_id
     return None
@@ -390,11 +395,13 @@ def _transition_snapshot(
     if len(metadata) != _MERGE_METADATA_LINES:
         return None
     parents = metadata[0].split()
-    if len(parents) != _MERGE_PARENT_COUNT or parents[1].decode("ascii") != base:
+    if (
+        len(parents) != _MERGE_PARENT_COUNT
+        or parents[1].decode("ascii") != base
+        or not parents[0].decode("ascii").startswith(snapshot_prefix)
+    ):
         return None
     snapshot = GitObjectId(parents[0].decode("ascii"))
-    if not snapshot.startswith(snapshot_prefix):
-        return None
     try:
         merged_tree = _git(
             root,
@@ -407,6 +414,34 @@ def _transition_snapshot(
     except ConfigurationError:
         return None
     return snapshot if merged_tree == metadata[1] else None
+
+
+def _reviewed_transition_snapshot(
+    root: Path,
+    base: GitObjectId,
+    head: GitObjectId,
+    snapshot_prefix: str,
+) -> GitObjectId | None:
+    history = _git(
+        root,
+        "rev-list",
+        "--first-parent",
+        "--parents",
+        f"--max-count={_MAXIMUM_TRANSITION_REFRESHES + 1}",
+        head,
+        failure="Git could not inspect a reviewed transition",
+    ).splitlines()
+    for index, line in enumerate(history):
+        commit, *parents = line.decode("ascii").split()
+        if commit.startswith(snapshot_prefix):
+            return GitObjectId(commit)
+        if (
+            len(parents) != _MERGE_PARENT_COUNT
+            or (index == 0 and parents[1] != base)
+            or not _is_ancestor(root, GitObjectId(parents[1]), base)
+        ):
+            return None
+    return None
 
 
 def _resolve_source(root: Path, source_ref: str) -> GitObjectId:

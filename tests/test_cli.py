@@ -9,17 +9,19 @@ import shutil
 import subprocess
 
 from jsonschema import ValidationError as JSONSchemaValidationError, validate
+from pydantic import RootModel
 import pytest
 from typer.testing import CliRunner
 
 from repo_standards.cli import app
-from repo_standards.core.models import Diagnostic, RepositorySnapshot, RuleId
-from repo_standards.github_review_policy import trusted_manifest
+from repo_standards.core.models import Diagnostic, JSONValue, RepositorySnapshot, RuleId
+from repo_standards.github_review_policy import GitHubRepositoryId, trusted_manifest
 from repo_standards.policy_sarj import policy as sarj_policy
 from repo_standards.repository import RepositoryAnalysisRequest, analyze_repository
 
 
 runner = CliRunner()
+_FIXTURE_REPOSITORY_ID = GitHubRepositoryId(123)
 
 
 def test_version_matches_installed_distribution() -> None:
@@ -252,7 +254,7 @@ def _review_policy_evidence(  # ruff: ignore[too-many-arguments] - focused fixtu
     repository: Path,
     *,
     head: str,
-    reviews: list[dict[str, object]] | None = None,
+    reviews: list[dict[str, JSONValue]] | None = None,
     body: str = "## What & why\nSmall change.\n\n## QA impact / blast radius\nN/A\n",
     checks_complete: bool = True,
     base_ref: str = "dev",
@@ -260,7 +262,7 @@ def _review_policy_evidence(  # ruff: ignore[too-many-arguments] - focused fixtu
     author_is_bot: bool = False,
     author_login: str = "developer",
     current_head: str | None = None,
-    head_repository_id: int = 123,
+    head_repository_id: GitHubRepositoryId = _FIXTURE_REPOSITORY_ID,
     check_head: str | None = None,
     threads_resolved: bool = True,
     include_merge_risk: bool = True,
@@ -307,7 +309,7 @@ def _promotion_evidence(  # ruff: ignore[too-many-arguments] - independent trust
     head: str,
     author_login: str = "release-automation[bot]",
     current_head: str | None = None,
-    head_repository_id: int = 123,
+    head_repository_id: GitHubRepositoryId = _FIXTURE_REPOSITORY_ID,
     source: str | None = None,
 ) -> Path:
     snapshot = source or head
@@ -646,6 +648,113 @@ def test_review_policy_accepts_a_verified_refreshed_promotion(tmp_path: Path) ->
 
 
 @pytest.mark.parametrize(
+    "approval", ["current", "refreshed", "missing", "stale", "bot", "extra-commit", "wrong-base"]
+)
+def test_resolved_transition_requires_human_review_of_the_exact_source_target_merge(
+    tmp_path: Path, approval: str
+) -> None:
+    original_base = _review_policy_fixture(tmp_path, allowlisted_bot_reviewers=("reviewer[bot]",))
+    (tmp_path / "README.md").write_text("source change\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    source = _git(tmp_path, "rev-parse", "HEAD")
+    _git(tmp_path, "checkout", "--quiet", "--detach", original_base)
+    (tmp_path / "README.md").write_text("target change\n", encoding="utf-8")
+    _commit_changes(tmp_path)
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    head = _git(
+        tmp_path,
+        "-c",
+        "user.name=Release manager",
+        "-c",
+        "user.email=release@example.invalid",
+        "commit-tree",
+        f"{source}^{{tree}}",
+        "-p",
+        source,
+        "-p",
+        base,
+        "-m",
+        "Resolve conflicting branch changes",
+    )
+    if approval == "refreshed":
+        _git(
+            tmp_path,
+            "-c",
+            "user.name=Release manager",
+            "-c",
+            "user.email=release@example.invalid",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "New target tip",
+        )
+        base = _git(tmp_path, "rev-parse", "HEAD")
+        head = _git(
+            tmp_path,
+            "-c",
+            "user.name=Release manager",
+            "-c",
+            "user.email=release@example.invalid",
+            "commit-tree",
+            f"{head}^{{tree}}",
+            "-p",
+            head,
+            "-p",
+            base,
+            "-m",
+            "Refresh target",
+        )
+    if approval == "extra-commit":
+        head = _git(
+            tmp_path,
+            "-c",
+            "user.name=Release manager",
+            "-c",
+            "user.email=release@example.invalid",
+            "commit-tree",
+            f"{head}^{{tree}}",
+            "-p",
+            head,
+            "-m",
+            "Additional edit",
+        )
+    evidence = _promotion_evidence(tmp_path, head=head, source=source)
+    provider = _json_object(evidence.read_text())
+    provider["latest_human_reviews"] = (
+        []
+        if approval == "missing"
+        else [
+            {
+                "reviewer": "reviewer[bot]" if approval == "bot" else "human",
+                "state": "approved",
+                "commit_sha": source if approval == "stale" else head,
+                "reviewer_is_bot": approval == "bot",
+            }
+        ]
+    )
+    evidence.write_text(json.dumps(provider))
+    run = _invoke_review_policy(
+        tmp_path,
+        base=original_base if approval == "wrong-base" else base,
+        head=head,
+        evidence=evidence,
+    )
+    accepted = approval in {"current", "refreshed"}
+    assert run.exit_code == (0 if accepted else 1)
+    assert run.summary["transition_exemption"] == ("promote" if accepted else None)
+    assert run.summary["missing_body_sections"] == (
+        []
+        if accepted
+        else [
+            "What & why",
+            "QA impact / blast radius",
+            "Merge Risk",
+        ]
+    )
+
+
+@pytest.mark.parametrize(
     ("author_login", "current_head", "head_repository_id"),
     [
         ("untrusted-automation[bot]", None, 123),
@@ -657,7 +766,7 @@ def test_pull_request_review_policy_transition_requires_exact_trusted_identity(
     tmp_path: Path,
     author_login: str,
     current_head: str | None,
-    head_repository_id: int,
+    head_repository_id: GitHubRepositoryId,
 ) -> None:
     base = _review_policy_fixture(tmp_path)
     (tmp_path / "large.py").write_text("value = 1\n" * 900, encoding="utf-8")
@@ -699,7 +808,7 @@ def test_pull_request_review_policy_transition_requires_exact_trusted_identity(
 @dataclass(frozen=True, slots=True)
 class ReviewPolicyRun:
     exit_code: int
-    summary: dict[str, object]
+    summary: dict[str, JSONValue]
 
 
 def _invoke_review_policy(
@@ -727,7 +836,7 @@ def _invoke_review_policy(
     return ReviewPolicyRun(result.exit_code, _object(_json_object(result.stdout)["summary"]))
 
 
-def _approvals(head: str, count: int) -> list[dict[str, object]]:
+def _approvals(head: str, count: int) -> list[dict[str, JSONValue]]:
     return [
         {"reviewer": f"{index}:human-{index}", "state": "approved", "commit_sha": head}
         for index in range(count)
@@ -1011,7 +1120,7 @@ def test_review_policy_allowlisted_bot_promotion_keeps_its_transition_exemption(
 ALLOWLISTED_BOT_REVIEWER = "348999126:bulbul-review[bot]"
 
 
-def _bot_approval(head: str, reviewer: str = ALLOWLISTED_BOT_REVIEWER) -> dict[str, object]:
+def _bot_approval(head: str, reviewer: str = ALLOWLISTED_BOT_REVIEWER) -> dict[str, JSONValue]:
     return {"reviewer": reviewer, "state": "approved", "commit_sha": head, "reviewer_is_bot": True}
 
 
@@ -1300,31 +1409,18 @@ def _manifest(root: Path, text: str) -> None:
     _commit_fixture(root)
 
 
-def _json_object(value: str) -> dict[str, object]:
-    parsed: object = json.loads(value)  # pyright: ignore[reportAny] -- the JSON decoder returns Any; the object is checked below
-    assert isinstance(parsed, dict)
-    return {
-        key: item
-        for key, item in parsed.items()  # pyright: ignore[reportUnknownVariableType] -- runtime checks narrow decoded JSON keys and values
-        if isinstance(key, str)
-    }
+def _json_object(value: str) -> dict[str, JSONValue]:
+    return RootModel[dict[str, JSONValue]].model_validate_json(value).root
 
 
-def _object(value: object) -> dict[str, object]:
+def _object(value: JSONValue) -> dict[str, JSONValue]:
     assert isinstance(value, dict)
-    return {
-        key: item
-        for key, item in value.items()  # pyright: ignore[reportUnknownVariableType] -- runtime checks narrow decoded JSON keys and values
-        if isinstance(key, str)
-    }
+    return value
 
 
-def _object_list(value: object) -> list[dict[str, object]]:
+def _object_list(value: JSONValue) -> list[dict[str, JSONValue]]:
     assert isinstance(value, list)
-    return [
-        _object(item)  # pyright: ignore[reportUnknownArgumentType] -- each decoded JSON element is narrowed by _object
-        for item in value  # pyright: ignore[reportUnknownVariableType] -- runtime checks narrow decoded JSON keys and values
-    ]
+    return [_object(item) for item in value]
 
 
 GOOD_MANIFEST = """
@@ -1884,7 +1980,7 @@ def test_public_corpus_is_six_immutable_not_downloaded_sources() -> None:
     corpus = _json_object(manifest_path.read_text(encoding="utf-8"))
     sources = _object_list(corpus["sources"])
     assert len(sources) == 6
-    assert len({item["profile"] for item in sources}) == 6
+    assert len({str(item["profile"]) for item in sources}) == 6
     assert all(len(str(item["commit"])) == 40 for item in sources)
     assert all(len(str(item["tree"])) == 40 for item in sources)
     assert all(_object(item["snapshot"])["status"] == "not-downloaded" for item in sources)

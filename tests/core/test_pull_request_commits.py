@@ -246,7 +246,7 @@ def test_exact_transition_exemption_passes(tmp_path: Path) -> None:
         head=head,
         base_ref="preview",
         head_ref=head_ref,
-        repository_id="sarj-ai/bulbul",
+        repository_id=RepositoryId("sarj-ai/bulbul"),
         transition_exemptions=(
             TransitionExemption(
                 exemption_id=TransitionExemptionId("bulbul-dev-preview"),
@@ -275,7 +275,7 @@ def test_verified_transition_bypasses_legacy_headers_even_within_limit(tmp_path:
         head=head,
         base_ref="preview",
         head_ref=f"automation/promote-dev-{head[:12]}",
-        repository_id="sarj-ai/bulbul",
+        repository_id=RepositoryId("sarj-ai/bulbul"),
         transition_exemptions=(
             TransitionExemption(
                 exemption_id=TransitionExemptionId("bulbul-dev-preview"),
@@ -347,7 +347,7 @@ def test_refreshed_transition_requires_a_clean_source_target_merge(
         head=head,
         base_ref="preview",
         head_ref=f"automation/promote-dev-{snapshot[:12]}",
-        repository_id="sarj-ai/bulbul",
+        repository_id=RepositoryId("sarj-ai/bulbul"),
         transition_exemptions=(
             TransitionExemption(
                 exemption_id=TransitionExemptionId("bulbul-dev-preview"),
@@ -377,7 +377,7 @@ def test_transition_snapshot_allows_source_advance(tmp_path: Path) -> None:
         head=snapshot,
         base_ref="preview",
         head_ref=f"automation/promote-dev-{snapshot[:12]}",
-        repository_id="sarj-ai/bulbul",
+        repository_id=RepositoryId("sarj-ai/bulbul"),
         transition_exemptions=(
             TransitionExemption(
                 exemption_id=TransitionExemptionId("bulbul-dev-preview"),
@@ -408,7 +408,7 @@ def test_transition_snapshot_with_extra_commit_is_not_exempt(tmp_path: Path) -> 
         head=head,
         base_ref="preview",
         head_ref=f"automation/promote-dev-{snapshot[:12]}",
-        repository_id="sarj-ai/bulbul",
+        repository_id=RepositoryId("sarj-ai/bulbul"),
         transition_exemptions=(
             TransitionExemption(
                 exemption_id=TransitionExemptionId("bulbul-dev-preview"),
@@ -446,7 +446,7 @@ def test_transition_lookalikes_do_not_pass(tmp_path: Path, changed: str) -> None
         head=head,
         base_ref=base_ref,
         head_ref=head_ref,
-        repository_id=repository_id,
+        repository_id=RepositoryId(repository_id),
         transition_exemptions=(
             TransitionExemption(
                 exemption_id=TransitionExemptionId("bulbul-dev-preview"),
