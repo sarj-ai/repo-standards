@@ -35,6 +35,7 @@ _MAXIMUM_GIT_OUTPUT_BYTES = 16 * 1024 * 1024
 _GIT_TIMEOUT = timedelta(seconds=10)
 _READ_CHUNK_BYTES = 64 * 1024
 _OBJECT_ID = re.compile(rb"[0-9a-f]{40}\Z")
+_MERGE_TREE_CONFLICTS = 1
 _NUMBERED_SUBJECT = re.compile(rb"\(([1-9][0-9]*)/([1-9][0-9]*)\) ([^\s].*)\Z")
 
 
@@ -50,6 +51,7 @@ Disposition = Literal[
     "within-limit",
     "numbered-series",
     "transition-exemption",
+    "transition-resolution",
     "over-limit",
 ]
 TransitionExemptionId = NewType("TransitionExemptionId", str)
@@ -82,6 +84,7 @@ class TransitionExemption:
     base_ref: str
     head_prefix: str
     sha_prefix_length: int = 12
+    allow_reviewed_resolution: bool = False
 
     def __post_init__(self) -> None:
         values = (
@@ -100,6 +103,14 @@ class TransitionExemption:
 
 
 @dataclass(frozen=True, slots=True)
+class TransitionMatch:
+    """A verified transition; `resolved_paths` is non-empty only for a reviewed resolution."""
+
+    exemption_id: TransitionExemptionId
+    resolved_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class PullRequestCommits:
     base: str
     head: str
@@ -110,6 +121,7 @@ class PullRequestCommits:
     disposition: Disposition
     numbering_issue: NumberingIssue | None = None
     exemption_id: TransitionExemptionId | None = None
+    resolved_paths: tuple[str, ...] = ()
     commit_message_enforcement: CommitMessageEnforcement | None = None
     commit_message_findings: tuple[PullRequestCommitMessageFinding, ...] = ()
 
@@ -180,7 +192,7 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
     )
     if len(commits) > MAXIMUM_ANALYZED_COMMITS:
         ConfigurationError.fail("pull-request history exceeds the 10000-commit safety limit")
-    exemption_id = matching_transition_exemption(
+    match = matching_transition_exemption(
         resolved,
         base_object_id=base_object_id,
         head_object_id=head_object_id,
@@ -191,8 +203,10 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
     )
     message_findings = ()
     numbering_issue = None
-    if exemption_id is not None:
-        disposition: Disposition = "transition-exemption"
+    if match is not None:
+        disposition: Disposition = (
+            "transition-resolution" if match.resolved_paths else "transition-exemption"
+        )
     elif len(commits) <= maximum_commits:
         disposition = "within-limit"
         message_findings = _commit_message_findings(commits)
@@ -209,7 +223,8 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
         maximum_commits=maximum_commits,
         commits=commits,
         disposition=disposition,
-        exemption_id=exemption_id,
+        exemption_id=None if match is None else match.exemption_id,
+        resolved_paths=() if match is None else match.resolved_paths,
         numbering_issue=numbering_issue,
         commit_message_enforcement=commit_message_enforcement,
         commit_message_findings=message_findings,
@@ -349,7 +364,7 @@ def matching_transition_exemption(  # ruff: ignore[too-many-arguments] - identit
     base_ref: str | None,
     head_ref: str | None,
     exemptions: tuple[TransitionExemption, ...],
-) -> TransitionExemptionId | None:
+) -> TransitionMatch | None:
     if repository_id is None or base_ref is None or head_ref is None:
         return None
     for exemption in exemptions:
@@ -365,9 +380,15 @@ def matching_transition_exemption(  # ruff: ignore[too-many-arguments] - identit
             continue
         _safe_revision(exemption.source_ref, name="source")
         source_object_id = _resolve_source(root, exemption.source_ref)
-        snapshot = _transition_snapshot(root, base_object_id, head_object_id, snapshot_prefix)
-        if snapshot is not None and _is_ancestor(root, snapshot, source_object_id):
-            return exemption.exemption_id
+        transition = _transition_snapshot(
+            root,
+            base_object_id,
+            head_object_id,
+            snapshot_prefix,
+            allow_reviewed_resolution=exemption.allow_reviewed_resolution,
+        )
+        if transition is not None and _is_ancestor(root, transition[0], source_object_id):
+            return TransitionMatch(exemption.exemption_id, transition[1])
     return None
 
 
@@ -376,9 +397,29 @@ def _transition_snapshot(
     base: GitObjectId,
     head: GitObjectId,
     snapshot_prefix: str,
-) -> GitObjectId | None:
+    *,
+    allow_reviewed_resolution: bool,
+) -> tuple[GitObjectId, tuple[str, ...]] | None:
+    """Return the snapshot and, for a reviewed resolution, its conflicted paths."""
     if head.startswith(snapshot_prefix):
-        return head
+        return head, ()
+    merge = _refresh_merge(root, base, head, snapshot_prefix)
+    if merge is None:
+        return None
+    snapshot, head_tree = merge
+    resolved = _merge_resolution(
+        root,
+        snapshot,
+        base,
+        head_tree,
+        allow_reviewed_resolution=allow_reviewed_resolution,
+    )
+    return None if resolved is None else (snapshot, resolved)
+
+
+def _refresh_merge(
+    root: Path, base: GitObjectId, head: GitObjectId, snapshot_prefix: str
+) -> tuple[GitObjectId, bytes] | None:
     metadata = _git(
         root,
         "show",
@@ -393,20 +434,64 @@ def _transition_snapshot(
     if len(parents) != _MERGE_PARENT_COUNT or parents[1].decode("ascii") != base:
         return None
     snapshot = GitObjectId(parents[0].decode("ascii"))
-    if not snapshot.startswith(snapshot_prefix):
+    return (snapshot, metadata[1]) if snapshot.startswith(snapshot_prefix) else None
+
+
+def _merge_resolution(
+    root: Path,
+    snapshot: GitObjectId,
+    base: GitObjectId,
+    head_tree: bytes,
+    *,
+    allow_reviewed_resolution: bool,
+) -> tuple[str, ...] | None:
+    """Return () for a clean merge, conflicted paths for a confined resolution, else None."""
+    status, output = _git_status(
+        root,
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "--no-messages",
+        "-z",
+        snapshot,
+        base,
+        allowed=frozenset({0, _MERGE_TREE_CONFLICTS}),
+        failure="Git could not merge the transition parents",
+    )
+    merged_tree, *conflicted = _nul_fields(output) or [b""]
+    if _OBJECT_ID.fullmatch(merged_tree) is None:
+        ConfigurationError.fail("Git returned a malformed transition merge tree")
+    if status == 0:
+        return () if merged_tree == head_tree and not conflicted else None
+    if not allow_reviewed_resolution or not conflicted:
         return None
-    try:
-        merged_tree = _git(
-            root,
-            "merge-tree",
-            "--write-tree",
-            snapshot,
-            base,
-            failure="Transition parents do not merge cleanly",
-        ).strip()
-    except ConfigurationError:
+    changed = _git(
+        root,
+        "diff-tree",
+        "-r",
+        "-z",
+        "--name-only",
+        "--no-renames",
+        merged_tree.decode("ascii"),
+        head_tree.decode("ascii"),
+        "--",
+        failure="Git could not compare the transition resolution",
+    )
+    if not set(_nul_fields(changed)) <= set(conflicted):
         return None
-    return snapshot if merged_tree == metadata[1] else None
+    return tuple(sorted({_printable_path(path) for path in conflicted}))
+
+
+def _printable_path(path: bytes) -> str:
+    text = path.decode("utf-8", errors="backslashreplace")
+    return "".join(char if char.isprintable() else f"\\x{ord(char):02x}" for char in text)
+
+
+def _nul_fields(output: bytes) -> list[bytes]:
+    fields = output.split(b"\0")
+    if fields and fields[-1] == b"":
+        fields.pop()
+    return fields
 
 
 def _resolve_source(root: Path, source_ref: str) -> GitObjectId:
@@ -441,6 +526,12 @@ def _is_ancestor(root: Path, ancestor: GitObjectId, descendant: GitObjectId) -> 
 
 
 def _git(root: Path, *arguments: str, failure: str) -> bytes:
+    return _git_status(root, *arguments, allowed=frozenset({0}), failure=failure)[1]
+
+
+def _git_status(
+    root: Path, *arguments: str, allowed: frozenset[int], failure: str
+) -> tuple[int, bytes]:
     executable = shutil.which("git")
     if executable is None:
         ConfigurationError.fail("Git is required for pull-request commit analysis")
@@ -453,10 +544,12 @@ def _git(root: Path, *arguments: str, failure: str) -> bytes:
         )
     except OSError:
         ConfigurationError.fail(failure)
-    return _bounded_git_output(process, failure=failure)
+    return _bounded_git_output(process, allowed=allowed, failure=failure)
 
 
-def _bounded_git_output(process: subprocess.Popen[bytes], *, failure: str) -> bytes:
+def _bounded_git_output(
+    process: subprocess.Popen[bytes], *, allowed: frozenset[int], failure: str
+) -> tuple[int, bytes]:
     stdout = process.stdout
     if stdout is None:
         _fail_git_process(process, failure)
@@ -481,9 +574,9 @@ def _bounded_git_output(process: subprocess.Popen[bytes], *, failure: str) -> by
         return_code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
         _fail_git_process(process, failure)
-    if return_code != 0:
+    if return_code not in allowed:
         ConfigurationError.fail(failure)
-    return bytes(output)
+    return return_code, bytes(output)
 
 
 def _fail_git_process(process: subprocess.Popen[bytes], message: str) -> NoReturn:

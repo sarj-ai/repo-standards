@@ -58,6 +58,7 @@ from repo_standards.core.pull_request_commits import (
     PullRequestCommits,
     TransitionExemption,
     TransitionExemptionId,
+    TransitionMatch,
     analyze_pull_request_commits,
     matching_transition_exemption,
 )
@@ -169,6 +170,7 @@ class _TransitionExemptionInput(BaseModel):
     base_ref: str = Field(min_length=1)
     head_prefix: str = Field(min_length=1)
     sha_prefix_length: int = Field(default=12, ge=7, le=40)
+    allow_reviewed_resolution: bool = False
 
 
 class _ReviewPolicyCheckInput(BaseModel):
@@ -213,6 +215,7 @@ class _ReviewPolicyEvidenceInput(BaseModel):
     threads_complete: bool
     threads_resolved: bool
     body: str = Field(max_length=1_048_576)
+    head_commit_user_logins: tuple[str, ...] | None = Field(default=None, max_length=16)
 
 
 class OutputFormat(StrEnum):
@@ -781,13 +784,13 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
             )
         _require_exact_configured_checks(provider, configured)
         activation = _authenticated_activation(configured, provider, base=base, head=head)
-        transition_exemption = _matching_review_policy_transition(
+        transition = _matching_review_policy_transition(
             root=resolved_root,
             base=GitObjectId(base),
             provider=provider,
             configured_pull_request=configured_pull_request,
         )
-        if transition_exemption is None:
+        if transition is None:
             size = analyze_pull_request_size(
                 resolved_root,
                 base=base,
@@ -803,7 +806,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         else:
             size = None
             counted_lines = 0
-            changed_paths = ()
+            changed_paths = transition.resolved_paths  # resolutions keep path-based floors
             missing_sections = ()
         reviews = tuple(
             HumanReviewEvidence(
@@ -845,7 +848,8 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
                 migration_roots=configured.migration_roots,
                 verified_activation=activation,
                 author_review_floor=1
-                if transition_exemption is None and _is_allowlisted_bot_author(provider, configured)
+                if (transition is not None and transition.resolved_paths)
+                or (transition is None and _is_allowlisted_bot_author(provider, configured))
                 else 0,
                 accepted_check_conclusions=frozenset(
                     CheckConclusion(item) for item in configured.accepted_check_conclusions
@@ -874,7 +878,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         reviews=reviews,
         result=result,
         missing_sections=missing_sections,
-        transition_exemption=transition_exemption,
+        transition=transition,
     )
     if activation is not None:
         payload = {**payload, "nonproduction_activation": activation.binding.payload()}
@@ -883,7 +887,7 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         result=result,
         provider=provider,
         missing_sections=missing_sections,
-        transition_exemption=transition_exemption,
+        transition=transition,
         configured=configured,
     ):
         raise typer.Exit(1)
@@ -1017,7 +1021,7 @@ def _matching_review_policy_transition(
     base: GitObjectId,
     provider: _ReviewPolicyEvidenceInput,
     configured_pull_request: PullRequestConfig,
-) -> str | None:
+) -> TransitionMatch | None:
     review_policy = configured_pull_request.review_policy
     if (
         review_policy is None
@@ -1042,6 +1046,7 @@ def _matching_review_policy_transition(
                 base_ref=transition.base_ref,
                 head_prefix=transition.head_prefix,
                 sha_prefix_length=transition.sha_prefix_length,
+                allow_reviewed_resolution=transition.allow_reviewed_resolution,
             )
             for transition in configured_pull_request.commit_history.transitions
             if transition.transition_id in exemptions
@@ -1064,20 +1069,41 @@ def _review_policy_merge_ready(
     result: ReviewPolicyResult,
     provider: _ReviewPolicyEvidenceInput,
     missing_sections: tuple[str, ...],
-    transition_exemption: str | None,
+    transition: TransitionMatch | None,
     configured: PullRequestReviewPolicyConfig,
 ) -> bool:
     return (
         result.merge_ready
+        and (
+            transition is None
+            or not transition.resolved_paths
+            or _independent_resolution_approval(provider)
+        )
         and not missing_sections
         and not provider.is_draft
         and (
             not provider.author_is_bot
-            or transition_exemption is not None
+            or transition is not None
             or _is_allowlisted_bot_author(provider, configured)
         )
         and provider.head_repository_id == provider.base_repository_id
         and all(check.head_sha == provider.evaluated_head_sha for check in provider.required_checks)
+    )
+
+
+def _independent_resolution_approval(provider: _ReviewPolicyEvidenceInput) -> bool:
+    """A reviewed resolution needs an exact-head human approval from neither author nor resolver."""
+    if not provider.head_commit_user_logins:
+        return False
+    excluded = {
+        login.casefold() for login in (provider.author_login, *provider.head_commit_user_logins)
+    }
+    return any(
+        review.state is ReviewState.APPROVED
+        and review.commit_sha == provider.evaluated_head_sha
+        and not review.reviewer_is_bot
+        and review.reviewer.rpartition(":")[2].casefold() not in excluded
+        for review in provider.latest_human_reviews
     )
 
 
@@ -1090,13 +1116,13 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
     reviews: tuple[HumanReviewEvidence, ...],
     result: ReviewPolicyResult,
     missing_sections: tuple[str, ...],
-    transition_exemption: str | None,
+    transition: TransitionMatch | None,
 ) -> Mapping[str, object]:
     merge_ready = _review_policy_merge_ready(
         result=result,
         provider=provider,
         missing_sections=missing_sections,
-        transition_exemption=transition_exemption,
+        transition=transition,
         configured=configured,
     )
     summary = size.summary if size is not None else None
@@ -1104,7 +1130,7 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
         result=result,
         provider=provider,
         missing_sections=missing_sections,
-        transition_exemption=transition_exemption,
+        transition=transition,
         configured=configured,
     )
     return {
@@ -1154,7 +1180,10 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
             }
             if result.description is not None
             else None,
-            "transition_exemption": transition_exemption,
+            "transition_exemption": None if transition is None else transition.exemption_id,
+            "transition_resolution_paths": (
+                [] if transition is None else list(transition.resolved_paths)
+            ),
             "missing_body_sections": list(missing_sections),
             "reasons": reasons,
         },
@@ -1228,11 +1257,15 @@ def _review_policy_receipt_reasons(
     result: ReviewPolicyResult,
     provider: _ReviewPolicyEvidenceInput,
     missing_sections: tuple[str, ...],
-    transition_exemption: str | None,
+    transition: TransitionMatch | None,
     configured: PullRequestReviewPolicyConfig,
 ) -> list[str]:
     reasons = [reason.value for reason in result.reasons]
-    if transition_exemption is not None:
+    if transition is not None and transition.resolved_paths:
+        reasons.append("transition_resolution")
+        if not _independent_resolution_approval(provider):
+            reasons.append("transition_resolution_approval_missing")
+    elif transition is not None:
         reasons.append("transition_exemption")
     if missing_sections:
         reasons.append("body_sections_incomplete")
@@ -1240,7 +1273,7 @@ def _review_policy_receipt_reasons(
         reasons.append("draft_pull_request")
     if (
         provider.author_is_bot
-        and transition_exemption is None
+        and transition is None
         and not _is_allowlisted_bot_author(provider, configured)
     ):
         reasons.append("bot_authored_pull_request")
@@ -1488,6 +1521,7 @@ def _analyze_resolved_pull_request_inputs(
                 base_ref=transition.base_ref,
                 head_prefix=transition.head_prefix,
                 sha_prefix_length=transition.sha_prefix_length,
+                allow_reviewed_resolution=transition.allow_reviewed_resolution,
             )
             for transition in history.transitions
         )
@@ -1545,6 +1579,7 @@ def _parse_transition_exemption(value: str) -> TransitionExemption:
         base_ref=document.base_ref,
         head_prefix=document.head_prefix,
         sha_prefix_length=document.sha_prefix_length,
+        allow_reviewed_resolution=document.allow_reviewed_resolution,
     )
 
 
@@ -1592,6 +1627,7 @@ def _pull_request_commits_payload(
         "disposition": result.disposition,
         "numbering_issue": result.numbering_issue,
         "exemption_id": result.exemption_id,
+        "resolved_paths": list(result.resolved_paths),
     }
     payload: dict[str, object] = {
         **_envelope(
@@ -1643,6 +1679,13 @@ def _render_pull_request_commits(result: PullRequestCommits, *, advisory: bool) 
     if result.exemption_id is not None:
         label = "Local transition candidate" if advisory else "Verified transition"
         lines.append(f"{label}: {result.exemption_id}")
+    if result.resolved_paths:
+        lines.append(
+            f"Reviewed resolution: {len(result.resolved_paths)} conflicted path(s); "
+            "an independent exact-head approval is required"
+        )
+        lines.extend(f"  {path}" for path in result.resolved_paths[:_MAX_RENDERED_COMMIT_FINDINGS])
+        lines.append(f"Inspect with: git show --remerge-diff {result.head_object_id}")
     if result.commit_message_findings:
         mode = result.commit_message_enforcement or "disabled"
         lines.append(f"Commit messages: {len(result.commit_message_findings)} finding(s) ({mode})")

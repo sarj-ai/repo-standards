@@ -554,6 +554,75 @@ def allowlisted_bot_reviewer_logins(manifest: Mapping[str, object]) -> frozenset
     return frozenset(logins)
 
 
+def allows_reviewed_resolution(manifest: Mapping[str, object]) -> bool:
+    pull_request = _optional_mapping(manifest.get("pull_request")) or {}
+    history = _optional_mapping(pull_request.get("commit_history")) or {}
+    transitions = _optional_array(history.get("transitions")) or ()
+    return any(
+        (transition := _optional_mapping(item)) is not None
+        and transition.get("allow_reviewed_resolution") is True
+        for item in transitions
+    )
+
+
+_HEAD_COMMIT_IDENTITY_QUERY = """
+query($owner: String!, $name: String!, $oid: GitObjectID!) {
+  repository(owner: $owner, name: $name) {
+    object(oid: $oid) {
+      ... on Commit {
+        authors(first: 10) { totalCount nodes { user { login } } }
+        committer { user { login } }
+        signature { isValid state wasSignedByGitHub signer { login } }
+      }
+    }
+  }
+}
+"""
+
+
+# Git author, committer and Co-authored-by identities are unauthenticated: count them only on a
+# valid signature with every one linked to GitHub, add the signer, and otherwise return nothing.
+def head_commit_user_logins(client: GitHubClient, head_sha: str) -> list[str]:
+    owner, _, name = client.repository.partition("/")
+    data = client.graphql(
+        _HEAD_COMMIT_IDENTITY_QUERY, {"owner": owner, "name": name, "oid": head_sha}
+    )
+    repository = _mapping(data.get("repository"), "GraphQL repository")
+    commit = _optional_mapping(repository.get("object"))
+    signature = None if commit is None else _optional_mapping(commit.get("signature"))
+    if (
+        commit is None
+        or signature is None
+        or signature.get("isValid") is not True
+        or signature.get("state") != "VALID"
+    ):
+        return []
+    authors = _optional_mapping(commit.get("authors")) or {}
+    nodes = _optional_array(authors.get("nodes")) or ()
+    if not nodes or authors.get("totalCount") != len(nodes):
+        return []
+    actors = [*nodes, commit.get("committer")]
+    logins: list[str] = []
+    for actor in actors:
+        login = _actor_login(_optional_mapping(actor))
+        if login is None:
+            return []
+        logins.append(login)
+    signer = _optional_mapping(signature.get("signer"))
+    if signer is not None or signature.get("wasSignedByGitHub") is not True:
+        signer_login = None if signer is None else signer.get("login")
+        if not isinstance(signer_login, str) or not signer_login:
+            return []
+        logins.append(signer_login)
+    return list(dict.fromkeys(logins))
+
+
+def _actor_login(actor: Mapping[str, object] | None) -> str | None:
+    user = None if actor is None else _optional_mapping(actor.get("user"))
+    login = None if user is None else user.get("login")
+    return login if isinstance(login, str) and login else None
+
+
 def _is_bot(user_type: str, login: str) -> bool:
     return user_type.casefold() == "bot" or login.casefold().endswith("[bot]")
 
@@ -1439,7 +1508,7 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
             token=github_token,
             server_url=os.environ.get("GITHUB_SERVER_URL", "https://github.com"),
         )
-        evidence = {
+        evidence: dict[str, object] = {
             "schema_version": 1,
             "pr_number": args.pr_number,
             "evaluated_head_sha": snapshot.head_sha,
@@ -1459,6 +1528,8 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
             "threads_resolved": collected.threads_resolved,
             "body": snapshot.body,
         }
+        if allows_reviewed_resolution(manifest):
+            evidence["head_commit_user_logins"] = head_commit_user_logins(client, snapshot.head_sha)
         evidence_path = temporary / "evidence.json"
         evidence_path.write_text(
             json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n",
