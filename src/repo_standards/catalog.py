@@ -42,6 +42,8 @@ from repo_standards.site import WEBSITE_URL
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import typer
 
 
@@ -89,6 +91,7 @@ _RULE_SLUGS = types.MappingProxyType(
         "repository/artifacts/schema-derived-config-examples": "schema-derived-config-examples",
         "repository/artifacts/bespoke-iac-verifiers": "bespoke-iac-verifiers",
         "repository/artifacts/operational-script-tests": "operational-script-tests",
+        "repository/artifacts/script-test-directories": "script-test-directories",
         "repository/artifacts/terraform-test-files": "terraform-test-files",
         "repository/artifacts/makefile-growth": "makefile-growth",
         "repository/documentation/placement": "documentation-placement",
@@ -105,8 +108,8 @@ class _ParameterResult(NamedTuple):
 
 
 class _AnnotationParts(NamedTuple):
-    base: object
-    metadata: tuple[object, ...]
+    base: object  # sarj-noqa: SARJ528 -- native Python annotations are open.
+    metadata: tuple[object, ...]  # sarj-noqa: SARJ528 -- native Annotated metadata is open.
 
 
 class CatalogModel(BaseModel):
@@ -623,7 +626,11 @@ def _command_descriptor(command: CommandInfo, path: tuple[str, ...]) -> CommandD
     )
 
 
-def _parameter(name: str, parameter: inspect.Parameter, annotation: object) -> _ParameterResult:
+def _parameter(
+    name: str,
+    parameter: inspect.Parameter,
+    annotation: object,  # sarj-noqa: SARJ528 -- native Python typing objects.
+) -> _ParameterResult:
     base, metadata = _annotation_parts(annotation)
     option = next((item for item in metadata if isinstance(item, OptionInfo)), None)
     argument = next((item for item in metadata if isinstance(item, ArgumentInfo)), None)
@@ -648,7 +655,9 @@ def _parameter(name: str, parameter: inspect.Parameter, annotation: object) -> _
     )
 
 
-def _annotation_parts(annotation: object) -> _AnnotationParts:
+def _annotation_parts(
+    annotation: object,  # sarj-noqa: SARJ528 -- get_type_hints exposes native annotations.
+) -> _AnnotationParts:
     if get_origin(annotation) is Annotated:
         arguments: tuple[object, ...] = get_args(annotation)
         return _AnnotationParts(arguments[0], arguments[1:])
@@ -666,14 +675,18 @@ def _parameter_names(name: str, option: OptionInfo | None) -> tuple[str, ...]:
     return tuple(declared) or (f"--{name.replace('_', '-')}",)
 
 
-def _choices(annotation: object) -> tuple[str, ...]:
+def _choices(
+    annotation: object,  # sarj-noqa: SARJ528 -- native annotation refined to an enum below.
+) -> tuple[str, ...]:
     selected = _non_optional(annotation)
     if isinstance(selected, type) and issubclass(selected, Enum):
         return tuple(_enum_value(item) for item in selected)
     return ()
 
 
-def _type_name(annotation: object) -> str:
+def _type_name(
+    annotation: object,  # sarj-noqa: SARJ528 -- native typing forms need reflected names.
+) -> str:
     selected = _non_optional(annotation)
     origin = get_origin(selected)
     if isinstance(origin, type):
@@ -683,7 +696,9 @@ def _type_name(annotation: object) -> str:
     return str(selected)
 
 
-def _non_optional(annotation: object) -> object:
+def _non_optional(
+    annotation: object,  # sarj-noqa: SARJ528 -- native union members are annotations.
+) -> object:  # sarj-noqa: SARJ528 -- return the original annotation or union member.
     origin = get_origin(annotation)
     if origin is types.UnionType:
         arguments: tuple[object, ...] = get_args(annotation)
@@ -715,13 +730,17 @@ def _reflected_default(parameter: inspect.Parameter) -> JSONValue:
     return _json_value(parameter.default)  # pyright: ignore[reportAny] - inspect boundary
 
 
-def _json_value(value: object) -> JSONValue:
+def _json_value(
+    value: object,  # sarj-noqa: SARJ528 -- native defaults are encoded and validated below.
+) -> JSONValue:
     encoded = json.dumps({"value": value}, default=_json_default, ensure_ascii=True, sort_keys=True)
     envelope = _JSON_OBJECT.validate_json(encoded, strict=True)
     return envelope["value"]
 
 
-def _json_default(value: object) -> str:
+def _json_default(
+    value: object,  # sarj-noqa: SARJ528 -- native JSON hook accepts any Python value.
+) -> str:
     match value:
         case Path():
             return value.as_posix()
@@ -803,7 +822,9 @@ def _schemas() -> tuple[SchemaDescriptor, ...]:
     )
 
 
-def _schema_object(value: object) -> dict[str, JSONValue]:
+def _schema_object(
+    value: Mapping[str, object],  # sarj-noqa: SARJ528 -- validate raw native schema members below.
+) -> dict[str, JSONValue]:
     return _JSON_OBJECT.validate_python(value, strict=True)
 
 

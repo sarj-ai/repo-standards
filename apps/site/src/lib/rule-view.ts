@@ -25,6 +25,8 @@ const DESCRIPTIONS = {
     "Review multiple new SQL migrations per stream.",
   "repository/artifacts/operational-script-tests":
     "Review tests in operational directories.",
+  "repository/artifacts/script-test-directories":
+    "Block new code in script test directories.",
   "repository/artifacts/schema-derived-config-examples":
     "Generate config examples from schemas.",
   "repository/artifacts/terraform-examples": "Document inputs in variables.tf.",

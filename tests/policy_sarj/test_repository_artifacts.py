@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from repo_standards.core.canonical import semantic_fingerprint
 from repo_standards.core.models import (
     Component,
     ComponentId,
@@ -32,6 +33,76 @@ _PACKAGE_ROOT = "libraries/infra"
 _PACKAGE_TEST = "tests/test_inputs.py"
 _PYTHON_PACKAGE = ("python", "input-library")
 _NPM_PACKAGE = ("npm", "@example/input-library")
+_SCRIPT_TEST_DIRECTORIES = RuleId("repository/artifacts/script-test-directories")
+
+
+@pytest.mark.parametrize(
+    ("path", "prohibited"),
+    [
+        ("scripts/tests/test_release.py", True),
+        ("python/scripts/tests/test_release.py", True),
+        ("python/scripts/tests/conftest.py", True),
+        ("python/scripts/tests/support/fixture.py", True),
+        ("packages/generator/scripts/tests/render.test.cjs", True),
+        ("tools/cli/SCRIPTS/__TESTS__/runner.MTS", True),
+        ("scripts/spec/contract.sh", True),
+        ("scripts/test/check.tsx", True),
+        ("scripts/specs/check.jq", True),
+        ("python/agent/tests/test_release.py", False),
+        ("tools/release/tests/test_release.py", False),
+        ("scripts/tests/README.md", False),
+        ("scripts/tests/fixtures/response.json", False),
+        ("scripts/contests/runner.py", False),
+        ("scripts/tests.py", False),
+        ("transcripts/tests/test_release.py", False),
+    ],
+)
+def test_script_test_directory_gate_uses_exact_path_segments(
+    path: str, *, prohibited: bool
+) -> None:
+    findings = SarjPolicy.evaluate_repository(
+        _snapshot(path), enabled_rule_ids=frozenset({_SCRIPT_TEST_DIRECTORIES})
+    )
+    assert [item.path for item in findings] == ([path] if prohibited else [])
+    assert all(item.severity == "error" for item in findings)
+
+
+def test_script_test_baseline_binds_only_the_reviewed_file_content() -> None:
+    path = "python/scripts/tests/test_release.py"
+    snapshot = _snapshot(path, "python/agent/main.py")
+
+    def finding(current: RepositorySnapshot) -> str:
+        diagnostics = SarjPolicy.evaluate_repository(
+            current, enabled_rule_ids=frozenset({_SCRIPT_TEST_DIRECTORIES})
+        )
+        assert len(diagnostics) == 1
+        return semantic_fingerprint(diagnostics[0])
+
+    original = finding(snapshot)
+    for changed_path in (path, "python/agent/main.py"):
+        files = tuple(
+            replace(item, object_id="f" * 40) if item.path == changed_path else item
+            for item in snapshot.inspection.tracked_files
+        )
+        changed = replace(snapshot, inspection=replace(snapshot.inspection, tracked_files=files))
+        assert (finding(changed) == original) is (changed_path != path)
+
+
+def test_strict_directory_gate_replaces_only_its_advisory_overlap() -> None:
+    snapshot = _snapshot("scripts/tests/test_release.py", "iac/test_plan.py")
+    advisory = RuleId("repository/artifacts/operational-script-tests")
+    review_only = SarjPolicy.evaluate_repository(snapshot, enabled_rule_ids=frozenset({advisory}))
+    assert [(item.path, item.rule_id) for item in review_only] == [
+        ("iac/test_plan.py", advisory),
+        ("scripts/tests/test_release.py", advisory),
+    ]
+    strict = SarjPolicy.evaluate_repository(
+        snapshot, enabled_rule_ids=frozenset({advisory, _SCRIPT_TEST_DIRECTORIES})
+    )
+    assert sorted((item.path, item.rule_id) for item in strict) == [
+        ("iac/test_plan.py", advisory),
+        ("scripts/tests/test_release.py", _SCRIPT_TEST_DIRECTORIES),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -131,7 +202,6 @@ def _with_insubstantive_path(
 
 
 def _rule_ids(snapshot: RepositorySnapshot) -> list[RuleId]:
-    # Declaration rules have dedicated domain, ownership and overlap cases.
     return [
         item.rule_id
         for item in SarjPolicy.evaluate_repository(snapshot)
@@ -524,7 +594,7 @@ def test_root_project_owns_only_conventional_test_locations() -> None:
     ]
 
 
-def test_declared_native_package_cannot_erase_github_script_review() -> None:
+def test_declared_native_package_cannot_erase_github_script_directory_gate() -> None:
     root = ".github/scripts"
     component = Component(ComponentId("ci"), "tool", root, "@example/ci")
     package = _root_package("npm", f"{root}/package.json", "ci-tools", workspace_root=False)
@@ -537,40 +607,44 @@ def test_declared_native_package_cannot_erase_github_script_review() -> None:
             components=(component,),
             packages=(package,),
         )
-    ) == [RuleId("repository/artifacts/operational-script-tests")]
+    ) == [_SCRIPT_TEST_DIRECTORIES]
 
 
 @pytest.mark.parametrize(
-    ("package_path", "package_name", "artifact_path"),
+    ("package_path", "package_name", "artifact_path", "expected"),
     [
         pytest.param(
             "packages/generator/package.json",
             "@example/generator",
             "packages/generator/scripts/tests/render.test.cjs",
+            [_SCRIPT_TEST_DIRECTORIES],
             id="package-test",
         ),
         pytest.param(
             "packages/application/package.json",
             "@example/application",
             "packages/application/src/verify-config.ts",
+            [],
             id="application-verifier",
         ),
         pytest.param(
             "packages/application/package.json",
             "@example/application",
             "packages/application/spec/contract.spec.ts",
+            [],
             id="spec-suite",
         ),
         pytest.param(
             "packages/application/package.json",
             "@example/application",
             "packages/application/specs/contract.spec.ts",
+            [],
             id="specs-suite",
         ),
     ],
 )
 def test_root_workspace_owned_package_artifact_is_clean(
-    package_path: str, package_name: str, artifact_path: str
+    package_path: str, package_name: str, artifact_path: str, expected: list[RuleId]
 ) -> None:
     package = PackageEvidence(
         ecosystem="npm",
@@ -585,15 +659,18 @@ def test_root_workspace_owned_package_artifact_is_clean(
         member_patterns=("packages/*",),
         exclude_patterns=(),
     )
+    snapshot = _snapshot(
+        artifact_path,
+        packages=(package,),
+        workspaces=(workspace,),
+    )
+    assert _rule_ids(snapshot) == expected
     assert (
-        _rule_ids(
-            _snapshot(
-                artifact_path,
-                packages=(package,),
-                workspaces=(workspace,),
-            )
+        SarjPolicy.evaluate_repository(
+            snapshot,
+            enabled_rule_ids=frozenset({RuleId("repository/artifacts/operational-script-tests")}),
         )
-        == []
+        == ()
     )
 
 
@@ -800,7 +877,7 @@ def test_root_workspace_owned_package_exclusions(
     ("component_id", "root", "identity", "artifact_path", "expected_rules"),
     [
         pytest.param(
-            "shared.release-tool",
+            ComponentId("shared.release-tool"),
             "tools/release",
             "@example/release-tool",
             "tools/release/tests/render.test.cjs",
@@ -808,7 +885,7 @@ def test_root_workspace_owned_package_exclusions(
             id="tools-root",
         ),
         pytest.param(
-            "shared.release-tool",
+            ComponentId("shared.release-tool"),
             "tools/release",
             "@example/release-tool",
             "tools/release/src/render.test.cjs",
@@ -816,7 +893,7 @@ def test_root_workspace_owned_package_exclusions(
             id="tools-source-is-not-test-ownership",
         ),
         pytest.param(
-            "shared.iac-tool",
+            ComponentId("shared.iac-tool"),
             "iac/bell",
             "@example/iac-tool",
             "iac/bell/tests/plan.test.cjs",
@@ -826,14 +903,14 @@ def test_root_workspace_owned_package_exclusions(
     ],
 )
 def test_operational_root_precedes_declared_tool_ownership(
-    component_id: str,
+    component_id: ComponentId,
     root: str,
     identity: str,
     artifact_path: str,
     expected_rules: list[RuleId],
 ) -> None:
     component = Component(
-        ComponentId(component_id),
+        component_id,
         "tool",
         root,
         identity,
