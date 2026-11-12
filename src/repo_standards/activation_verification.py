@@ -10,7 +10,7 @@ from pathlib import PurePosixPath
 import re
 import tomllib
 from typing import TYPE_CHECKING, Literal, Protocol, TypeGuard
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
 import zlib
 
@@ -327,6 +327,12 @@ def _identity(pr: Mapping[str, object]) -> tuple[object, ...]:
     )
 
 
+def _workflow_runs_path(prefix: str, workflow_id: int, branch: str, event: str) -> str:
+    # Filter by event server side so a newer run from another trigger cannot displace the proof.
+    query = urlencode({"branch": branch, "event": event})
+    return f"{prefix}/actions/workflows/{workflow_id}/runs?{query}"
+
+
 def _producer_receipt(  # ruff: ignore[too-many-locals] -- each authenticated provider identity stays explicit
     client: ActivationClient,
     policy: ActivationPolicy,
@@ -345,7 +351,7 @@ def _producer_receipt(  # ruff: ignore[too-many-locals] -- each authenticated pr
     runs = [
         _object(item)
         for item in client.rest_pages(
-            f"{prefix}/actions/workflows/{workflow_id}/runs?branch={branch}",
+            _workflow_runs_path(prefix, workflow_id, branch, policy.event),
             collection_key="workflow_runs",
         )
     ]
@@ -441,7 +447,7 @@ def _require_current_producer(
     runs = [
         _object(item)
         for item in client.rest_pages(
-            f"{prefix}/actions/workflows/{workflow_id}/runs?branch={branch}",
+            _workflow_runs_path(prefix, workflow_id, branch, policy.event),
             collection_key="workflow_runs",
         )
     ]
