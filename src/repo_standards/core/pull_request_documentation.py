@@ -279,12 +279,17 @@ def _adds_content(before: bytes, after: bytes) -> bool:
     if b"\0" in before or b"\0" in after:
         return True
     try:
-        old_lines = iter(before.decode("utf-8").split("\n"))
-        new_lines = after.decode("utf-8").split("\n")
+        old_tokens = iter(_content_tokens(before.decode("utf-8")))
+        new_tokens = _content_tokens(after.decode("utf-8"))
     except UnicodeDecodeError:
         return True
-    # An ordered subsequence preserves all existing content while permitting deletions.
-    return any(line.strip() and line not in old_lines for line in new_lines)
+    # Permit deletions and reflow while rejecting added, duplicated or reordered tokens.
+    return any(token not in old_tokens for token in new_tokens)
+
+
+def _content_tokens(content: str) -> list[str]:
+    nonblank = "\n".join(line for line in content.split("\n") if line.strip())
+    return re.findall(r"\w+|[^\w \t\r\n]", nonblank)
 
 
 def _git(root: Path, *arguments: str, input_bytes: bytes | None = None) -> bytes:
