@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-_RULE_ID = "repository/artifacts/untyped-javascript"
+_RULE_ID = "repository/artifacts/operational-script-tests"
 _MANIFEST = f'repository_id = "ratchet-example"\ncomponents = []\nenabled_rules = ["{_RULE_ID}"]\n'
 _RUNNER = CliRunner()
 _JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
@@ -60,10 +60,13 @@ def _commit(root: Path) -> None:
     )
 
 
-def _repository(root: Path, *, javascript: bool = True) -> Path:
+def _repository(root: Path, *, warning: bool = True) -> Path:
     (root / ".repo-standards").mkdir()
+    (root / ".github/scripts").mkdir(parents=True)
     (root / ".repo-standards/repository.toml").write_text(_MANIFEST, encoding="utf-8")
-    (root / ("app.js" if javascript else "app.ts")).write_text("export {};\n", encoding="utf-8")
+    (root / (".github/scripts/app.test.mts" if warning else "app.ts")).write_text(
+        "export {};\n", encoding="utf-8"
+    )
     _git(root, "init", "--quiet")
     _commit(root)
     return root
@@ -110,7 +113,7 @@ def test_default_baseline_and_ratchet_preserve_error_only_behavior(tmp_path: Pat
 
 
 def test_script_test_gate_blocks_new_tests_inside_a_baselined_file(tmp_path: Path) -> None:
-    root = _repository(tmp_path, javascript=False)
+    root = _repository(tmp_path, warning=False)
     manifest = root / ".repo-standards/repository.toml"
     manifest.write_text(
         _MANIFEST.replace(_RULE_ID, "repository/artifacts/script-test-directories"),
@@ -140,10 +143,10 @@ def test_script_test_gate_blocks_new_tests_inside_a_baselined_file(tmp_path: Pat
 
 
 def test_opted_in_ratchet_blocks_a_new_warning_from_a_zero_baseline(tmp_path: Path) -> None:
-    root = _repository(tmp_path, javascript=False)
+    root = _repository(tmp_path, warning=False)
     payload = parse_json_object(_baseline(root, include_warnings=True).encode())
     assert payload["fingerprints"] == []
-    (root / "app.js").write_text("export {};\n", encoding="utf-8")
+    (root / ".github/scripts/app.test.mts").write_text("export {};\n", encoding="utf-8")
     _commit(root)
     checked = _check(root, include_warnings=True)
     assert checked.exit_code == 1, checked.stdout
@@ -164,7 +167,7 @@ def test_opted_in_known_warning_passes_and_resolved_fingerprint_fails_closed(
     checked = _check(root, include_warnings=True)
     assert checked.exit_code == 0, checked.stdout
     assert '"known":1' in checked.stdout
-    (root / "app.js").unlink()
+    (root / ".github/scripts/app.test.mts").unlink()
     _commit(root)
     checked = _check(root, include_warnings=True)
     assert checked.exit_code == 2, checked.stdout
@@ -183,19 +186,19 @@ def test_baseline_comparison_requires_the_exact_warning_setting(
 
 
 def test_staged_warning_gate_does_not_read_unstaged_or_untracked_bytes(tmp_path: Path) -> None:
-    root = _repository(tmp_path, javascript=False)
+    root = _repository(tmp_path, warning=False)
     _baseline(root, include_warnings=True)
-    (root / "new.js").write_text("export {};\n", encoding="utf-8")
+    (root / ".github/scripts/new.test.mts").write_text("export {};\n", encoding="utf-8")
     assert _check(root, include_warnings=True, staged=True).exit_code == 0
-    _git(root, "add", "new.js")
+    _git(root, "add", ".github/scripts/new.test.mts")
     assert _check(root, include_warnings=True).exit_code == 0
     assert _check(root, include_warnings=True, staged=True).exit_code == 1
 
 
 def test_native_baseline_creation_has_the_same_staged_git_authority(tmp_path: Path) -> None:
-    root = _repository(tmp_path, javascript=False)
-    (root / "new.js").write_text("export {};\n", encoding="utf-8")
-    _git(root, "add", "new.js")
+    root = _repository(tmp_path, warning=False)
+    (root / ".github/scripts/new.test.mts").write_text("export {};\n", encoding="utf-8")
+    _git(root, "add", ".github/scripts/new.test.mts")
     committed = _RUNNER.invoke(app, ["baseline", str(root), "--ratchet-warnings"])
     staged = _RUNNER.invoke(app, ["baseline", str(root), "--ratchet-warnings", "--staged"])
     assert committed.exit_code == staged.exit_code == 0
@@ -218,6 +221,8 @@ def test_stale_policy_or_scope_baselines_are_rejected(tmp_path: Path, field: str
 
 def test_reviewed_artifact_changes_require_a_new_scope_baseline(tmp_path: Path) -> None:
     root = _repository(tmp_path)
+    (root / "app.js").write_text("export {};\n", encoding="utf-8")
+    _commit(root)
     _baseline(root, include_warnings=True)
     (root / ".repo-standards/repository.toml").write_text(
         _MANIFEST
@@ -357,7 +362,7 @@ def test_native_baseline_creation_respects_its_parser_size_boundary(tmp_path: Pa
 def test_native_baseline_cli_wire_size_includes_its_trailing_newline(
     tmp_path: Path, extra_bytes: int
 ) -> None:
-    root = _repository(tmp_path, javascript=False)
+    root = _repository(tmp_path, warning=False)
     initial = _RUNNER.invoke(app, ["baseline", str(root), "--ratchet-warnings"])
     assert initial.exit_code == 0
     repository_id_length = (

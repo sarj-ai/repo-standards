@@ -2110,9 +2110,11 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
 ) -> None:
     r"""Analyze one repository manifest.
 
-    Explicitly enable repository/artifacts/untyped-javascript in enabled_rules
-    or with --enable-rule to review tracked .js, .jsx, .mjs and .cjs paths
-    case-insensitively. Typed variants and source maps remain outside this rule.
+    Without a nonempty rule selection, reject undeclared JavaScript and bespoke
+    verifier scripts. Use .mts for ESM tooling and .cts for CommonJS. The
+    untyped-javascript rule reviews .js, .jsx, .mjs and .cjs case-insensitively;
+    typed variants and source maps remain outside this rule. A nonempty
+    enabled_rules list or --enable-rule selects the requested rules instead.
     Migrations must update loaders, callers, type checks and runtime tests.
     Typed tool presets such as eslint.strict.ts need no JavaScript artifact
     declaration. Prefer a tool's supported TypeScript preset over declaring

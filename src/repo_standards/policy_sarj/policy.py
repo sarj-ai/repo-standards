@@ -380,8 +380,8 @@ RULES = (
     ),
     Rule(
         rule_id=UNTYPED_JAVASCRIPT_RULE_ID,
-        version=1,
-        default_severity="warning",
+        version=2,
+        default_severity="error",
         title="Prefer typed source and declare required JavaScript artifacts",
         description=(
             "Tracked .js, .jsx, .mjs and .cjs paths, case-insensitively, need an exact "
@@ -394,8 +394,9 @@ RULES = (
             "make that intent reviewable without inferring it from a filename."
         ),
         fix=(
-            "Review module loading and callers before migrating authored code to typed "
-            "TypeScript. For required JavaScript, declare the exact path, artifact kind and "
+            "Use .mts for authored ESM tooling, .cts for CommonJS, and the framework's typed "
+            "source convention for applications. Review module loading and callers before "
+            "migrating. For required JavaScript, declare the exact path, artifact kind and "
             "reason; generated output also needs a tracked non-JavaScript source. A declaration "
             "records intent and does not prove generation or semantic necessity."
         ),
@@ -406,8 +407,8 @@ RULES = (
                 title="Typed tooling source",
                 language="text",
                 before="scripts/generate-catalog.mjs",
-                after="scripts/generate-catalog.ts",
-                expected_severity="warning",
+                after="scripts/generate-catalog.mts",
+                expected_severity="error",
             ),
             _example(
                 example_id="sarj-artifact-untyped-javascript-generated",
@@ -424,7 +425,7 @@ RULES = (
                     'kind = \\"generated\\"\\nsource = \\"scripts/generate.py\\"\\n'
                     'reason = \\"External tools load this generated ESM artifact.\\"\\n"}'
                 ),
-                expected_severity="warning",
+                expected_severity="error",
             ),
         ),
     ),
@@ -836,7 +837,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=35,
+    policy_version=36,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1535,6 +1536,10 @@ class SarjPolicy:
     policy_id: ClassVar[PolicyId] = PolicyId("sarj")
     policy_version: ClassVar[int] = POLICY_SPEC.policy_version
     profile_id: ClassVar[ProfileId] = PROFILE_ID
+    default_rule_ids: ClassVar[tuple[str, ...]] = (
+        "repository/artifacts/untyped-javascript",
+        "repository/artifacts/bespoke-iac-verifiers",
+    )
 
     @staticmethod
     def spec() -> PolicySpec:
