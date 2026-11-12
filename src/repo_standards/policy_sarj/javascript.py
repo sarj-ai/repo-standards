@@ -53,7 +53,8 @@ def javascript_diagnostics(
                         "Review the file and its runtime, tool, fixture or distribution contract.",
                         (
                             "For authored tooling or application source, migrate to typed "
-                            "TypeScript and update callers, module loading and type checks."
+                            "TypeScript (.mts for ESM tooling, .cts for CommonJS) and update "
+                            "callers, module loading and type checks."
                         ),
                         (
                             "For required JavaScript, add an exact javascript.artifacts "

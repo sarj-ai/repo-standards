@@ -78,7 +78,7 @@ def complete_repository_analysis(
     if snapshot.manifest.enabled_rules and request.enabled_rule_ids:
         ConfigurationError.fail("manifest enabled_rules cannot be combined with enabled_rule_ids")
     enabled_rules = activated_rule_ids(
-        snapshot.manifest.enabled_rules or request.enabled_rule_ids,
+        snapshot.manifest.enabled_rules or request.enabled_rule_ids or policy.default_rule_ids,
         current_rules=frozenset(RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()),
     )
     snapshot = with_makefile_comparison(

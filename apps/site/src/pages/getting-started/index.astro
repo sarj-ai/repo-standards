@@ -6,7 +6,7 @@ import { siteHref } from '../../lib/site';
 
 const setup = 'uvx --no-config --isolated --python 3.14 --from code-standards code-standards setup\ncode-standards doctor';
 const standalone = 'uv tool install repo-standards\nrepo-standards pull-request size . --base origin/main';
-const manifest = 'enabled_rules = ["repository/artifacts/bespoke-iac-verifiers"]';
+const manifest = 'repository_id = "example-repository"\ncomponents = []';
 const workflow = `name: Pull-request size
 on:
   pull_request:
@@ -24,12 +24,12 @@ jobs:
       - uses: sarj-ai/repo-standards@9ec36427f34bab43589129d85d571dd476061c8e # v6.22.3`;
 ---
 
-<ReferencePage title="Getting started" description="Set up local hooks, run a size check, and explicitly enable reviewed repository rules.">
+<ReferencePage title="Getting started" description="Set up typed-source defaults, local hooks, and pull-request checks.">
   <article class="guide-page">
     <header class="section-heading">
       <p class="eyebrow">Setup</p>
       <h1>Getting started</h1>
-      <p class="lede">Start with local feedback. Enable repository rules when you are ready.</p>
+      <p class="lede">Start with shared typed-source and verifier rules, then choose additional policy.</p>
     </header>
 
     <nav class="command-index" aria-label="On this page">
@@ -51,11 +51,11 @@ jobs:
 
     <section id="enable-rules" aria-labelledby="enable-rules-heading">
       <h2 id="enable-rules-heading">2. Choose repository rules</h2>
-      <p>Rules are disabled by default. <a href={siteHref('/rules/')}>Review a rule and its examples</a>, then add its stable ID to <code>.repo-standards/repository.toml</code>:</p>
+      <p>Checks reject undeclared JavaScript and bespoke verifier scripts by default. Use <code>.mts</code> for ESM tooling and <code>.cts</code> for CommonJS. Start with this tracked <code>.repo-standards/repository.toml</code>:</p>
       <Code code={manifest} lang="toml" frame="none" wrap />
       <Code code="repo-standards check ." lang="bash" frame="terminal" />
       <p>The manifest must be tracked in Git. Checks read committed <code>HEAD</code>; use <code>--staged</code> after staging both the manifest and files to check the index.</p>
-      <p class="muted">The installed release supplies the implementation. IDs stay versionless. <code>--enable-rule</code> selects a rule for one run.</p>
+      <p class="muted">An omitted or empty rule list uses the defaults. A nonempty <code>enabled_rules</code> list or <code>--enable-rule</code> selection replaces them; include both default IDs when adding rules. <a href={siteHref('/rules/')}>Review rules and their examples</a>. IDs stay versionless.</p>
     </section>
 
     <section id="ci" aria-labelledby="ci-heading">

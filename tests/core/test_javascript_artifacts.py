@@ -130,8 +130,8 @@ def test_every_tracked_javascript_extension_needs_a_declaration(path: str) -> No
     assert len(findings) == 1
     finding = findings[0]
     assert finding.path == path
-    assert finding.severity == "warning"
-    assert finding.rule_version == 1
+    assert finding.severity == "error"
+    assert finding.rule_version == 2
     assert finding.evidence_level == "verified"
     assert "declar" in finding.message
     assert finding.remediation is not None
@@ -409,7 +409,7 @@ def test_git_literal_artifacts_and_sources_never_expand_patterns(
         item for item in SarjPolicy.evaluate_repository(snapshot) if item.rule_id == _RULE_ID
     ]
     assert {item.path for item in findings} == set(siblings)
-    assert all(item.severity == "warning" and item.rule_version == 1 for item in findings)
+    assert all(item.severity == "error" and item.rule_version == 2 for item in findings)
     assert snapshot.manifest.javascript_artifacts[1].path == artifact_path
     assert snapshot.manifest.javascript_artifacts[1].source == source_path
 
@@ -571,18 +571,41 @@ def test_artifact_and_generator_symlinks_fail_closed(tmp_path: Path, path: str) 
         load_repository_snapshot(root, identity=git_index_identity(root))
 
 
-def test_new_rule_is_opt_in_warning_with_no_implicit_activation(tmp_path: Path) -> None:
+def test_typed_source_is_enforced_by_default(tmp_path: Path) -> None:
     root = _repository(tmp_path)
-    disabled = analyze_repository(RepositoryAnalysisRequest(root=root))
-    enabled = analyze_repository(
+    (root / "app.js").rename(root / "app.mjs")
+    _commit(root)
+    default = analyze_repository(RepositoryAnalysisRequest(root=root))
+    selected = analyze_repository(
         RepositoryAnalysisRequest(root=root, enabled_rule_ids=(str(_RULE_ID),))
     )
-    assert disabled.completion == enabled.completion == "complete"
-    assert disabled.diagnostics == ()
-    assert [(item.rule_id, item.severity, item.path) for item in enabled.diagnostics] == [
-        (_RULE_ID, "warning", "app.js")
+    assert default.completion == selected.completion == "complete"
+    assert default.diagnostics == selected.diagnostics
+    assert [(item.rule_id, item.severity, item.path) for item in default.diagnostics] == [
+        (_RULE_ID, "error", "app.mjs")
     ]
-    assert enabled.mode is Mode.STRICT
+    assert default.mode is Mode.STRICT
+    (root / "app.mjs").rename(root / "app.mts")
+    _commit(root)
+    assert analyze_repository(RepositoryAnalysisRequest(root=root)).diagnostics == ()
+
+
+def test_bespoke_verifiers_are_rejected_by_default(tmp_path: Path) -> None:
+    root = _repository(tmp_path, artifact=_artifact("app.js", kind="runtime"))
+    verifier = root / ".github/scripts/verify-access.mts"
+    verifier.parent.mkdir(parents=True)
+    verifier.write_text("export {};\n", encoding="utf-8")
+    _commit(root)
+
+    report = analyze_repository(RepositoryAnalysisRequest(root=root))
+
+    assert [(item.rule_id, item.severity, item.path) for item in report.diagnostics] == [
+        (
+            RuleId("repository/artifacts/bespoke-iac-verifiers"),
+            "error",
+            ".github/scripts/verify-access.mts",
+        )
+    ]
 
 
 def test_manifest_activation_and_declaration_are_independent(tmp_path: Path) -> None:
@@ -662,12 +685,12 @@ def test_removed_generation_input_invalidates_a_declaration(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("command", ["check", "report"])
-def test_strict_and_report_show_warnings_without_error_promotion(
+def test_strict_and_report_enforce_the_reviewed_typed_source_policy(
     tmp_path: Path, command: str
 ) -> None:
     root = _repository(tmp_path, enabled=True)
     result = CliRunner().invoke(app, [command, str(root), "--format", "json"])
-    assert result.exit_code == 0, result.stdout
-    assert '"severity":"warning"' in result.stdout
-    assert '"warnings":1' in result.stdout
-    assert '"errors":0' in result.stdout
+    assert result.exit_code == (1 if command == "check" else 0), result.stdout
+    assert '"severity":"error"' in result.stdout
+    assert '"warnings":0' in result.stdout
+    assert '"errors":1' in result.stdout

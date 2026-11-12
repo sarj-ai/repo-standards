@@ -93,7 +93,7 @@ const referenceLinks = [...new Set(rule.references)].map((href) => ({
       <h2 id="enable-rule">Enable this rule</h2>
       <p>Add the stable ID to <code>enabled_rules</code> in your tracked <code>.repo-standards/repository.toml</code>:</p>
       <Code code={`enabled_rules = ["${rule["rule_id"]}"]`} lang="toml" frame="none" wrap />
-      <p>Keep any IDs already enabled. <a href={siteHref('/getting-started/#enable-rules')}>Setup and staged checks</a></p>
+      <p>This selects only this rule. To retain the defaults, also include <code>repository/artifacts/untyped-javascript</code> and <code>repository/artifacts/bespoke-iac-verifiers</code>, along with any existing IDs. Omitted or empty selections use the defaults. <a href={siteHref('/getting-started/#enable-rules')}>Setup and staged checks</a></p>
     </section>
 
     {referenceLinks.length > 0 && (

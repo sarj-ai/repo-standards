@@ -1,8 +1,6 @@
 # repo-standards
 
-`repo-standards` measures pull-request review size without executing repository code. Its
-repository rules are available for review but remain disabled until individually approved
-and explicitly activated by a consumer.
+`repo-standards` measures pull-request review size without executing repository code.
 
 ## Where rules belong
 
