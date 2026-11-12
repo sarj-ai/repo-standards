@@ -1,10 +1,6 @@
 # repo-standards
 
-`repo-standards` measures pull-request review size without executing repository code. With no
-explicit rule selection, repository checks enforce typed source and reject bespoke verifier
-scripts. Use `.mts` for ESM tooling and `.cts` for CommonJS; required JavaScript needs an exact
-`javascript.artifacts` declaration. A nonempty rule list replaces these defaults;
-an omitted or empty selection uses them.
+`repo-standards` measures pull-request review size without executing repository code.
 
 ## Where rules belong
 
