@@ -17,6 +17,8 @@ from repo_standards.core.pull_request_documentation import analyze_pull_request_
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from pydantic import JsonValue
+
 
 runner = CliRunner()
 
@@ -166,11 +168,24 @@ def test_content_additions_are_rejected_in_existing_scoped_files(tmp_path: Path,
     assert not result.satisfied
 
 
-@pytest.mark.parametrize("content", ["", "existing\n", "\nexisting\n\t\nsecond\n\u2003\n"])
-def test_deletions_and_blank_additions_are_allowed(tmp_path: Path, content: str) -> None:
+@pytest.mark.parametrize(
+    ("before", "content"),
+    [
+        ("existing\nsecond\n", ""),
+        ("existing\nsecond\n", "existing\n"),
+        ("existing\nsecond\n", "\nexisting\n\t\nsecond\n\u2003\n"),
+        ("Existing words remain here.\n", "Existing words here.\n"),
+        ("Existing words\nremain here.\n", "Existing words remain here.\n"),
+        ("The drain. `test_render.py` keeps that order.\n", "The drain.\n"),
+        ("Mirror `kamailio.cfg`); the retired test checks it.\n", "Mirror `kamailio.cfg`).\n"),
+    ],
+)
+def test_deletions_and_blank_additions_are_allowed(
+    tmp_path: Path, before: str, content: str
+) -> None:
     _repository(tmp_path)
     target = tmp_path / "README.md"
-    target.write_text("existing\nsecond\n", encoding="utf-8")
+    target.write_text(before, encoding="utf-8")
     base = _commit(tmp_path)
     target.write_text(content, encoding="utf-8")
     _commit(tmp_path)
@@ -197,21 +212,24 @@ def test_content_ban_is_independent_of_page_exemptions(tmp_path: Path, path: str
 
 
 @pytest.mark.parametrize(
-    "content",
+    ("before", "content"),
     [
-        b"replacement\n",
-        b"existing\nexisting\n",
-        b"existing\x00hidden",
-        b"existing\n\xff",
-        b"existing\v",
+        (b"existing\n", b"replacement\n"),
+        (b"existing\n", b"existing\nexisting\n"),
+        (b"existing\n", b"existing\x00hidden"),
+        (b"existing\n", b"existing\n\xff"),
+        (b"existing\n", b"existing\v"),
+        (b"existing\n", b"exis ting\n"),
+        (b"existing\n", b"`existing`\n"),
+        (b"first second\n", b"second first\n"),
     ],
 )
 def test_replacements_duplicates_and_binary_content_are_rejected(
-    tmp_path: Path, content: bytes
+    tmp_path: Path, before: bytes, content: bytes
 ) -> None:
     _repository(tmp_path)
     target = tmp_path / "README.md"
-    target.write_bytes(b"existing\n")
+    target.write_bytes(before)
     base = _commit(tmp_path)
     target.write_bytes(content)
     _commit(tmp_path)
@@ -669,7 +687,7 @@ def test_dependency_metadata_exception_rejects_binary_json_encodings(
     ],
 )
 def test_existing_docs_package_overrides_are_dependency_metadata(
-    tmp_path: Path, overrides: dict[str, object]
+    tmp_path: Path, overrides: dict[str, JsonValue]
 ) -> None:
     base = _docs_package(tmp_path)
     package = tmp_path / "apps/docs/package.json"
@@ -696,7 +714,7 @@ def test_existing_docs_package_overrides_are_dependency_metadata(
     ],
 )
 def test_invalid_dependency_overrides_remain_documentation_findings(
-    tmp_path: Path, overrides: object
+    tmp_path: Path, overrides: JsonValue
 ) -> None:
     base = _docs_package(tmp_path)
     package = tmp_path / "apps/docs/package.json"
