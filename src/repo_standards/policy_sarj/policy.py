@@ -481,7 +481,7 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
-        version=6,
+        version=7,
         default_severity="error",
         title="Do not commit bespoke verifier scripts",
         description=(
@@ -497,13 +497,12 @@ RULES = (
             "executable verification belongs in an objectively owned tool or harness."
         ),
         fix=(
-            "Identify each distinct behavior and safety contract the verifier checks. "
-            "Before deleting it and its invocations, demonstrate that retained or replacement "
-            "checks reject the same wrong outcomes through Terraform, shared policy, or a "
-            "provider or runtime contract; if executable "
-            "verification is durable product code, place it in conventional source inside a "
-            "declared or workspace-backed tool or harness. Relocating, renaming, or translating "
-            "the same check, including to TypeScript, is not remediation."
+            "Run one-off IaC rehearsals outside Git and summarize evidence in the PR. "
+            "For a permanent check, name the recurring regression existing gates miss, "
+            "its owned harness, execution cost, and failure action. Preserve distinct "
+            "behavior and safety contracts in native checks or that harness; then remove "
+            "the redundant helper, invocations, and unused dependencies. Renaming, moving, "
+            "or translating the helper does not resolve duplication."
         ),
         taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
         examples=(
@@ -518,7 +517,7 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/operational-script-tests"),
-        version=5,
+        version=6,
         default_severity="warning",
         title="Review operational script tests for duplicate contracts",
         description=(
@@ -538,10 +537,11 @@ RULES = (
             "redundancy or test value; workflow contents are outside this rule's evidence."
         ),
         fix=(
-            "Review the asserted contract and existing checks. Remove a test and its "
-            "invocations only when existing coverage rejects the same wrong outcomes. "
-            "Retain distinct behavior and safety coverage; moving or renaming does not "
-            "resolve contract duplication."
+            "Name the wrong outcome and retained check that rejects it. Keep one-off "
+            "rollout rehearsals and reports outside Git. Recurring tests need a distinct "
+            "regression, an owned harness, and a bounded execution cost. Remove redundant "
+            "tests and invocations only after proving equivalent coverage; retain distinct "
+            "behavior and safety contracts. Moving or renaming is not remediation."
         ),
         taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
         examples=(
@@ -1021,16 +1021,19 @@ def _tracked_artifact_diagnostics(
                 message="tracked retired, operational, or unowned verifier is prohibited",
                 path=path,
                 remediation=Remediation(
-                    summary="Preserve distinct contracts before removing the verifier.",
+                    summary="Keep one-off rehearsals outside Git; preserve distinct contracts.",
                     steps=(
                         (
-                            "Identify each behavior and safety contract and demonstrate that "
-                            "retained or replacement Terraform, shared-policy, provider, or "
-                            "runtime checks reject the same wrong outcomes."
+                            "For recurring verification, name the regression existing gates "
+                            "miss, its owned harness, runtime budget, and failure action."
                         ),
                         (
-                            "Then delete the verifier and every invocation; relocating it "
-                            "is not remediation."
+                            "Demonstrate that retained native checks or the owned harness "
+                            "reject each distinct wrong outcome."
+                        ),
+                        (
+                            "Remove the redundant helper, invocations, and unused dependencies; "
+                            "moving or renaming it is not remediation."
                         ),
                     ),
                     validation=(
@@ -1052,12 +1055,16 @@ def _tracked_artifact_diagnostics(
                 remediation=Remediation(
                     summary="Review the asserted contract and existing coverage.",
                     steps=(
-                        "Retain tests that reject distinct behavior or safety regressions.",
+                        (
+                            "Retain tests that reject distinct behavior or safety regressions "
+                            "in an owned harness with a bounded execution cost."
+                        ),
                         (
                             "Delete the test and its invocations only after demonstrating "
                             "equivalent existing coverage; moving or renaming does not "
                             "resolve duplication."
                         ),
+                        "Keep one-off IaC rehearsals and their reports outside Git.",
                     ),
                     validation=(
                         "Run focused tests for retained contracts and rerun repo-standards.",

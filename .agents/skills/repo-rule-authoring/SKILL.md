@@ -24,6 +24,13 @@ Start judgment-heavy rules as pending warnings. Preserve safe false negatives,
 use syntax-aware evidence, and emit one diagnostic per defect. Do not infer authorship or intent.
 A placement warning cannot justify deleting a test; review the asserted contract.
 
+For IaC work, prefer one-off task-local verification with concise PR evidence.
+Do not commit rehearsal helpers, reports or runbook narratives just to prove a
+change. Permanent validation needs a distinct recurring regression, an existing
+gate's demonstrated gap, an owned harness and a bounded execution cost.
+Reuse existing artifact/documentation rules; do not add filename aliases,
+word-count limits or duplicate detectors to enforce a judgment about verbosity.
+
 The developer-only calibration helper is
 `scripts/calibrate_rules.py`; its commands and private-report rules are in the
 calibration reference. Cloning, fetching, installation, publishing, commits, and consumer
