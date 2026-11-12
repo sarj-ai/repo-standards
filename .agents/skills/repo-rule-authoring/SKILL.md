@@ -24,7 +24,9 @@ Start judgment-heavy rules as pending warnings. Preserve safe false negatives,
 use syntax-aware evidence, and emit one diagnostic per defect. Do not infer authorship or intent.
 A placement warning cannot justify deleting a test; review the asserted contract.
 
-For IaC work, prefer one-off task-local verification with concise PR evidence.
+For preparatory validation and IaC work, prefer one-off task-local verification
+with concise PR evidence. Require a current operational decision and a missed
+failure; package ownership or a helper's self-tests do not establish need.
 Do not commit rehearsal helpers, reports or runbook narratives just to prove a
 change. Permanent validation needs a distinct recurring regression, an existing
 gate's demonstrated gap, an owned harness and a bounded execution cost.
