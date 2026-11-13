@@ -7,8 +7,9 @@ import shlex
 import shutil
 import subprocess
 import sys
+from threading import Thread
 import tomllib
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, override
 
 from pydantic import RootModel
 import pytest
@@ -29,6 +30,8 @@ from repo_standards.policy_sarj import SarjPolicy
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator, Mapping
+
     from repo_standards.core.outcome import ConfigValue, JSONValue
 
 
@@ -489,7 +492,6 @@ def test_staged_snapshot_honors_the_selected_index(
     ordinary_bytes = ordinary_index.read_bytes()
     selected_index = repository / ".git/pending-index"
     monkeypatch.setenv("GIT_INDEX_FILE", ".git/pending-index" if relative else str(selected_index))
-    # Git resolves relative index selections after -C selects the repository.
     monkeypatch.chdir(tmp_path)
     _git(repository, "read-tree", "HEAD")
     manifest = repository / ".repo-standards/repository.toml"
@@ -900,8 +902,6 @@ def test_committed_path_boundaries_survive_direct_blob_sorting(
         text=True,
         timeout=10,
     ).strip()
-    # Write the index directly so case-insensitive filesystems
-    # cannot collapse the deliberately invalid tracked-tree paths.
     for path in paths:
         _git(repository, "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
     _git(
@@ -917,3 +917,194 @@ def test_committed_path_boundaries_survive_direct_blob_sorting(
     )
     with pytest.raises(ConfigurationError, match=message):
         inspect_repository(repository)
+
+
+@pytest.fixture
+def git_payload_children() -> Iterator[list[subprocess.Popen[bytes]]]:
+    children: list[subprocess.Popen[bytes]] = []
+    try:
+        yield children
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+            if child.stdout is not None:
+                child.stdout.close()
+
+
+@pytest.fixture
+def git_payload_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    git_payload_children: list[subprocess.Popen[bytes]],
+) -> Callable[[str], inspection_module.GitIdentity]:
+    real_spawn = subprocess.Popen
+    identity = inspection_module.GitIdentity("a" * 40, "b" * 40)
+
+    def current_identity(_root: Path) -> inspection_module.GitIdentity:
+        return identity
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Injection would bypass Git's public entry point.
+        inspection_module, "git_identity", current_identity
+    )
+
+    def probe(script: str) -> inspection_module.GitIdentity:
+        def spawn(
+            command: list[str], *, stdout: int | None, stderr: int, env: Mapping[str, str]
+        ) -> subprocess.Popen[bytes]:
+            assert "--no-lazy-fetch" in command
+            assert "--no-optional-locks" in command
+            child = real_spawn(
+                [sys.executable, "-c", script], stdout=stdout, stderr=stderr, env=env
+            )
+            git_payload_children.append(child)
+            return child
+
+        monkeypatch.setattr(subprocess, "Popen", spawn)
+        return git_index_identity(tmp_path)
+
+    return probe
+
+
+def _assert_payload_child_reaped(children: list[subprocess.Popen[bytes]]) -> None:
+    assert len(children) == 1
+    child = children[0]
+    assert child.returncode is not None
+    assert child.stdout is None or child.stdout.closed
+    if sys.platform != "win32":
+        with pytest.raises(ChildProcessError):
+            os.waitpid(child.pid, os.WNOHANG)
+
+
+def test_bounded_git_reader_reaps_success(
+    git_payload_children: list[subprocess.Popen[bytes]],
+    git_payload_probe: Callable[[str], inspection_module.GitIdentity],
+) -> None:
+    identity = git_payload_probe("pass")
+    assert identity.mode == "git-index"
+    assert identity.source_revision == "a" * 40
+    _assert_payload_child_reaped(git_payload_children)
+
+
+def test_bounded_git_reader_reaps_nonzero_exit(
+    git_payload_children: list[subprocess.Popen[bytes]],
+    git_payload_probe: Callable[[str], inspection_module.GitIdentity],
+) -> None:
+    with pytest.raises(ConfigurationError, match="cannot enumerate Git index"):
+        git_payload_probe("raise SystemExit(7)")
+    assert git_payload_children[0].returncode == 7
+    _assert_payload_child_reaped(git_payload_children)
+
+
+def test_bounded_git_reader_reaps_output_limit(
+    git_payload_children: list[subprocess.Popen[bytes]],
+    git_payload_probe: Callable[[str], inspection_module.GitIdentity],
+) -> None:
+    with pytest.raises(ConfigurationError, match="output exceeds"):
+        git_payload_probe("import os,time; os.write(1,b'x'*(33*1024*1024)); time.sleep(60)")
+    _assert_payload_child_reaped(git_payload_children)
+
+
+def test_bounded_git_reader_reaps_exit_timeout(
+    git_payload_children: list[subprocess.Popen[bytes]],
+    git_payload_probe: Callable[[str], inspection_module.GitIdentity],
+) -> None:
+    with pytest.raises(ConfigurationError, match="enumeration timed out"):
+        git_payload_probe("import os,time; os.close(1); time.sleep(60)")
+    _assert_payload_child_reaped(git_payload_children)
+
+
+def test_bounded_git_reader_reaps_read_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    git_payload_children: list[subprocess.Popen[bytes]],
+    git_payload_probe: Callable[[str], inspection_module.GitIdentity],
+) -> None:
+    class ShortDeadlineThread(Thread):
+        @override
+        def join(self, timeout: float | None = None) -> None:
+            super().join(timeout=0.05 if timeout == 30 else timeout)
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Exercise the deadline without a production knob.
+        inspection_module, "Thread", ShortDeadlineThread
+    )
+    with pytest.raises(ConfigurationError, match="enumeration timed out"):
+        git_payload_probe("import time; time.sleep(60)")
+    _assert_payload_child_reaped(git_payload_children)
+
+
+def test_bounded_git_reader_reaps_thread_start_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    git_payload_children: list[subprocess.Popen[bytes]],
+    git_payload_probe: Callable[[str], inspection_module.GitIdentity],
+) -> None:
+    class UnstartedThread(Thread):
+        @override
+        def start(self) -> None:
+            message = "fixture thread start failed"
+            raise RuntimeError(message)
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Fail startup without exhausting host threads.
+        inspection_module, "Thread", UnstartedThread
+    )
+    with pytest.raises(RuntimeError, match="fixture thread start failed"):
+        git_payload_probe("import time; time.sleep(60)")
+    _assert_payload_child_reaped(git_payload_children)
+
+
+def test_bounded_git_reader_reaps_interruption(
+    monkeypatch: pytest.MonkeyPatch,
+    git_payload_children: list[subprocess.Popen[bytes]],
+    git_payload_probe: Callable[[str], inspection_module.GitIdentity],
+) -> None:
+    class InterruptedThread(Thread):
+        @override
+        def join(self, timeout: float | None = None) -> None:
+            if timeout == 30:
+                raise KeyboardInterrupt
+            super().join(timeout=timeout)
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Interrupt this join without signaling VM work.
+        inspection_module, "Thread", InterruptedThread
+    )
+    with pytest.raises(KeyboardInterrupt):
+        git_payload_probe("import time; time.sleep(60)")
+    _assert_payload_child_reaped(git_payload_children)
+
+
+def test_bounded_git_reader_reaps_missing_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    git_payload_children: list[subprocess.Popen[bytes]],
+    git_payload_probe: Callable[[str], inspection_module.GitIdentity],
+) -> None:
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Omit the pipe but retain a real child to reap.
+        subprocess, "PIPE", None
+    )
+    with pytest.raises(ConfigurationError, match="cannot read Git index enumeration output"):
+        git_payload_probe("import time; time.sleep(60)")
+    _assert_payload_child_reaped(git_payload_children)
+
+
+@pytest.mark.parametrize("fault", [OSError, MemoryError])
+def test_bounded_git_reader_reaps_read_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    git_payload_children: list[subprocess.Popen[bytes]],
+    git_payload_probe: Callable[[str], inspection_module.GitIdentity],
+    fault: type[OSError | MemoryError],
+) -> None:
+    real_read = os.read
+
+    def read(descriptor: int, size: int) -> bytes:
+        if git_payload_children:
+            stream = git_payload_children[0].stdout
+            if stream is not None and not stream.closed and descriptor == stream.fileno():
+                message = "fixture pipe read failed"
+                raise fault(message)
+        return real_read(descriptor, size)
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Injection would skip OS descriptor ownership.
+        os, "read", read
+    )
+    with pytest.raises(ConfigurationError, match="cannot enumerate Git index"):
+        git_payload_probe("import time; time.sleep(60)")
+    _assert_payload_child_reaped(git_payload_children)
