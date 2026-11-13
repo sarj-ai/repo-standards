@@ -10,7 +10,7 @@ from repo_standards._git_environment import GIT_NO_PAGER_ENVIRONMENT
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import GitObjectId
 
-from ._context import PullRequestContext
+from ._context import LocalPullRequestContext, PullRequestContext
 
 
 if TYPE_CHECKING:
@@ -46,14 +46,11 @@ def resolve_local_advisory_context(
     remote_base = f"origin/{base_ref}"
     head_sha = _object_id(_git(resolved, "rev-parse", "HEAD^{commit}"))
     base_sha = _object_id(_git(resolved, "merge-base", remote_base, head_sha))
-    return PullRequestContext(
+    return LocalPullRequestContext(
         base_sha=base_sha,
         head_sha=head_sha,
         base_ref=base_ref,
         head_ref=head_ref,
-        base_repository_id=None,
-        head_repository_id=None,
-        source="local",
     )
 
 

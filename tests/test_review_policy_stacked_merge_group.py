@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, TypeGuard
 
 import pytest
 
+from repo_standards.core.outcome import JSONValue
 from repo_standards.github_review_policy import (
     GitHubClient,
     ReconciliationError,
@@ -41,7 +42,7 @@ class FakeQueue:
     queue_heads: dict[int, str] = field(default_factory=dict)
     behind_by: dict[tuple[str, str], int] = field(default_factory=dict)
     hidden_refs: set[int] = field(default_factory=set)
-    posted: list[dict[str, object]] = field(default_factory=list)
+    posted: list[dict[str, JSONValue]] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
 
     def by_number(self, number: int) -> QueuedPull:
@@ -58,8 +59,8 @@ class FakeQueue:
         return client
 
     def request(
-        self, method: str, path: str, *, payload: Mapping[str, object] | None = None
-    ) -> object:
+        self, method: str, path: str, *, payload: Mapping[str, JSONValue] | None = None
+    ) -> JSONValue:
         self.calls.append(path)
         if method == "POST":
             assert payload is not None
@@ -78,11 +79,11 @@ class FakeQueue:
             raise AssertionError(message)
         return handler(rest)
 
-    def _merge_group_commit(self, sha: str) -> object:
+    def _merge_group_commit(self, sha: str) -> JSONValue:
         pull = next(pull for pull in self.pulls if pull.group_sha == sha)
         return {"sha": sha, "parents": [{"sha": pull.group_parent_sha}]}
 
-    def _pull(self, number: str) -> object:
+    def _pull(self, number: str) -> JSONValue:
         pull = self.by_number(int(number))
         bases = {other.head_ref: other.head_sha for other in self.pulls}
         return {
@@ -102,7 +103,7 @@ class FakeQueue:
             "state": pull.state,
         }
 
-    def _queue_refs(self, ref_path: str) -> object:
+    def _queue_refs(self, ref_path: str) -> JSONValue:
         assert ref_path == "matching-refs/heads/gh-readonly-queue/dev/"
         visible = [pull for pull in self.pulls if pull.number not in self.hidden_refs]
         return [
@@ -113,11 +114,11 @@ class FakeQueue:
             for pull in visible
         ]
 
-    def _comparison(self, revisions: str) -> object:
+    def _comparison(self, revisions: str) -> JSONValue:
         ancestor, head = revisions.split("...")
         return {"behind_by": self.behind_by.get((ancestor, head), 0)}
 
-    def _run(self, run_path: str) -> object:
+    def _run(self, run_path: str) -> JSONValue:
         assert run_path == "runs/123"
         return {
             "path": f"{WORKFLOW}@refs/heads/dev",
@@ -126,7 +127,7 @@ class FakeQueue:
             "event": "pull_request_target",
         }
 
-    def pages(self, path: str, *, collection_key: str | None = None) -> list[object]:
+    def pages(self, path: str, *, collection_key: str | None = None) -> list[JSONValue]:
         assert collection_key is None
         self.calls.append(path)
         sha = path.removeprefix("/repos/owner/repo/commits/").removesuffix("/statuses")
@@ -142,7 +143,7 @@ class FakeQueue:
             }
         ]
 
-    def graphql(self, query: str, variables: Mapping[str, object]) -> Mapping[str, object]:
+    def graphql(self, query: str, variables: Mapping[str, JSONValue]) -> Mapping[str, JSONValue]:
         assert "mergeQueueEntry" in query
         number = variables["number"]
         assert isinstance(number, int)
@@ -158,7 +159,7 @@ class FakeQueue:
             workflow_path=WORKFLOW,
         )
 
-    def final_status(self) -> dict[str, object]:
+    def final_status(self) -> dict[str, JSONValue]:
         return self.posted[-1]
 
 
@@ -265,7 +266,7 @@ def test_pull_request_targeting_the_queue_base_skips_stack_lookups() -> None:
     assert not any("/matching-refs/" in path or "/compare/" in path for path in queue.calls)
 
 
-def _is_status(value: object) -> TypeGuard[Mapping[str, object]]:
+def _is_status(value: object) -> TypeGuard[Mapping[str, JSONValue]]:
     return isinstance(value, dict)
 
 
@@ -277,7 +278,9 @@ def test_merge_group_reauthenticates_activation_receipt() -> None:
     base = BASE_TIP
     provider.contents[base, ".repo-standards/repository.toml"] = MANIFEST.encode()
 
-    def request(method: str, path: str, *, payload: Mapping[str, object] | None = None) -> object:
+    def request(
+        method: str, path: str, *, payload: Mapping[str, JSONValue] | None = None
+    ) -> JSONValue:
         if path.startswith(f"{REPO_PATH}git/") and "/matching-refs/" not in path:
             queue.calls.append(path)
             return provider.request(
@@ -285,8 +288,8 @@ def test_merge_group_reauthenticates_activation_receipt() -> None:
             )
         return original_request(method, path, payload=payload)
 
-    def activation_status(path: str, *, collection_key: str | None = None) -> list[object]:
-        result: list[object] = []
+    def activation_status(path: str, *, collection_key: str | None = None) -> list[JSONValue]:
+        result: list[JSONValue] = []
         for item in original_pages(path, collection_key=collection_key):
             assert _is_status(item)
             result.append({**item, "description": "Verified activation: review policy passed"})

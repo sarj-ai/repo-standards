@@ -10,7 +10,7 @@ import pytest
 from repo_standards.catalog import build_catalog, catalog_schema
 from repo_standards.cli import app
 from repo_standards.core.canonical import canonical_json
-from repo_standards.core.models import JSONValue
+from repo_standards.core.outcome import JSONValue
 from repo_standards.verify_release_artifacts import verify_site, verify_site_catalog
 
 

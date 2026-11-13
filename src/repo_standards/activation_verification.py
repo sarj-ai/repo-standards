@@ -5,15 +5,15 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 from io import BytesIO
-import json
 from pathlib import PurePosixPath
 import re
-import tomllib
 from typing import TYPE_CHECKING, Literal, Protocol, TypeGuard
 from urllib.parse import quote
 from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
 import zlib
 
+from repo_standards.core._json import parse_json_value
+from repo_standards.core._toml import parse_toml_object
 from repo_standards.core.activation_policy import ActivationEdit, ActivationPolicy
 from repo_standards.core.activation_receipt import (
     ActivationBinding,
@@ -27,6 +27,8 @@ from repo_standards.core.activation_receipt import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from repo_standards.core.outcome import JSONValue
+
 MAX_ARCHIVE_BYTES = 1_048_576
 MAX_RECEIPT_FILES = 128
 MAX_RECEIPT_BYTES = 16_384
@@ -38,9 +40,9 @@ class ActivationClient(Protocol):
     repository: str
 
     def request(
-        self, method: str, path: str, *, payload: Mapping[str, object] | None = None
-    ) -> object: ...
-    def rest_pages(self, path: str, *, collection_key: str | None = None) -> list[object]: ...
+        self, method: str, path: str, *, payload: Mapping[str, JSONValue] | None = None
+    ) -> JSONValue: ...
+    def rest_pages(self, path: str, *, collection_key: str | None = None) -> list[JSONValue]: ...
     def artifact_bytes(self, artifact_id: int) -> bytes: ...
 
 
@@ -66,7 +68,7 @@ class InvalidActivationError(ValueError):
         super().__init__("activation evidence mismatch")
 
 
-def _object(value: object) -> Mapping[str, object]:
+def _object(value: JSONValue) -> Mapping[str, JSONValue]:
     if not _is_object(value):
         raise InvalidActivationError
     return value
@@ -84,7 +86,9 @@ def _text(value: object) -> str:
     return value
 
 
-def _require(condition: object) -> None:
+def _require(
+    condition: bool,  # ruff: ignore[boolean-type-hint-positional-argument] -- assertion predicate.
+) -> None:
     if not condition:
         raise InvalidActivationError
 
@@ -96,7 +100,7 @@ def _blob(client: ActivationClient, sha: str, path: str) -> bytes:
     commit = _object(client.request("GET", f"{prefix}/commits/{sha}"))
     tree_sha = _text(_object(commit.get("tree")).get("sha"))
     _require(commit.get("sha") == sha)
-    entry: Mapping[str, object] = {}
+    entry: Mapping[str, JSONValue] = {}
     for index, part in enumerate(pure.parts):
         tree = _object(client.request("GET", f"{prefix}/trees/{tree_sha}"))
         _require(tree.get("sha") == tree_sha and tree.get("truncated") is False)
@@ -148,10 +152,13 @@ def receipt_bytes(archive: bytes, digest: str, *, expected_name: str) -> bytes:
 
 
 def policy_at_base(client: ActivationClient, base_sha: str) -> ActivationPolicy:
-    trusted = _object(
-        tomllib.loads(_blob(client, base_sha, ".repo-standards/repository.toml").decode())
-    )
-    configured = _object(_object(trusted.get("pull_request")).get("review_policy"))
+    trusted = parse_toml_object(_blob(client, base_sha, ".repo-standards/repository.toml"))
+    pull_request = trusted.get("pull_request")
+    if not isinstance(pull_request, dict):
+        raise InvalidActivationError
+    configured = pull_request.get("review_policy")
+    if not isinstance(configured, dict):
+        raise InvalidActivationError
     return ActivationPolicy.model_validate(configured.get("nonproduction_activation"))
 
 
@@ -198,7 +205,7 @@ def _authenticate(  # ruff: ignore[too-many-locals] -- binding fields remain ind
     producer = _producer_receipt(
         client, policy, base_sha, environment=env, expected_name=f"{number}-{head_sha}.json"
     )
-    parsed: object = json.loads(producer.raw)  # pyright: ignore[reportAny] -- untrusted JSON is narrowed immediately
+    parsed = parse_json_value(producer.raw)
     payload = _object(parsed)
     feature_id = _text(payload.get("feature_id"))
     features = [item for item in policy.features if item.feature_id == feature_id]
@@ -293,25 +300,25 @@ def _is_environment(value: object) -> TypeGuard[Literal["dev", "preview"]]:
     return value in {"dev", "preview"} if isinstance(value, str) else False
 
 
-def _is_object(value: object) -> TypeGuard[Mapping[str, object]]:
+def _is_object(value: JSONValue) -> TypeGuard[Mapping[str, JSONValue]]:
     return isinstance(value, dict)
 
 
-def _array(value: object) -> list[object]:
+def _array(value: JSONValue) -> list[JSONValue]:
     if not _is_array(value):
         raise InvalidActivationError
     return value
 
 
-def _is_array(value: object) -> TypeGuard[list[object]]:
+def _is_array(value: JSONValue) -> TypeGuard[list[JSONValue]]:
     return isinstance(value, list)
 
 
-def _snapshot(client: ActivationClient, number: int) -> Mapping[str, object]:
+def _snapshot(client: ActivationClient, number: int) -> Mapping[str, JSONValue]:
     return _object(client.request("GET", f"/repos/{client.repository}/pulls/{number}"))
 
 
-def _identity(pr: Mapping[str, object]) -> tuple[object, ...]:
+def _identity(pr: Mapping[str, JSONValue]) -> tuple[JSONValue, ...]:
     base, head, user = (_object(pr.get(key)) for key in ("base", "head", "user"))
     return (
         pr.get("state"),

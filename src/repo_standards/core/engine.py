@@ -9,6 +9,7 @@ from .models import (
     MAX_REPOSITORY_INPUT_BYTES,
     AnalysisReport,
     Baseline,
+    CurrentRatchetEntry,
     Diagnostic,
     ExceptionUse,
     FindingsReport,
@@ -19,6 +20,7 @@ from .models import (
     RatchetClassification,
     RatchetComparison,
     RatchetEntry,
+    ResolvedRatchetEntry,
 )
 from .render import baseline_dict
 from .rule_reviews import RuleVersion
@@ -68,7 +70,6 @@ def apply_exceptions(
             result.append(
                 replace(
                     diagnostic,
-                    disposition="excepted",
                     exception=ExceptionUse(
                         owner=exception.owner,
                         issue=exception.issue,
@@ -184,7 +185,8 @@ def check_baseline_comparison(comparison: RatchetComparison) -> tuple[Diagnostic
     new = tuple(
         item.diagnostic
         for item in comparison.entries
-        if item.classification is RatchetClassification.NEW and item.diagnostic is not None
+        if isinstance(item, CurrentRatchetEntry)
+        and item.classification is RatchetClassification.NEW
     )
     stale = comparison.fingerprints(RatchetClassification.RESOLVED)
     if stale:
@@ -210,8 +212,8 @@ def classify_baseline(
         for item in ratchet_findings(report, include_warnings=include_warnings)
     }
     known = set(baseline.fingerprints)
-    entries = [
-        RatchetEntry(
+    entries: list[RatchetEntry] = [
+        CurrentRatchetEntry(
             fingerprint=fingerprint,
             classification=(
                 RatchetClassification.KNOWN
@@ -223,10 +225,7 @@ def classify_baseline(
         for fingerprint in sorted(current)
     ]
     entries.extend(
-        RatchetEntry(
-            fingerprint=fingerprint,
-            classification=RatchetClassification.RESOLVED,
-        )
+        ResolvedRatchetEntry(fingerprint=fingerprint)
         for fingerprint in sorted(known - set(current))
     )
     return RatchetComparison(entries=tuple(entries), include_warnings=include_warnings)

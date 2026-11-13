@@ -19,7 +19,7 @@ from repo_standards.catalog import (
 )
 from repo_standards.cli import app
 from repo_standards.core.canonical import canonical_json
-from repo_standards.core.models import JSONValue
+from repo_standards.core.outcome import JSONValue
 from repo_standards.policy_sarj import SarjPolicy
 
 

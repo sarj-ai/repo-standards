@@ -17,11 +17,19 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel
 import pytest
 
+from repo_standards.core.outcome import JSONValue
 from repo_standards.github_review_policy import (
+    Arguments,
     CollectedEvidence,
     GitHubClient,
     GitHubRepositoryId,
     GitHubUserId,
+    MergeGroupCommand,
+    OperationalPolicyRejected,
+    PolicyAccepted,
+    PolicyRejected,
+    PullRequestCommand,
+    PullRequestNumber,
     PullRequestSnapshot,
     ReconciliationError,
     allowlisted_bot_reviewer_logins,
@@ -35,6 +43,7 @@ from repo_standards.github_review_policy import (
     merge_queue_head_sha,
     pull_request_snapshot,
     reconcile_merge_group,
+    reconciliation_command,
     render_comment,
     require_unchanged_evidence,
     required_check_names,
@@ -56,13 +65,13 @@ class _PostedStatus(BaseModel):
 
 
 class _RequestFixture(GitHubClient):
-    def __init__(self, response: Callable[[str, str], object]) -> None:
+    def __init__(self, response: Callable[[str, str], JSONValue]) -> None:
         super().__init__(token="token", repository="owner/repo", api_url="https://api.test")
-        self._response: Callable[[str, str], object] = response
+        self._response: Callable[[str, str], JSONValue] = response
 
     def request(
-        self, method: str, path: str, *, payload: Mapping[str, object] | None = None
-    ) -> object:
+        self, method: str, path: str, *, payload: Mapping[str, JSONValue] | None = None
+    ) -> JSONValue:
         assert payload is None
         return self._response(method, path)
 
@@ -252,7 +261,11 @@ def test_tier_zero_runtime_gate(
         author_is_bot=author_is_bot,
         draft=draft,
     )
-    assert (decision.passed, decision.reason) == expected
+    if expected[0]:
+        assert isinstance(decision, PolicyAccepted)
+    else:
+        assert isinstance(decision, OperationalPolicyRejected)
+        assert decision.reason == expected[1]
 
 
 def test_non_tier_zero_runtime_gate_ignores_optional_lane() -> None:
@@ -264,7 +277,7 @@ def test_non_tier_zero_runtime_gate_ignores_optional_lane() -> None:
         author_is_bot=True,
         draft=True,
     )
-    assert (decision.passed, decision.reason) == (True, None)
+    assert isinstance(decision, PolicyAccepted)
 
 
 @pytest.mark.parametrize(
@@ -291,7 +304,12 @@ def test_verified_transition_runtime_gate(
         draft=draft,
         transition_exempt=True,
     )
-    assert decision.passed is expected
+    if expected:
+        assert isinstance(decision, PolicyAccepted)
+    elif not policy_passed:
+        assert isinstance(decision, PolicyRejected)
+    else:
+        assert isinstance(decision, OperationalPolicyRejected)
 
 
 def test_failed_policy_stays_blocked_when_optional_lane_is_enabled() -> None:
@@ -303,7 +321,7 @@ def test_failed_policy_stays_blocked_when_optional_lane_is_enabled() -> None:
         author_is_bot=False,
         draft=False,
     )
-    assert (decision.passed, decision.reason) == (False, None)
+    assert isinstance(decision, PolicyRejected)
 
 
 @pytest.mark.parametrize("manifest_path", ["", "/absolute.toml", "../escape.toml", "a/../b.toml"])
@@ -318,7 +336,7 @@ def test_trusted_manifest_rejects_unsafe_paths(
 
 
 def test_required_checks_come_from_trusted_manifest() -> None:
-    manifest = {
+    manifest: dict[str, JSONValue] = {
         "pull_request": {
             "review_policy": {"required_checks": ["lint", "test"]},
         }
@@ -339,9 +357,9 @@ def test_required_checks_come_from_trusted_manifest() -> None:
     ],
 )
 def test_allowlisted_bot_reviewers_come_from_trusted_manifest(
-    policy: dict[str, object], expected: frozenset[str]
+    policy: dict[str, JSONValue], expected: frozenset[str]
 ) -> None:
-    manifest = {"pull_request": {"review_policy": policy}}
+    manifest: dict[str, JSONValue] = {"pull_request": {"review_policy": policy}}
 
     assert allowlisted_bot_reviewer_logins(manifest) == expected
 
@@ -354,8 +372,10 @@ def test_allowlisted_bot_reviewers_come_from_trusted_manifest(
         pytest.param([7], id="non-string-entry"),
     ],
 )
-def test_allowlisted_bot_reviewers_reject_non_bot_entries(value: object) -> None:
-    manifest = {"pull_request": {"review_policy": {"allowlisted_bot_reviewers": value}}}
+def test_allowlisted_bot_reviewers_reject_non_bot_entries(value: JSONValue) -> None:
+    manifest: dict[str, JSONValue] = {
+        "pull_request": {"review_policy": {"allowlisted_bot_reviewers": value}}
+    }
 
     with pytest.raises(ReconciliationError, match="allowlisted_bot_reviewers"):
         allowlisted_bot_reviewer_logins(manifest)
@@ -364,7 +384,7 @@ def test_allowlisted_bot_reviewers_reject_non_bot_entries(value: object) -> None
 def test_rest_pagination_collects_every_page() -> None:
     calls: list[str] = []
 
-    def request(method: str, path: str) -> object:
+    def request(method: str, path: str) -> JSONValue:
         assert method == "GET"
         calls.append(path)
         return list(range(100)) if path.endswith("page=1") else [100]
@@ -383,14 +403,15 @@ def test_rest_pagination_collects_every_page() -> None:
         ({"status": "completed", "conclusion": None}, "failure"),
     ],
 )
-def test_check_conclusions_fail_closed(check: dict[str, object], expected: str) -> None:
+def test_check_conclusions_fail_closed(check: dict[str, JSONValue], expected: str) -> None:
     assert check_conclusion(check) == expected
 
 
 def test_required_check_uses_provider_head_sha() -> None:
     client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
 
-    def pages(path: str, **_kwargs: object) -> list[object]:
+    def pages(path: str, *, collection_key: str | None = None) -> list[JSONValue]:
+        assert collection_key in {None, "check_runs"}
         if "check-runs" not in path:
             return []
         return [
@@ -421,7 +442,7 @@ def test_required_checks_read_only_the_configured_app_evidence(conclusion: str |
     head = "a" * 40
     calls: list[str] = []
 
-    def request(method: str, path: str) -> object:
+    def request(method: str, path: str) -> JSONValue:
         assert method == "GET"
         calls.append(path)
         assert path == f"/repos/owner/repo/commits/{head}/check-runs?filter=all&per_page=100&page=1"
@@ -461,7 +482,7 @@ def test_single_required_check_filters_by_name_and_preserves_pagination() -> Non
         "details_url": "https://github.com/owner/repo/actions/runs/123/job/456",
     }
 
-    def request(method: str, path: str) -> object:
+    def request(method: str, path: str) -> JSONValue:
         assert method == "GET"
         calls.append(path)
         assert path == (
@@ -489,7 +510,7 @@ def test_single_required_check_filters_by_name_and_preserves_pagination() -> Non
 
 
 def test_single_required_check_missing_still_blocks() -> None:
-    def request(method: str, path: str) -> object:
+    def request(method: str, path: str) -> JSONValue:
         assert method == "GET"
         assert "&check_name=lint&" in path
         return {"check_runs": []}
@@ -501,7 +522,7 @@ def test_single_required_check_missing_still_blocks() -> None:
 
 def test_latest_reviews_exclude_author_and_bots_and_keep_latest_decisive() -> None:
     head = "a" * 40
-    reviews = [
+    reviews: list[dict[str, JSONValue]] = [
         {
             "id": 1,
             "user": {"id": 20, "login": "reviewer", "type": "User"},
@@ -561,7 +582,7 @@ def test_invalid_review_shape_fails_closed() -> None:
 
 def test_bot_transition_still_excludes_bot_approval() -> None:
     head = "a" * 40
-    reviews = [
+    reviews: list[dict[str, JSONValue]] = [
         {
             "id": 1,
             "user": {"id": 30, "login": "sdk-reviewer[bot]", "type": "Bot"},
@@ -575,7 +596,7 @@ def test_bot_transition_still_excludes_bot_approval() -> None:
 
 
 def test_reviewer_requires_resolved_write_permission() -> None:
-    reviews = [
+    reviews: list[dict[str, JSONValue]] = [
         {
             "id": 1,
             "user": {"id": 20, "login": "reviewer", "type": "User"},
@@ -583,7 +604,7 @@ def test_reviewer_requires_resolved_write_permission() -> None:
         }
     ]
 
-    def request(method: str, path: str) -> object:
+    def request(method: str, path: str) -> JSONValue:
         assert method == "GET"
         assert path.startswith("/repos/owner/repo/")
         return {
@@ -600,7 +621,7 @@ def test_reviewer_requires_resolved_write_permission() -> None:
 ALLOWLISTED_BOT_REVIEWERS = frozenset({"bulbul-review[bot]"})
 
 
-def _bot_review(user_id: int, login: str, *, user_type: str = "Bot") -> dict[str, object]:
+def _bot_review(user_id: int, login: str, *, user_type: str = "Bot") -> dict[str, JSONValue]:
     return {
         "id": user_id,
         "user": {"id": user_id, "login": login, "type": user_type},
@@ -610,12 +631,12 @@ def _bot_review(user_id: int, login: str, *, user_type: str = "Bot") -> dict[str
     }
 
 
-def _no_permission_lookup(method: str, path: str) -> object:
+def _no_permission_lookup(method: str, path: str) -> JSONValue:
     pytest.fail(f"unexpected permission lookup: {method} {path}")
 
 
 def test_listed_bot_reviewer_is_eligible_without_a_collaborator_permission() -> None:
-    reviews = [
+    reviews: list[dict[str, JSONValue]] = [
         _bot_review(348999126, "Bulbul-Review[bot]"),
         _bot_review(30, "other-bot[bot]"),
         _bot_review(31, "evil-bulbul-review[bot]"),
@@ -637,7 +658,9 @@ def test_listed_bot_reviewer_is_eligible_without_a_collaborator_permission() -> 
 def test_listed_bot_login_needs_bot_type_and_must_not_be_the_author(
     user_type: str, author_id: int
 ) -> None:
-    reviews = [_bot_review(348999126, "bulbul-review[bot]", user_type=user_type)]
+    reviews: list[dict[str, JSONValue]] = [
+        _bot_review(348999126, "bulbul-review[bot]", user_type=user_type)
+    ]
 
     eligible = eligible_reviewer_ids(
         _RequestFixture(_no_permission_lookup),
@@ -650,7 +673,10 @@ def test_listed_bot_login_needs_bot_type_and_must_not_be_the_author(
 
 
 def test_latest_reviews_mark_listed_bot_and_drop_unlisted_bots() -> None:
-    reviews = [_bot_review(348999126, "bulbul-review[bot]"), _bot_review(30, "other-bot[bot]")]
+    reviews: list[dict[str, JSONValue]] = [
+        _bot_review(348999126, "bulbul-review[bot]"),
+        _bot_review(30, "other-bot[bot]"),
+    ]
 
     latest = latest_human_reviews(
         reviews,
@@ -669,7 +695,7 @@ def test_latest_reviews_mark_listed_bot_and_drop_unlisted_bots() -> None:
     )
 
 
-def _pull_payload(body: object) -> dict[str, object]:
+def _pull_payload(body: JSONValue) -> dict[str, JSONValue]:
     return {
         "base": {"sha": "a" * 40, "ref": "dev", "repo": {"id": 1}},
         "head": {
@@ -693,7 +719,7 @@ def _pull_payload(body: object) -> dict[str, object]:
         pytest.param({}, id="empty-object-body"),
     ],
 )
-def test_pull_request_snapshot_rejects_non_text_body(body: object) -> None:
+def test_pull_request_snapshot_rejects_non_text_body(body: JSONValue) -> None:
     client = _RequestFixture(lambda _method, _path: _pull_payload(body))
 
     with pytest.raises(ReconciliationError, match="body must be a string or null"):
@@ -709,7 +735,7 @@ def test_pull_request_snapshot_preserves_nullable_text_body(body: str | None) ->
 
 def test_complete_evidence_fingerprint_detects_body_drift() -> None:
     snapshot = PullRequestSnapshot(
-        number=1,
+        number=PullRequestNumber(1),
         base_sha="a" * 40,
         head_sha="b" * 40,
         base_ref="dev",
@@ -732,7 +758,7 @@ def test_complete_evidence_fingerprint_detects_body_drift() -> None:
 
 
 def test_merge_group_requires_latest_actions_status_for_exact_head() -> None:
-    statuses = [
+    statuses: list[dict[str, JSONValue]] = [
         {
             "id": 1,
             "context": "Review Policy",
@@ -757,7 +783,7 @@ def test_merge_group_requires_latest_actions_status_for_exact_head() -> None:
 
 
 def test_merge_group_rejects_spoofed_success_status() -> None:
-    statuses = [
+    statuses: list[dict[str, JSONValue]] = [
         {
             "id": 1,
             "context": "Review Policy",
@@ -777,7 +803,7 @@ def test_merge_group_rejects_spoofed_success_status() -> None:
 
 def test_merge_group_accepts_configured_successful_actions_run() -> None:
     pull_head = "b" * 40
-    statuses = [
+    statuses: list[dict[str, JSONValue]] = [
         {
             "id": 1,
             "context": "Review Policy",
@@ -787,10 +813,10 @@ def test_merge_group_accepts_configured_successful_actions_run() -> None:
         }
     ]
 
-    def request(method: str, path: str) -> object:
+    def request(method: str, path: str) -> JSONValue:
         assert method == "GET"
         if path == f"/repos/owner/repo/commits/{pull_head}/statuses?per_page=100&page=1":
-            return statuses
+            return list[JSONValue](statuses)
         assert path == "/repos/owner/repo/actions/runs/123"
         return {
             "path": ".github/workflows/review-policy.yml@refs/heads/dev",
@@ -809,7 +835,7 @@ def test_merge_group_accepts_configured_successful_actions_run() -> None:
     )
 
 
-def _successful_status() -> list[dict[str, object]]:
+def _successful_status() -> list[dict[str, JSONValue]]:
     return [
         {
             "id": 1,
@@ -839,10 +865,10 @@ def test_merge_group_waits_for_the_status_run_to_complete(conclusion: str, expec
     )
     sleeps: list[float] = []
 
-    def request(method: str, path: str) -> object:
+    def request(method: str, path: str) -> JSONValue:
         assert method == "GET"
         if path == f"/repos/owner/repo/commits/{pull_head}/statuses?per_page=100&page=1":
-            return _successful_status()
+            return list[JSONValue](_successful_status())
         assert path == "/repos/owner/repo/actions/runs/123"
         return {
             "path": ".github/workflows/review-policy.yml@refs/heads/dev",
@@ -882,7 +908,7 @@ def test_merge_group_rechecks_latest_receipt_after_waiting(
     run_path = "/repos/owner/repo/actions/runs/123"
     statuses_path = f"/repos/owner/repo/commits/{pull_head}/statuses?per_page=100&page=1"
     statuses = _successful_status()
-    current_statuses: list[object] = list(statuses)
+    current_statuses: list[JSONValue] = list(statuses)
     calls: list[str] = []
     runs = iter(
         [
@@ -891,7 +917,7 @@ def test_merge_group_rechecks_latest_receipt_after_waiting(
         ]
     )
 
-    def request(method: str, path: str) -> object:
+    def request(method: str, path: str) -> JSONValue:
         assert method == "GET"
         calls.append(path)
         if path == statuses_path:
@@ -925,7 +951,7 @@ def test_merge_group_rejects_a_status_run_that_never_completes() -> None:
     clock = iter([0.0, 100.0, 200.0, 300.0])
     sleeps: list[float] = []
 
-    def request(method: str, path: str) -> object:
+    def request(method: str, path: str) -> JSONValue:
         assert method == "GET"
         assert path == "/repos/owner/repo/actions/runs/123"
         return {
@@ -954,9 +980,11 @@ def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None
     queue_parent = "a" * 40
     client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
     calls: list[tuple[str, str]] = []
-    posted_statuses: list[dict[str, object]] = []
+    posted_statuses: list[dict[str, JSONValue]] = []
 
-    def request(method: str, path: str, *, payload: Mapping[str, object] | None = None) -> object:
+    def request(
+        method: str, path: str, *, payload: Mapping[str, JSONValue] | None = None
+    ) -> JSONValue:
         calls.append((method, path))
         if method == "POST" and path == f"/repos/owner/repo/statuses/{merge_head}":
             assert payload is not None
@@ -991,7 +1019,8 @@ def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None
         message = f"unexpected request: {method} {path}"
         raise AssertionError(message)
 
-    def pages(path: str, **_kwargs: object) -> list[object]:
+    def pages(path: str, *, collection_key: str | None = None) -> list[JSONValue]:
+        assert collection_key is None
         calls.append(("PAGES", path))
         assert path == f"/repos/owner/repo/commits/{pull_head}/statuses"
         return [
@@ -1007,7 +1036,7 @@ def test_merge_group_resolves_pull_request_from_queue_ref_before_merge() -> None
     client.request = request
     client.rest_pages = pages
 
-    def graphql(query: str, variables: object) -> dict[str, object]:
+    def graphql(query: str, variables: Mapping[str, JSONValue]) -> dict[str, JSONValue]:
         assert "mergeQueueEntry" in query
         assert variables == {"owner": "owner", "repository": "repo", "number": 42}
         return {
@@ -1046,11 +1075,11 @@ def test_merge_group_rejects_noncanonical_queue_ref(head_ref: str) -> None:
 
 @pytest.mark.parametrize("entry", [None, {"headCommit": {"oid": "d" * 40}}])
 def test_merge_group_requires_current_queue_entry(
-    entry: dict[str, object] | None,
+    entry: dict[str, JSONValue] | None,
 ) -> None:
     client = GitHubClient(token="token", repository="owner/repo", api_url="https://api.test")
 
-    def graphql(query: str, variables: object) -> dict[str, object]:
+    def graphql(query: str, variables: Mapping[str, JSONValue]) -> dict[str, JSONValue]:
         assert "mergeQueueEntry" in query
         assert variables == {"owner": "owner", "repository": "repo", "number": 42}
         return {"repository": {"pullRequest": {"mergeQueueEntry": entry}}}
@@ -1063,12 +1092,12 @@ def test_merge_group_requires_current_queue_entry(
         assert merge_queue_head_sha(client, 42) == "d" * 40
 
 
-def _receipt(earlier_approvals: list[dict[str, object]]) -> dict[str, object]:
+def _receipt(earlier_approvals: list[dict[str, JSONValue]]) -> dict[str, JSONValue]:
     return {
         "summary": {"tier": 1, "current_human_approvals": 1, "reasons": []},
         "size": {"counted_lines": 300, "excluded_lines": 0},
         "provenance": {"evaluated_head": "a" * 40},
-        "earlier_approvals": earlier_approvals,
+        "earlier_approvals": list[JSONValue](earlier_approvals),
     }
 
 
@@ -1452,3 +1481,64 @@ def test_unauthenticated_reviewed_commit_fetch_reports_why_it_failed(
 
     assert set(unavailable) == {private_origin.reviewed}
     assert unavailable[private_origin.reviewed].startswith("fatal:")
+
+
+@pytest.mark.parametrize(
+    ("number", "sha", "reference"),
+    [
+        (None, None, None),
+        (1, "a" * 40, "refs/heads/gh-readonly-queue/main/pr-1-" + "b" * 40),
+        (None, "a" * 40, None),
+        (1, None, "refs/heads/example"),
+        (0, None, None),
+        (-1, None, None),
+        (True, None, None),
+        (False, None, None),
+    ],
+)
+def test_reconciliation_refuses_incomplete_or_competing_commands(
+    number: int | None, sha: str | None, reference: str | None
+) -> None:
+    args = Arguments()
+    args.pr_number = number
+    args.merge_group_head_sha = sha
+    args.merge_group_head_ref = reference
+    with pytest.raises(ReconciliationError):
+        reconciliation_command(args)
+
+
+def test_reconciliation_commands_contain_only_their_required_data() -> None:
+    args = Arguments()
+    args.pr_number = 7
+    request = reconciliation_command(args)
+    assert isinstance(request, PullRequestCommand)
+    assert request.pr_number == 7
+    args.pr_number = None
+    args.merge_group_head_sha = "a" * 40
+    args.merge_group_head_ref = "refs/heads/gh-readonly-queue/main/pr-7-" + "b" * 40
+    group = reconciliation_command(args)
+    assert isinstance(group, MergeGroupCommand)
+    assert group.head_sha == "a" * 40
+    assert group.head_ref == args.merge_group_head_ref
+
+
+@pytest.mark.parametrize("identifier", [True, False, 0, -1])
+def test_reconciliation_refuses_invalid_app_identifiers(identifier: int) -> None:
+    args = Arguments()
+    args.pr_number = 7
+    args.required_check_app_id = identifier
+    with pytest.raises(ReconciliationError, match="positive"):
+        reconciliation_command(args)
+
+
+@pytest.mark.parametrize("tier", [None, True, "0", -1, 3, []])
+def test_accepted_policy_requires_valid_tier_evidence(tier: JSONValue) -> None:
+    with pytest.raises(ReconciliationError, match="tier evidence"):
+        final_policy_decision(
+            policy_passed=True,
+            tier=tier,
+            lane_enabled=True,
+            same_repository=True,
+            author_is_bot=False,
+            draft=False,
+        )

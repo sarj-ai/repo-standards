@@ -17,10 +17,20 @@ if TYPE_CHECKING:
 from pydantic import ValidationError
 import pytest
 
-from repo_standards.activation_verification import VerifiedActivation, authenticate_activation
-from repo_standards.core.activation_policy import ActivationEdit, ActivationPolicy
+from repo_standards.activation_verification import (
+    VerifiedActivation,
+    authenticate_activation,
+    policy_at_base,
+)
+from repo_standards.core.activation_policy import (
+    ActivationEdit,
+    ActivationPolicy,
+    AppendActivationEdit,
+    ReplacementActivationEdit,
+)
 from repo_standards.core.activation_receipt import ActivationBinding, ActivationChange
 from repo_standards.core.models import GitObjectId
+from repo_standards.core.outcome import JSONValue
 from repo_standards.core.pull_request_body import missing_required_body_sections
 from repo_standards.core.review_policy import (
     CheckConclusion,
@@ -29,7 +39,11 @@ from repo_standards.core.review_policy import (
     ReviewPolicyEvidence,
     evaluate_review_policy,
 )
-from repo_standards.github_review_policy import final_policy_decision
+from repo_standards.github_review_policy import (
+    PolicyAccepted,
+    PolicyRejected,
+    final_policy_decision,
+)
 
 
 BASE, HEAD, SOURCE, ACTIVATION = (letter * 40 for letter in "abad")
@@ -71,11 +85,11 @@ def archive(raw: bytes, name: str = f"123-{HEAD}.json") -> bytes:
     return stream.getvalue()
 
 
-def _is_mapping(value: object) -> TypeGuard[dict[object, object]]:
+def _is_mapping(value: JSONValue) -> TypeGuard[dict[str, JSONValue]]:
     return isinstance(value, dict)
 
 
-def _set(target: object, path: tuple[str, ...], value: object) -> None:
+def _set(target: dict[str, JSONValue], path: tuple[str, ...], value: JSONValue) -> None:
     assert _is_mapping(target)
     for key in path[:-1]:
         nested = target[key]
@@ -92,7 +106,7 @@ class Provider:
         self.base_sha = BASE
         self.target_protected = True
         self.target_advanced = False
-        self.pr: dict[str, object] = {
+        self.pr: dict[str, JSONValue] = {
             "state": "open",
             "draft": False,
             "user": {"login": "sarj-bulbul[bot]", "type": "Bot"},
@@ -103,7 +117,7 @@ class Provider:
                 "repo": {"id": 1, "full_name": REPOSITORY},
             },
         }
-        self.run: dict[str, object] = {
+        self.run: dict[str, JSONValue] = {
             "id": 7,
             "run_attempt": 2,
             "workflow_id": 9,
@@ -120,14 +134,14 @@ class Provider:
             "updated_at": "2026-11-08T10:05:00Z",
         }
         self.runs = [self.run]
-        self.suite: dict[str, object] = {
+        self.suite: dict[str, JSONValue] = {
             "id": 8,
             "head_sha": SOURCE,
             "app": {"id": 15368},
             "status": "completed",
             "conclusion": "success",
         }
-        self.files = [
+        self.files: list[dict[str, JSONValue]] = [
             {"filename": path, "status": "modified"}
             for path in ("domain/api.tf", "domain/worker.tf")
         ]
@@ -150,7 +164,7 @@ class Provider:
             ),
         )
         self.raw = json.dumps(self.binding.payload()).encode()
-        self.artifact: dict[str, object] = {
+        self.artifact: dict[str, JSONValue] = {
             "id": 6,
             "name": "activation-receipt-dev",
             "expired": False,
@@ -176,8 +190,8 @@ class Provider:
             size_in_bytes=len(zipped), digest="sha256:" + hashlib.sha256(zipped).hexdigest()
         )
 
-    def tree(self, sha: str, directory: str = "") -> list[dict[str, object]]:
-        entries: dict[str, dict[str, object]] = {}
+    def tree(self, sha: str, directory: str = "") -> list[dict[str, JSONValue]]:
+        entries: dict[str, dict[str, JSONValue]] = {}
         for (commit, path), content in self.contents.items():
             if commit != sha or not path.startswith(directory):
                 continue
@@ -196,8 +210,8 @@ class Provider:
         return list(entries.values())
 
     def request(  # ruff: ignore[too-many-return-statements] -- explicit fake API routes
-        self, method: str, path: str, *, payload: Mapping[str, object] | None = None
-    ) -> object:
+        self, method: str, path: str, *, payload: Mapping[str, JSONValue] | None = None
+    ) -> JSONValue:
         assert method == "GET"
         assert payload is None
         suffix = path.removeprefix(f"/repos/{REPOSITORY}")
@@ -232,7 +246,11 @@ class Provider:
         if suffix.startswith("/git/trees/"):
             tree_id = suffix.removeprefix("/git/trees/")
             sha, directory = self.trees[tree_id]
-            return {"sha": tree_id, "truncated": False, "tree": self.tree(sha, directory)}
+            return {
+                "sha": tree_id,
+                "truncated": False,
+                "tree": list[JSONValue](self.tree(sha, directory)),
+            }
         if suffix.startswith("/git/blobs/"):
             blob_id = suffix.split("/")[-1]
             content = self.blobs[blob_id]
@@ -244,20 +262,20 @@ class Provider:
             }
         raise AssertionError(path)
 
-    def run_attempt(self, suffix: str) -> dict[str, object]:
+    def run_attempt(self, suffix: str) -> dict[str, JSONValue]:
         return next(
             run
             for run in self.runs
             if f"/actions/runs/{run['id']}/attempts/{run['run_attempt']}" == suffix
         )
 
-    def rest_pages(self, path: str, *, collection_key: str | None = None) -> list[object]:
+    def rest_pages(self, path: str, *, collection_key: str | None = None) -> list[JSONValue]:
         assert path.startswith("/repos/")
         if collection_key == "workflow_runs":
-            return list(self.runs)
+            return list[JSONValue](self.runs)
         if collection_key == "artifacts":
             return [self.artifact]
-        return list(self.files)
+        return list[JSONValue](self.files)
 
     def artifact_bytes(self, artifact_id: int) -> bytes:
         assert artifact_id == 6
@@ -271,6 +289,13 @@ class Provider:
         return authenticate_activation(
             self, policy=self.policy, number=123, base_sha=self.base_sha, head_sha=HEAD
         )
+
+
+def test_activation_policy_preserves_unrelated_toml_date_metadata() -> None:
+    provider = Provider()
+    key = BASE, ".repo-standards/repository.toml"
+    provider.contents[key] = b"recorded_on = 2026-11-13\n" + provider.contents[key]
+    assert policy_at_base(provider, BASE) == provider.policy
 
 
 def _mixed_provider() -> Provider:
@@ -292,7 +317,7 @@ def test_mixed_activation_proves_unchanged_consumer_is_already_enabled() -> None
 @pytest.mark.parametrize("commit", [BASE, HEAD])
 def test_mixed_activation_rejects_unchanged_consumer_symlink(commit: str) -> None:
     class SymlinkProvider(Provider):
-        def tree(self, sha: str, directory: str = "") -> list[dict[str, object]]:
+        def tree(self, sha: str, directory: str = "") -> list[dict[str, JSONValue]]:
             entries = super().tree(sha, directory)
             for entry in entries:
                 if sha == commit and directory == "domain/" and entry["path"] == "api.tf":
@@ -374,11 +399,12 @@ def test_mixed_activation_rejects_nonmodified_scope(status: str) -> None:
 
 def test_mixed_activation_rejects_unrelated_or_duplicate_or_empty_scope() -> None:
     provider = _mixed_provider()
-    for files in (
+    cases: tuple[list[dict[str, JSONValue]], ...] = (
         [*provider.files, {"filename": "unrelated.tf", "status": "modified"}],
         provider.files * 2,
         [],
-    ):
+    )
+    for files in cases:
         provider.files = files
         assert provider.verify() is None
 
@@ -403,7 +429,10 @@ def test_authenticated_multifile_activation_waives_only_review_floors():
             draft=False,
             verified_activation=proof,
         )
-        assert decision.passed == policy_passed
+        if policy_passed:
+            assert isinstance(decision, PolicyAccepted)
+        else:
+            assert isinstance(decision, PolicyRejected)
     ordinary = evaluate_review_policy(evidence, ReviewPolicyConfig(author_review_floor=1))
     assert ordinary.required_human_reviews == 1
     assert "sensitive_approval_missing" in ordinary.reasons
@@ -689,7 +718,7 @@ def test_append_line_rejects_symlink(commit: str) -> None:
     provider = _append_provider()
     original_tree = provider.tree
 
-    def tree(sha: str, directory: str = "") -> list[dict[str, object]]:
+    def tree(sha: str, directory: str = "") -> list[dict[str, JSONValue]]:
         entries = original_tree(sha, directory)
         if sha == commit and directory == "domain/":
             for entry in entries:
@@ -699,3 +728,33 @@ def test_append_line_rejects_symlink(commit: str) -> None:
 
     provider.tree = tree
     assert provider.verify() is None
+
+
+def test_activation_commands_preserve_the_default_and_strict_append_contract() -> None:
+    replacement = ActivationEdit.model_validate(
+        {"environment": "preview", "path": "existing.tfvars", "before": "off", "after": "on"}
+    )
+    assert isinstance(replacement.root, ReplacementActivationEdit)
+    assert replacement.model_dump() == {
+        "environment": "preview",
+        "path": "existing.tfvars",
+        "before": "off",
+        "after": "on",
+        "operation": "replace",
+    }
+    append = ActivationEdit.model_validate(
+        {
+            "environment": "preview",
+            "path": "existing.tfvars",
+            "operation": "append_line",
+            "before": "",
+            "after": "flag = true",
+        }
+    )
+    assert isinstance(append.root, AppendActivationEdit)
+    with pytest.raises(ValidationError):
+        replacement.root = append.root
+    with pytest.raises(ValidationError):
+        ActivationEdit.model_validate(
+            {"environment": "preview", "path": "existing.tfvars", "before": "", "after": "on"}
+        )

@@ -1,27 +1,71 @@
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 
-class ActivationEdit(BaseModel):
+class _ActivationEdit(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     environment: Literal["dev", "preview"]
     path: str = Field(min_length=1, max_length=512)
-    operation: Literal["replace", "append_line"] = "replace"
-    before: str = Field(max_length=4096)
     after: str = Field(min_length=1, max_length=4096)
 
+
+class ReplacementActivationEdit(_ActivationEdit):
+    operation: Literal["replace"] = "replace"
+    before: str = Field(min_length=1, max_length=4096)
+
+
+class AppendActivationEdit(_ActivationEdit):
+    operation: Literal["append_line"] = "append_line"
+    before: Literal[""] = ""
+
     @model_validator(mode="after")
-    def validate_operation(self) -> Self:
-        if (self.operation == "append_line") != (not self.before):
-            message = "only append_line requires an empty before literal"
-            raise ValueError(message)
-        if self.operation == "append_line" and any(c in self.after for c in "\r\n"):
+    def single_line(self) -> Self:
+        if any(c in self.after for c in "\r\n"):
             message = "append_line requires a single registered line"
             raise ValueError(message)
         return self
+
+
+class ActivationEdit(
+    RootModel[
+        Annotated[
+            ReplacementActivationEdit | AppendActivationEdit,
+            Field(discriminator="operation"),
+        ]
+    ]
+):
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_operation(cls, value: object) -> object:
+        unchanged: object = value
+        if isinstance(value, dict) and "operation" not in value:
+            return ReplacementActivationEdit.model_validate(value)
+        return unchanged
+
+    @property
+    def environment(self) -> Literal["dev", "preview"]:
+        return self.root.environment
+
+    @property
+    def path(self) -> str:
+        return self.root.path
+
+    @property
+    def operation(self) -> Literal["replace", "append_line"]:
+        return self.root.operation
+
+    @property
+    def before(self) -> str:
+        return self.root.before
+
+    @property
+    def after(self) -> str:
+        return self.root.after
 
 
 class RegisteredActivation(BaseModel):

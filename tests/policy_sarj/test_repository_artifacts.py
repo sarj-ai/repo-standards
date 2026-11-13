@@ -164,7 +164,6 @@ def _snapshot(
         ),
         baseline=None,
         inspection=RepositoryInspection(
-            completion="complete",
             source_revision="a" * 40,
             tree_digest="b" * 40,
             tracked_file_count=len(tracked),

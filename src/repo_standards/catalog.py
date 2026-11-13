@@ -26,14 +26,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator,
 from typer.models import ArgumentInfo, CommandInfo, DefaultPlaceholder, OptionInfo, TyperInfo
 
 from repo_standards.core.canonical import canonical_json
-from repo_standards.core.models import (
-    ExampleLanguage,
-    JSONValue,
-    Policy,
-    Rule,
-    RuleCategoryId,
-    RuleId,
-)
+from repo_standards.core.models import ExampleLanguage, Policy, Rule, RuleCategoryId, RuleId
+from repo_standards.core.outcome import JSONValue
 from repo_standards.core.render import analysis_outcome_schema, baseline_schema, output_schema
 from repo_standards.core.taxonomy import CATEGORIES
 from repo_standards.policy_sarj.policy import POLICY_SPEC, SarjPolicy

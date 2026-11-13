@@ -3,6 +3,10 @@
   "pythonVersion": "3.14",
   "include": [
     "src",
-    "tests"
+    "tests",
+    "ci_artifacts.py",
+    "ci_reviewed_validation.py",
+    "release_reconciliation.py",
+    "test_selection.py"
   ]
 }

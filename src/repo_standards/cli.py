@@ -9,7 +9,16 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import Annotated, ClassVar, Literal, NamedTuple, NewType, NoReturn, NotRequired
+from typing import (
+    Annotated,
+    ClassVar,
+    Literal,
+    NamedTuple,
+    NewType,
+    NoReturn,
+    NotRequired,
+    assert_never,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError
 import typer
@@ -23,7 +32,16 @@ from repo_standards._machine import (
 )
 from repo_standards.activation_verification import VerifiedActivation, authenticate_activation
 from repo_standards.core.canonical import canonical_json
-from repo_standards.core.commit_message import CommitMessageResult, check_local_commit_message_file
+from repo_standards.core.commit_message import (
+    AppliedCommitRepair,
+    CommitMessageResult,
+    ProposedCommitRepair,
+    RejectedCommitMessage,
+    ValidCommitMessage,
+    check_local_commit_message_file,
+    commit_message_findings,
+    is_commit_message_satisfied,
+)
 from repo_standards.core.description import analyze_description, without_bot_footer
 from repo_standards.core.engine import baseline_from_report
 from repo_standards.core.errors import BaselineError, ConfigurationError
@@ -39,20 +57,26 @@ from repo_standards.core.models import (
     AnalysisReport,
     Baseline,
     Diagnostic,
-    ExecutionIssue,
     GitObjectId,
     IncompleteReport,
-    JSONValue,
     MigrationCouplingException,
     Mode,
     Policy,
     PolicyId,
     PullRequestConfig,
     PullRequestReviewPolicyConfig,
+    RatchetComparison,
     RepositoryId,
     RepositoryInspection,
     Rule,
     RuleId,
+    report_outcome,
+)
+from repo_standards.core.outcome import (
+    CompletedOutcome,
+    ExecutionIssue,
+    IncompleteCommand,
+    JSONValue,
 )
 from repo_standards.core.parser import load_manifest
 from repo_standards.core.pull_request_body import missing_required_body_sections
@@ -100,6 +124,7 @@ from repo_standards.pull_request._trusted_manifest import load_trusted_base_mani
 from repo_standards.repository.analysis import (
     RepositoryAnalysisRequest,
     complete_repository_analysis,
+    select_analysis,
 )
 from repo_standards.rest import (
     InstrumentationDetectionReport,
@@ -139,11 +164,43 @@ _MAX_RENDERED_COMMIT_FINDINGS = 3
 _MAX_REVIEW_POLICY_EVIDENCE_BYTES = 1_048_576
 
 
+@dataclass(frozen=True, slots=True)
+class _UnrequestedBaseline:
+    kind: ClassVar[Literal["unrequested"]] = "unrequested"
+    regressions: ClassVar[tuple[()]] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _UnavailableBaseline:
+    kind: ClassVar[Literal["unavailable"]] = "unavailable"
+    path: str
+    reason: Literal["not-evaluated", "rejected"]
+
+
+@dataclass(frozen=True, slots=True)
+class _VerifiedBaseline:
+    kind: ClassVar[Literal["verified"]] = "verified"
+    path: str
+    baseline: Baseline
+    comparison: RatchetComparison
+    regressions: tuple[Diagnostic, ...]
+
+
+type _BaselineReceipt = _UnrequestedBaseline | _UnavailableBaseline | _VerifiedBaseline
+
+
+class _BaselinePresentation(NamedTuple):
+    baseline: Mapping[str, JSONValue]
+    ratchet: Mapping[str, JSONValue]
+
+
 class _CompletedAnalysis(NamedTuple):
     report: AnalysisReport
-    regressions: tuple[Diagnostic, ...]
-    baseline_state: Mapping[str, JSONValue]
-    ratchet_state: Mapping[str, JSONValue]
+    receipt: _UnrequestedBaseline | _VerifiedBaseline
+
+    @property
+    def regressions(self) -> tuple[Diagnostic, ...]:
+        return self.receipt.regressions
 
 
 class _PolicyPayload(CommandEnvelope):
@@ -344,7 +401,9 @@ def commit_message_command(
             remediation="Provide exactly one bounded UTF-8 regular commit-message file.",
         )
     payload = _commit_message_payload(result, fix_safe_enabled=fix_safe)
-    advisories = subject_advisories(result.header) if advise and result.satisfied else ()
+    advisories = (
+        subject_advisories(result.header) if advise and is_commit_message_satisfied(result) else ()
+    )
     if advise:
         payload = {**payload, "advisories": [asdict(advice) for advice in advisories]}
     if output_format is OutputFormat.TEXT:
@@ -357,7 +416,7 @@ def commit_message_command(
         typer.echo(json.dumps(payload, indent=2, sort_keys=True) + "\n", nl=False)
     else:
         typer.echo(canonical_json(payload) + "\n", nl=False)
-    if not result.satisfied:
+    if not is_commit_message_satisfied(result):
         raise typer.Exit(1)
 
 
@@ -366,11 +425,22 @@ def _commit_message_payload(
     *,
     fix_safe_enabled: bool,
 ) -> _CommitMessagePayload:
+    match result:
+        case ValidCommitMessage() | RejectedCommitMessage():
+            fixed, replacement = False, None
+        case ProposedCommitRepair(replacement_header=proposed):
+            fixed, replacement = False, proposed
+        case AppliedCommitRepair(header=applied):
+            fixed, replacement = True, applied
+        case _:
+            assert_never(result)
     return {
         **_envelope(
             "commit-message",
-            conclusion="passed" if result.satisfied else "findings",
             provenance={"kind": "commit-message-file"},
+            outcome=CompletedOutcome.PASSED
+            if is_commit_message_satisfied(result)
+            else CompletedOutcome.FINDINGS,
         ),
         "policy": {
             "id": "managed-conventional-header-v1",
@@ -379,22 +449,27 @@ def _commit_message_payload(
             "safe_fix_enabled": fix_safe_enabled,
         },
         "summary": {
-            "satisfied": result.satisfied,
-            "fix_applied": result.fix_applied,
-            "replacement_message": result.replacement_header,
-            "replacement_header": result.replacement_header,
+            "satisfied": is_commit_message_satisfied(result),
+            "fix_applied": fixed,
+            "replacement_message": replacement,
+            "replacement_header": replacement,
         },
-        "findings": [asdict(finding) for finding in result.findings],
+        "findings": [asdict(finding) for finding in commit_message_findings(result)],
     }
 
 
 def _render_commit_message(result: CommitMessageResult) -> str:
-    if result.fix_applied:
-        return "Commit message: safely normalized; validation passed.\n"
-    if result.satisfied:
-        return ""
-    finding = result.findings[0]
-    return f"Commit message: {finding.code}\n{finding.message}\nFix: {finding.remediation}\n"
+    match result:
+        case AppliedCommitRepair():
+            return "Commit message: safely normalized; validation passed.\n"
+        case ValidCommitMessage():
+            return ""
+        case RejectedCommitMessage(finding=finding) | ProposedCommitRepair(finding=finding):
+            return (
+                f"Commit message: {finding.code}\n{finding.message}\nFix: {finding.remediation}\n"
+            )
+        case _:
+            assert_never(result)
 
 
 @pull_request_app.command("text")
@@ -442,8 +517,8 @@ def pull_request_text_command(
     payload = {
         **_envelope(
             "pull-request text",
-            conclusion="findings" if warnings else "passed",
             provenance={"kind": "pull-request-body-file"},
+            outcome=CompletedOutcome.FINDINGS if warnings else CompletedOutcome.PASSED,
         ),
         "policy": {
             "enforcement": "advisory",
@@ -719,6 +794,7 @@ def _pull_request_documentation_payload(
         **_envelope(
             "pull-request documentation",
             provenance={"kind": "git-revisions", "base": result.base, "head": result.head},
+            outcome=CompletedOutcome.PASSED if result.satisfied else CompletedOutcome.FINDINGS,
         ),
         "policy": {
             "maximum_added_pages": result.maximum_added_pages,
@@ -1161,13 +1237,13 @@ def _pull_request_review_policy_payload(  # ruff: ignore[too-many-arguments] - r
     return {
         **_envelope(
             "pull-request review-policy",
-            conclusion="passed" if merge_ready else "findings",
             provenance={
                 "kind": "git-revisions-and-provider-evidence",
                 "base": base,
                 "evaluated_head": provider.evaluated_head_sha,
                 "current_head": provider.current_head_sha,
             },
+            outcome=CompletedOutcome.PASSED if merge_ready else CompletedOutcome.FINDINGS,
         ),
         "policy": {
             "zero_review_below_counted_lines": configured.zero_review_below_counted_lines,
@@ -1571,12 +1647,10 @@ def _emit_pull_request_commits_not_applicable(
     payload = {
         **_envelope(
             "pull-request commits",
-            conclusion="inconclusive" if is_local_advisory else "passed",
-            provenance=(
-                {"kind": "local-advisory"}
-                if is_local_advisory
-                else {"kind": "github-event", "event_name": result.event_name}
-            ),
+            provenance={"kind": "local-advisory"}
+            if is_local_advisory
+            else {"kind": "github-event", "event_name": result.event_name},
+            outcome=CompletedOutcome.ADVISORY if is_local_advisory else CompletedOutcome.PASSED,
         ),
         "summary": {"disposition": "not-applicable", "reason": result.reason},
     }
@@ -1611,16 +1685,16 @@ def _emit_pull_request_commits_advisory_incomplete(
 ) -> None:
     payload = _envelope(
         "pull-request commits",
-        completion="incomplete",
-        conclusion="inconclusive",
-        issues=[
-            _issue_payload(
-                "analysis.incomplete",
-                "analysis",
-                str(error),
-                "Authoritative pull-request CI will retry with complete exact revisions.",
+        outcome=IncompleteCommand(
+            (
+                _execution_issue(
+                    "analysis.incomplete",
+                    "analysis",
+                    str(error),
+                    ("Authoritative pull-request CI will retry with complete exact revisions."),
+                ),
             )
-        ],
+        ),
     )
     if output_format is OutputFormat.TEXT:
         typer.echo(
@@ -1652,12 +1726,12 @@ def _pull_request_commits_payload(
     payload: _CommitsPayload = {
         **_envelope(
             "pull-request commits",
-            conclusion="findings" if result.has_findings else "passed",
             provenance={
                 "kind": "git-revisions",
                 "base": result.base_object_id,
                 "head": result.head_object_id,
             },
+            outcome=CompletedOutcome.FINDINGS if result.has_findings else CompletedOutcome.PASSED,
         ),
         "policy": {
             "enabled": True,
@@ -1752,17 +1826,17 @@ def inspect_command(
     except (ConfigurationError, OSError) as error:
         payload = _envelope(
             "inspect",
-            completion="incomplete",
-            conclusion="inconclusive",
             provenance=_git_provenance(identity),
-            issues=[
-                _issue_payload(
-                    "inspection.incomplete",
-                    "inspection",
-                    str(error),
-                    "Inspect the reported Git object and correct or classify it explicitly.",
+            outcome=IncompleteCommand(
+                (
+                    _execution_issue(
+                        "inspection.incomplete",
+                        "inspection",
+                        str(error),
+                        ("Inspect the reported Git object and correct or classify it explicitly."),
+                    ),
                 )
-            ],
+            ),
         )
         typer.echo(canonical_json(payload))
         raise typer.Exit(2) from None
@@ -1806,22 +1880,26 @@ def _inspection_payload(
     return {
         **_envelope(
             "inspect",
-            completion=inspection.completion,
-            conclusion="passed" if inspection.completion == "complete" else "inconclusive",
             provenance={
                 "kind": "git-tree",
                 "source_revision": inspection.source_revision,
                 "tree_digest": inspection.tree_digest,
             },
-            issues=[
-                _issue_payload(
-                    "metadata.invalid",
-                    "inspection",
-                    message,
-                    "Correct or explicitly exclude the malformed inert metadata file.",
+            outcome=CompletedOutcome.PASSED
+            if inspection.completion == "complete"
+            else IncompleteCommand(
+                tuple(
+                    [
+                        _execution_issue(
+                            "metadata.invalid",
+                            "inspection",
+                            message,
+                            "Correct or explicitly exclude the malformed inert metadata file.",
+                        )
+                        for message in inspection.issues
+                    ]
                 )
-                for message in inspection.issues
-            ],
+            ),
         ),
         "summary": {
             "tracked_files": inspection.tracked_file_count,
@@ -1936,27 +2014,31 @@ def rest_discover_command(
     payload = {
         **_envelope(
             "rest.discover",
-            completion=completion,
-            conclusion="passed" if completion == "complete" else "inconclusive",
             provenance=_git_provenance(identity),
-            issues=[
-                _issue_payload(
-                    "metadata.invalid",
-                    "inspection",
-                    issue,
-                    "Correct or explicitly exclude the malformed tracked metadata.",
+            outcome=CompletedOutcome.PASSED
+            if completion == "complete"
+            else IncompleteCommand(
+                tuple(
+                    [
+                        _execution_issue(
+                            "metadata.invalid",
+                            "inspection",
+                            issue,
+                            "Correct or explicitly exclude the malformed tracked metadata.",
+                        )
+                        for issue in inspection.issues
+                    ]
+                    + [
+                        _execution_issue(
+                            issue.code,
+                            "rest-detection",
+                            issue.message,
+                            "Correct or explicitly classify the tracked framework metadata.",
+                        )
+                        for issue in detection.issues
+                    ]
                 )
-                for issue in inspection.issues
-            ]
-            + [
-                _issue_payload(
-                    issue.code,
-                    "rest-detection",
-                    issue.message,
-                    "Correct or explicitly classify the tracked framework metadata.",
-                )
-                for issue in detection.issues
-            ],
+            ),
         ),
         "application_code_executed": False,
         "coverage": {
@@ -2009,18 +2091,31 @@ def rest_doctor_command(root: Annotated[Path, typer.Argument()] = Path()) -> Non
     payload = {
         **_envelope(
             "rest.doctor",
-            completion=completion,
-            conclusion="passed" if completion == "complete" else "inconclusive",
             provenance=_git_provenance(identity),
-            issues=[
-                _issue_payload(
-                    issue.code,
-                    "rest-detection",
-                    issue.message,
-                    "Correct or explicitly classify the tracked framework metadata.",
+            outcome=CompletedOutcome.PASSED
+            if completion == "complete"
+            else IncompleteCommand(
+                tuple(
+                    [
+                        _execution_issue(
+                            "metadata.invalid",
+                            "inspection",
+                            issue,
+                            "Correct or explicitly exclude the malformed tracked metadata.",
+                        )
+                        for issue in inspection.issues
+                    ]
+                    + [
+                        _execution_issue(
+                            issue.code,
+                            "rest-detection",
+                            issue.message,
+                            "Correct or explicitly classify the tracked framework metadata.",
+                        )
+                        for issue in detection.issues
+                    ]
                 )
-                for issue in detection.issues
-            ],
+            ),
         ),
         "application_code_executed": False,
         "capabilities": [asdict(item) for item in instrumentation_capabilities()],
@@ -2043,37 +2138,39 @@ def _emit_rest_error(
 ) -> NoReturn:
     payload = _envelope(
         command,
-        completion="incomplete",
-        conclusion="inconclusive",
         provenance=_git_provenance(identity),
-        issues=[
-            _issue_payload(
-                code,
-                "rest",
-                message,
-                "Review the tracked contract selection and rerun without executing "
-                "application code.",
+        outcome=IncompleteCommand(
+            (
+                _execution_issue(
+                    code,
+                    "rest",
+                    message,
+                    (
+                        "Review the tracked contract selection and rerun without executing"
+                        " application code."
+                    ),
+                ),
             )
-        ],
+        ),
     )
     payload["schema_version"] = 3
     typer.echo(canonical_json(payload))
     raise typer.Exit(2)
 
 
-def _issue_payload(
+def _execution_issue(
     code: str,
     phase: str,
     message: str,
     remediation: str,
-) -> Mapping[str, JSONValue]:
-    return {
-        "code": code,
-        "phase": phase,
-        "message": message,
-        "retryable": False,
-        "remediation": [remediation],
-    }
+) -> ExecutionIssue:
+    return ExecutionIssue(
+        code=code,
+        phase=phase,
+        message=message,
+        retryable=False,
+        remediation=(remediation,),
+    )
 
 
 @app.command()
@@ -2144,7 +2241,7 @@ def check(  # ruff: ignore[too-many-arguments,too-many-positional-arguments] - T
     for the wire format. Python callers create baselines with
     baseline_from_report(report, include_warnings=True), serialize with
     baseline_dict, and analyze with RepositoryAnalysisRequest using both
-    mode=Mode.RATCHET and include_warnings=True.
+    selection=RatchetAnalysis(baseline_path, include_warnings=True).
     """
     raise typer.Exit(
         _run_check(
@@ -2252,16 +2349,11 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
     include_warnings: bool = False,
 ) -> int:
     command = "report" if mode is Mode.REPORT else "check"
-    baseline_state: Mapping[str, JSONValue] = {
-        "status": "not-requested" if mode is not Mode.RATCHET else "not-evaluated",
-        "path": baseline_path if mode is Mode.RATCHET else None,
-    }
-    ratchet_state: Mapping[str, JSONValue] = {"status": "not-requested"}
     try:
         if include_warnings and mode is not Mode.RATCHET:
             ConfigurationError.fail("--ratchet-warnings requires --mode ratchet")
         policy = _policy()
-        report, regressions, baseline_state, ratchet_state = _complete_analysis(
+        completed = _complete_analysis(
             root=root,
             manifest_path=manifest_path,
             baseline_path=baseline_path,
@@ -2275,32 +2367,37 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
         )
     except ConfigurationError as error:
         report = _incomplete(SarjPolicy.policy_id, mode, str(error))
-        if mode is Mode.RATCHET:
-            baseline_state = {
-                "status": "rejected" if isinstance(error, BaselineError) else "not-evaluated",
-                "path": baseline_path,
-            }
-            ratchet_state = {"status": "not-evaluated", "reason": "analysis-incomplete"}
+        receipt: _BaselineReceipt = (
+            _UnavailableBaseline(
+                baseline_path,
+                "rejected" if isinstance(error, BaselineError) else "not-evaluated",
+            )
+            if mode is Mode.RATCHET
+            else _UnrequestedBaseline()
+        )
+        presentation = _baseline_presentation(receipt)
         typer.echo(
             _render(
                 report,
                 output_format,
                 command=command,
                 manifest_path=manifest_path,
-                baseline=baseline_state,
-                ratchet=ratchet_state,
+                baseline=presentation.baseline,
+                ratchet=presentation.ratchet,
             ),
             nl=False,
         )
         return 2
+    report = completed.report
+    presentation = _baseline_presentation(completed.receipt)
     typer.echo(
         _render(
             report,
             output_format,
             command=command,
             manifest_path=manifest_path,
-            baseline=baseline_state,
-            ratchet=ratchet_state,
+            baseline=presentation.baseline,
+            ratchet=presentation.ratchet,
         ),
         nl=False,
     )
@@ -2315,7 +2412,7 @@ def _run_check(  # ruff: ignore[too-many-arguments] - normalized CLI options
                 for item in report.diagnostics
             )
         )
-    return int(bool(regressions))
+    return int(bool(completed.regressions))
 
 
 def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis inputs
@@ -2335,24 +2432,17 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         RepositoryAnalysisRequest(
             root=root,
             manifest_path=manifest_path,
-            baseline_path=baseline_path,
-            mode=mode,
+            selection=select_analysis(mode, baseline_path, include_warnings=include_warnings),
             as_of=_parse_date(as_of),
             staged=staged,
             enabled_rule_ids=enabled_rule_ids,
             base_revision=base_revision,
-            include_warnings=include_warnings,
         ),
         policy=policy,
     )
     report = completed.report
     if mode is not Mode.RATCHET:
-        return _CompletedAnalysis(
-            report,
-            (),
-            {"status": "not-requested", "path": None},
-            {"status": "not-requested"},
-        )
+        return _CompletedAnalysis(report, _UnrequestedBaseline())
     if completed.baseline is None:
         message = "baseline is absent from the selected Git tree"
         raise BaselineError(message)
@@ -2361,7 +2451,6 @@ def _complete_analysis(  # ruff: ignore[too-many-arguments] - explicit analysis 
         completed.baseline,
         baseline_path,
         regressions=completed.regressions,
-        include_warnings=include_warnings,
     )
 
 
@@ -2371,7 +2460,6 @@ def _complete_ratchet_analysis(
     baseline_path: str,
     *,
     regressions: tuple[Diagnostic, ...],
-    include_warnings: bool = False,
 ) -> _CompletedAnalysis:
     comparison = report.ratchet
     if comparison is None:
@@ -2386,22 +2474,44 @@ def _complete_ratchet_analysis(
         "ratchet_known": max(active_count - new_count, 0),
     }
     report = replace(report, summary=ratchet_summary, ratchet=None)
-    baseline_state: Mapping[str, JSONValue] = {
-        "status": "verified",
-        "path": baseline_path,
-        "fingerprints": len(baseline.fingerprints),
-        "scope_digest": baseline.scope_digest,
-        "include_warnings": baseline.include_warnings,
-    }
-    ratchet_state: Mapping[str, JSONValue] = {
-        "status": "regressions" if regressions else "clean",
-        "known": max(active_count - new_count, 0),
-        "new": new_count,
-        "stale": 0,
-        "regressions": len(regressions),
-        "include_warnings": include_warnings,
-    }
-    return _CompletedAnalysis(report, regressions, baseline_state, ratchet_state)
+    return _CompletedAnalysis(
+        report, _VerifiedBaseline(baseline_path, baseline, comparison, regressions)
+    )
+
+
+def _baseline_presentation(receipt: _BaselineReceipt) -> _BaselinePresentation:
+    match receipt:
+        case _UnrequestedBaseline():
+            return _BaselinePresentation(
+                {"status": "not-requested", "path": None}, {"status": "not-requested"}
+            )
+        case _UnavailableBaseline():
+            return _BaselinePresentation(
+                {"status": receipt.reason, "path": receipt.path},
+                {"status": "not-evaluated", "reason": "analysis-incomplete"},
+            )
+        case _VerifiedBaseline():
+            new_count = len(receipt.regressions)
+            known_count = max(len(receipt.comparison.entries) - new_count, 0)
+            return _BaselinePresentation(
+                {
+                    "status": "verified",
+                    "path": receipt.path,
+                    "fingerprints": len(receipt.baseline.fingerprints),
+                    "scope_digest": receipt.baseline.scope_digest,
+                    "include_warnings": receipt.baseline.include_warnings,
+                },
+                {
+                    "status": "regressions" if receipt.regressions else "clean",
+                    "known": known_count,
+                    "new": new_count,
+                    "stale": 0,
+                    "regressions": new_count,
+                    "include_warnings": receipt.comparison.include_warnings,
+                },
+            )
+        case _:
+            assert_never(receipt)
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -2476,7 +2586,7 @@ def _report_payload(
 ) -> Mapping[str, JSONValue]:
     payload = dict(report_dict(report))
     payload.pop("execution_issues")
-    provenance: dict[str, object] = {
+    provenance: dict[str, JSONValue] = {
         "kind": "repository-manifest",
         "manifest_path": manifest_path,
         "source_revision": None,
@@ -2490,13 +2600,7 @@ def _report_payload(
         RootModel[dict[str, JSONValue]]
         .model_validate(
             {
-                **_envelope(
-                    command,
-                    completion=report.completion,
-                    conclusion=report.conclusion,
-                    provenance=provenance,
-                    issues=[asdict(issue) for issue in report.execution_issues],
-                ),
+                **_envelope(command, provenance=provenance, outcome=report_outcome(report)),
                 **payload,
                 "baseline": dict(baseline),
                 "ratchet": dict(ratchet),
@@ -2599,9 +2703,7 @@ def _emit_command_error(
 ) -> NoReturn:
     payload = _envelope(
         command,
-        completion="incomplete",
-        conclusion="inconclusive",
-        issues=[_issue_payload(code, phase, message, remediation)],
+        outcome=IncompleteCommand((_execution_issue(code, phase, message, remediation),)),
     )
     typer.echo(canonical_json(payload))
     raise typer.Exit(2)

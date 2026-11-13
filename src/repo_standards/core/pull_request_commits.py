@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 import os
 import re
@@ -8,7 +8,7 @@ import selectors
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git queries
 import time
-from typing import TYPE_CHECKING, Literal, NamedTuple, NewType
+from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple, NewType, assert_never
 
 
 if TYPE_CHECKING:
@@ -17,7 +17,11 @@ if TYPE_CHECKING:
 
 from repo_standards._git_environment import GIT_NO_PAGER_ENVIRONMENT
 
-from .commit_message import CommitMessageFinding, analyze_commit_header
+from .commit_message import (
+    CommitMessageFinding,
+    analyze_commit_header,
+    commit_message_findings,
+)
 from .errors import ConfigurationError
 from .models import CommitMessageEnforcement, GitObjectId, RepositoryId
 
@@ -101,6 +105,53 @@ class TransitionExemption:
 
 
 @dataclass(frozen=True, slots=True)
+class UncheckedCommitMessages:
+    kind: ClassVar[Literal["unchecked"]] = "unchecked"
+    enforcement: None = field(init=False, default=None)
+    findings: tuple[PullRequestCommitMessageFinding, ...] = field(init=False, default=())
+
+
+@dataclass(frozen=True, slots=True)
+class CheckedCommitMessages:
+    kind: ClassVar[Literal["checked"]] = "checked"
+    enforcement: CommitMessageEnforcement
+    findings: tuple[PullRequestCommitMessageFinding, ...]
+
+
+type CommitMessages = UncheckedCommitMessages | CheckedCommitMessages
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedCommitCount:
+    kind: ClassVar[Literal["accepted"]] = "accepted"
+    disposition: Literal["within-limit", "numbered-series"]
+    messages: CommitMessages
+    numbering_issue: None = field(init=False, default=None)
+    exemption_id: None = field(init=False, default=None)
+
+
+@dataclass(frozen=True, slots=True)
+class RejectedCommitCount:
+    kind: ClassVar[Literal["rejected"]] = "rejected"
+    numbering_issue: NumberingIssue
+    messages: CommitMessages
+    disposition: Literal["over-limit"] = field(init=False, default="over-limit")
+    exemption_id: None = field(init=False, default=None)
+
+
+@dataclass(frozen=True, slots=True)
+class ExemptCommitCount:
+    kind: ClassVar[Literal["exempt"]] = "exempt"
+    exemption_id: TransitionExemptionId
+    configured_enforcement: CommitMessageEnforcement | None
+    disposition: Literal["transition-exemption"] = field(init=False, default="transition-exemption")
+    numbering_issue: None = field(init=False, default=None)
+
+
+type CommitAssessment = AcceptedCommitCount | RejectedCommitCount | ExemptCommitCount
+
+
+@dataclass(frozen=True, slots=True)
 class PullRequestCommits:
     base: str
     head: str
@@ -108,11 +159,39 @@ class PullRequestCommits:
     head_object_id: GitObjectId
     maximum_commits: int
     commits: tuple[PullRequestCommit, ...]
-    disposition: Disposition
-    numbering_issue: NumberingIssue | None = None
-    exemption_id: TransitionExemptionId | None = None
-    commit_message_enforcement: CommitMessageEnforcement | None = None
-    commit_message_findings: tuple[PullRequestCommitMessageFinding, ...] = ()
+    assessment: CommitAssessment
+
+    @property
+    def disposition(self) -> Disposition:
+        return self.assessment.disposition
+
+    @property
+    def numbering_issue(self) -> NumberingIssue | None:
+        return self.assessment.numbering_issue
+
+    @property
+    def exemption_id(self) -> TransitionExemptionId | None:
+        return self.assessment.exemption_id
+
+    @property
+    def commit_message_enforcement(self) -> CommitMessageEnforcement | None:
+        match self.assessment:
+            case AcceptedCommitCount() | RejectedCommitCount():
+                return self.assessment.messages.enforcement
+            case ExemptCommitCount():
+                return self.assessment.configured_enforcement
+            case _:
+                assert_never(self.assessment)
+
+    @property
+    def commit_message_findings(self) -> tuple[PullRequestCommitMessageFinding, ...]:
+        match self.assessment:
+            case AcceptedCommitCount() | RejectedCommitCount():
+                return self.assessment.messages.findings
+            case ExemptCommitCount():
+                return ()
+            case _:
+                assert_never(self.assessment)
 
     @property
     def commit_count(self) -> int:
@@ -120,15 +199,21 @@ class PullRequestCommits:
 
     @property
     def satisfied(self) -> bool:
-        count_satisfied = self.disposition != "over-limit"
-        messages_satisfied = not self.commit_message_findings or (
-            self.commit_message_enforcement is CommitMessageEnforcement.OBSERVE
-        )
-        return count_satisfied and messages_satisfied
+        if isinstance(self.assessment, RejectedCommitCount):
+            return False
+        match self.commit_message_enforcement:
+            case None | CommitMessageEnforcement.OBSERVE:
+                return True
+            case CommitMessageEnforcement.STRICT:
+                return not self.commit_message_findings
+            case _ as unexpected:
+                assert_never(unexpected)
 
     @property
     def has_findings(self) -> bool:
-        return self.disposition == "over-limit" or bool(self.commit_message_findings)
+        return isinstance(self.assessment, RejectedCommitCount) or bool(
+            self.commit_message_findings
+        )
 
 
 def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence stays explicit
@@ -170,7 +255,7 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
                 head_object_id=head_object_id,
                 maximum_commits=maximum_commits,
                 commits=commits,
-                disposition="within-limit",
+                assessment=AcceptedCommitCount("within-limit", UncheckedCommitMessages()),
             )
 
     commits = _commits(
@@ -190,18 +275,6 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
         head_ref=head_ref,
         exemptions=transition_exemptions,
     )
-    message_findings = ()
-    numbering_issue = None
-    if exemption_id is not None:
-        disposition: Disposition = "transition-exemption"
-    elif len(commits) <= maximum_commits:
-        disposition = "within-limit"
-        message_findings = _commit_message_findings(commits)
-    else:
-        numbering_issue = _numbering_issue(commits)
-        disposition = "numbered-series" if numbering_issue is None else "over-limit"
-        if commit_message_enforcement is not None:
-            message_findings = _commit_message_findings(commits)
     return PullRequestCommits(
         base=base,
         head=head,
@@ -209,12 +282,31 @@ def analyze_pull_request_commits(  # ruff: ignore[too-many-arguments] - evidence
         head_object_id=head_object_id,
         maximum_commits=maximum_commits,
         commits=commits,
-        disposition=disposition,
-        exemption_id=exemption_id,
-        numbering_issue=numbering_issue,
-        commit_message_enforcement=commit_message_enforcement,
-        commit_message_findings=message_findings,
+        assessment=_assess_commits(
+            commits, maximum_commits, exemption_id, commit_message_enforcement
+        ),
     )
+
+
+def _assess_commits(
+    commits: tuple[PullRequestCommit, ...],
+    maximum: int,
+    exemption: TransitionExemptionId | None,
+    enforcement: CommitMessageEnforcement | None,
+) -> CommitAssessment:
+    if exemption is not None:
+        return ExemptCommitCount(exemption, enforcement)
+    messages = (
+        UncheckedCommitMessages()
+        if enforcement is None
+        else CheckedCommitMessages(enforcement, _commit_message_findings(commits))
+    )
+    if len(commits) <= maximum:
+        return AcceptedCommitCount("within-limit", messages)
+    issue = _numbering_issue(commits)
+    if issue is None:
+        return AcceptedCommitCount("numbered-series", messages)
+    return RejectedCommitCount(issue, messages)
 
 
 def _commit_message_findings(
@@ -229,7 +321,7 @@ def _commit_message_findings(
                 subject=commit.subject,
                 finding=finding,
             )
-            for finding in result.findings
+            for finding in commit_message_findings(result)
         )
     return tuple(findings)
 

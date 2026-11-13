@@ -12,14 +12,21 @@ from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema c
 import pytest
 import yaml
 
-from ci_artifacts import extract, reuse
+from ci_artifacts import (
+    AwaitingArtifact,
+    FreshValidationRequired,
+    JsonValue,
+    VerifiedArtifact,
+    extract,
+    reuse,
+)
 
 
 SHA = "a" * 40
 OTHER = "b" * 40
 
 
-def _run(**changes: object) -> dict[str, object]:
+def _run(**changes: JsonValue) -> dict[str, JsonValue]:
     return {
         "id": 7,
         "run_attempt": 1,
@@ -53,10 +60,10 @@ def _archive(root: Path, *, sha: str = SHA, extra: str | None = None) -> Archive
 
 @dataclass
 class Gateway:
-    responses: list[object]
+    responses: list[JsonValue]
     archive: Path
 
-    def get(self, endpoint: str) -> object:
+    def get(self, endpoint: str) -> JsonValue:
         assert endpoint.startswith("repos/owner/repo/actions/")
         return self.responses.pop(0)
 
@@ -65,7 +72,7 @@ class Gateway:
         destination.write_bytes(self.archive.read_bytes())
 
 
-def _responses(digest: str, *, latest_attempt: int = 1) -> list[object]:
+def _responses(digest: str, *, latest_attempt: int = 1) -> list[JsonValue]:
     return [
         {"total_count": 1, "workflow_runs": [_run()]},
         {
@@ -107,7 +114,12 @@ def test_reuse_preserves_tested_bytes_and_excludes_source_marker(tmp_path: Path)
     result = reuse(
         "owner/repo", SHA, "packages", destination, transport=Gateway(_responses(digest), archive)
     )
-    assert result.reused
+    assert isinstance(result, VerifiedArtifact)
+    assert result.source == SHA
+    assert result.run.identifier == 7
+    assert result.run.attempt == 1
+    assert result.artifact.identifier == 9
+    assert result.artifact.digest == digest
     assert (destination / "repo_standards-1.0.0-py3-none-any.whl").read_bytes() == b"tested wheel"
     assert not (destination / "SOURCE_COMMIT").exists()
 
@@ -123,7 +135,7 @@ def test_rerun_race_leaves_no_reusable_files(tmp_path: Path) -> None:
         destination,
         transport=Gateway(_responses(digest, latest_attempt=2), archive),
     )
-    assert not result.reused
+    assert isinstance(result, FreshValidationRequired)
     assert not destination.exists()
 
 
@@ -148,7 +160,9 @@ def test_wrong_failed_or_incomplete_main_runs_do_not_reuse(tmp_path: Path, case:
     elif case == "pending":
         run.update(status="in_progress", conclusion=None)
     responses = _responses(digest)
-    rows = [run, _run(id=8, conclusion="failure")] if case == "newer-failure" else [run]
+    rows: list[JsonValue] = (
+        [run, _run(id=8, conclusion="failure")] if case == "newer-failure" else [run]
+    )
     responses[0] = {"total_count": 2 if case == "truncated" else len(rows), "workflow_runs": rows}
     if case == "pending":
         responses[1] = {
@@ -161,7 +175,10 @@ def test_wrong_failed_or_incomplete_main_runs_do_not_reuse(tmp_path: Path, case:
     result = reuse(
         "owner/repo", SHA, "packages", destination, transport=Gateway(responses, archive)
     )
-    assert not result.reused
+    if case in {"fork", "pr", "other-sha", "other-path", "pending"}:
+        assert isinstance(result, AwaitingArtifact)
+    else:
+        assert isinstance(result, FreshValidationRequired)
     assert not destination.exists()
 
 
@@ -216,13 +233,13 @@ def test_artifact_provenance_and_success_are_required(tmp_path: Path, case: str)
     bundle = _archive(tmp_path)
     archive, digest = bundle.path, bundle.digest
     responses = _responses(digest)
-    artifacts: dict[str, object] = {
+    artifacts: dict[str, JsonValue] = {
         "id": 9,
         "name": "tested-packages-1",
         "expired": False,
         "digest": digest,
     }
-    identity: dict[str, object] = {
+    identity: dict[str, JsonValue] = {
         "id": 7,
         "head_sha": SHA,
         "head_branch": "main",
@@ -261,7 +278,7 @@ def test_artifact_provenance_and_success_are_required(tmp_path: Path, case: str)
     result = reuse(
         "owner/repo", SHA, "packages", destination, transport=Gateway(responses, archive)
     )
-    assert not result.reused
+    assert isinstance(result, FreshValidationRequired)
     assert not destination.exists()
 
 
@@ -276,7 +293,7 @@ def test_main_can_complete_successfully_during_download(tmp_path: Path) -> None:
     result = reuse(
         "owner/repo", SHA, "packages", tmp_path / "out", transport=Gateway(responses, archive)
     )
-    assert result.reused
+    assert isinstance(result, VerifiedArtifact)
 
 
 @pytest.mark.parametrize("case", ["failure", "changed-source", "malformed"])
@@ -293,7 +310,7 @@ def test_failed_or_changed_main_cannot_supply_artifacts(tmp_path: Path, case: st
     result = reuse(
         "owner/repo", SHA, "packages", destination, transport=Gateway(responses, archive)
     )
-    assert not result.reused
+    assert isinstance(result, FreshValidationRequired)
     assert not destination.exists()
 
 
@@ -301,8 +318,8 @@ def test_failed_or_changed_main_cannot_supply_artifacts(tmp_path: Path, case: st
 def test_parallel_ci_waits_for_all_checks_and_propagates_failure(
     tmp_path: Path, failed_check: str
 ) -> None:
-    object_map = TypeAdapter(dict[str, object])
-    objects = TypeAdapter(list[dict[str, object]])
+    object_map = TypeAdapter(dict[str, JsonValue])
+    objects = TypeAdapter(list[dict[str, JsonValue]])
     root = Path(__file__).parents[1]
     document = object_map.validate_python(
         yaml.load((root / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader),
@@ -350,3 +367,69 @@ def test_parallel_ci_waits_for_all_checks_and_propagates_failure(
         "ruff",
     ]
     assert len((tmp_path / "summary").read_text().splitlines()) == 3
+
+
+@pytest.mark.parametrize("index", [0, 1, 2])
+def test_boolean_collection_counts_cannot_qualify_artifacts(tmp_path: Path, index: int) -> None:
+    bundle = _archive(tmp_path)
+    responses = _responses(bundle.digest)
+    response = responses[index]
+    assert isinstance(response, dict)
+    response["total_count"] = True
+    destination = tmp_path / "verified"
+    result = reuse(
+        "owner/repo", SHA, "packages", destination, transport=Gateway(responses, bundle.path)
+    )
+    assert isinstance(result, FreshValidationRequired)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("field", ["id", "repository_id", "head_repository_id"])
+def test_boolean_artifact_identity_cannot_match_an_integer(tmp_path: Path, field: str) -> None:
+    bundle = _archive(tmp_path)
+    responses = _responses(bundle.digest)
+    responses[0] = {
+        "total_count": 1,
+        "workflow_runs": [_run(id=1, head_repository={"id": 1, "full_name": "owner/repo"})],
+    }
+    identity: dict[str, JsonValue] = {
+        "id": 1,
+        "head_sha": SHA,
+        "head_branch": "main",
+        "repository_id": 1,
+        "head_repository_id": 1,
+    }
+    identity[field] = True
+    responses[2] = {
+        "total_count": 1,
+        "artifacts": [
+            {
+                "id": 9,
+                "name": "tested-packages-1",
+                "expired": False,
+                "digest": bundle.digest,
+                "workflow_run": identity,
+            }
+        ],
+    }
+    destination = tmp_path / "verified"
+    result = reuse(
+        "owner/repo", SHA, "packages", destination, transport=Gateway(responses, bundle.path)
+    )
+    assert isinstance(result, FreshValidationRequired)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("nonfinite", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_provider_json_cannot_qualify_artifacts(tmp_path: Path, nonfinite: float) -> None:
+    bundle = _archive(tmp_path)
+    destination = tmp_path / "verified"
+    result = reuse(
+        "owner/repo",
+        SHA,
+        "packages",
+        destination,
+        transport=Gateway([nonfinite], bundle.path),
+    )
+    assert isinstance(result, FreshValidationRequired)
+    assert not destination.exists()

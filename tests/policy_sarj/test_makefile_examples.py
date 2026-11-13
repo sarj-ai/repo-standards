@@ -31,9 +31,7 @@ def test_makefile_examples_compare_two_snapshots(
 ) -> None:
     result = run_rule_example(fixture_id, source)
 
-    assert result.complete
-    assert result.execution_issue_codes == ()
-    assert result.rule_ids == expected
+    assert result == expected
 
 
 def test_makefile_metadata_records_verified_policy_preference_without_activation() -> None:

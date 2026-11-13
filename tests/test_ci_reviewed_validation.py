@@ -12,7 +12,12 @@ from zipfile import ZipFile
 
 import pytest
 
-from ci_reviewed_validation import record, reuse
+from ci_artifacts import FreshValidationRequired, JsonValue
+from ci_reviewed_validation import (
+    VerifiedReviewedValidation,
+    record,
+    reuse,
+)
 from tests.test_public_content import OBJECT_MAP
 
 
@@ -23,7 +28,13 @@ TREE = "c" * 40
 
 
 @pytest.mark.parametrize(
-    "module", ["ci_artifacts.py", "ci_reviewed_validation.py", "test_selection.py"]
+    "module",
+    [
+        "ci_artifacts.py",
+        "ci_reviewed_validation.py",
+        "release_reconciliation.py",
+        "test_selection.py",
+    ],
 )
 def test_certificate_bootstrap_supports_runner_python_grammar(module: str) -> None:
     source = (Path(__file__).parents[1] / module).read_text(encoding="utf-8")
@@ -65,7 +76,7 @@ def repository(tmp_path: Path) -> RepositoryFixture:
     )
 
 
-def _run(*, run_id: int = 7, conclusion: str | None = "success") -> dict[str, object]:
+def _run(*, run_id: int = 7, conclusion: str | None = "success") -> dict[str, JsonValue]:
     return {
         "id": run_id,
         "run_attempt": 1,
@@ -81,11 +92,11 @@ def _run(*, run_id: int = 7, conclusion: str | None = "success") -> dict[str, ob
 
 @dataclass
 class Gateway:
-    responses: list[object]
+    responses: list[JsonValue]
     archive: Path
     downloads: int = 0
 
-    def get(self, endpoint: str) -> object:
+    def get(self, endpoint: str) -> JsonValue:
         assert endpoint.startswith(f"repos/{REPOSITORY}/")
         return self.responses.pop(0)
 
@@ -98,7 +109,7 @@ class Gateway:
 def _gateway(  # ruff: ignore[too-many-branches] -- independent negative provider fixtures.
     tmp_path: Path, base: str, sha: str, tree: str, *, case: str = "valid"
 ) -> Gateway:
-    proof: dict[str, object] = {
+    proof: dict[str, JsonValue] = {
         "schema_version": 1,
         "repository": REPOSITORY,
         "source_commit": HEAD,
@@ -136,8 +147,12 @@ def _gateway(  # ruff: ignore[too-many-branches] -- independent negative provide
         run.update(status="in_progress", conclusion=None)
     if case == "wrong-workflow":
         run["path"] = ".github/workflows/other.yml"
-    branch = {"ref": "main", "sha": base, "repo": {"id": 3, "full_name": REPOSITORY}}
-    pull: dict[str, object] = {
+    branch: dict[str, JsonValue] = {
+        "ref": "main",
+        "sha": base,
+        "repo": {"id": 3, "full_name": REPOSITORY},
+    }
+    pull: dict[str, JsonValue] = {
         "merge_commit_sha": sha,
         "merged_at": "now",
         "base": branch,
@@ -147,7 +162,7 @@ def _gateway(  # ruff: ignore[too-many-branches] -- independent negative provide
         pull["head"] = {**branch, "sha": HEAD, "repo": {"id": 4, "full_name": "fork/repo"}}
     if case == "unmerged":
         pull["merged_at"] = None
-    artifact = {
+    artifact: dict[str, JsonValue] = {
         "id": 9,
         "name": "reviewed-validation-1",
         "expired": False,
@@ -165,16 +180,20 @@ def _gateway(  # ruff: ignore[too-many-branches] -- independent negative provide
             "repository_id": 3,
             "head_repository_id": 4,
         }
-    latest = {**run, "run_attempt": 2} if case == "race" else run
-    jobs = [{"name": "Validate / Python 3.15", "status": "completed", "conclusion": "success"}]
+    latest: dict[str, JsonValue] = {**run, "run_attempt": 2} if case == "race" else run
+    jobs: list[dict[str, JsonValue]] = [
+        {"name": "Validate / Python 3.15", "status": "completed", "conclusion": "success"}
+    ]
     if case == "job-failed":
         jobs[0]["conclusion"] = "failure"
-    rows = [run, _run(run_id=8, conclusion="failure")] if case == "newer-failed" else [run]
+    rows: list[JsonValue] = (
+        [run, _run(run_id=8, conclusion="failure")] if case == "newer-failed" else [run]
+    )
     return Gateway(
         [
             [pull],
             {"total_count": len(rows) + (case == "truncated"), "workflow_runs": rows},
-            {"total_count": len(jobs), "jobs": jobs},
+            {"total_count": len(jobs), "jobs": list(jobs)},
             {"total_count": 1, "artifacts": [artifact]},
             latest,
         ],
@@ -188,7 +207,15 @@ def test_full_exact_tree_proof_reuses_validation(
     root, base, sha, tree = repository.root, repository.base, repository.sha, repository.tree
     gateway = _gateway(tmp_path, base, sha, tree)
     result = reuse(root, REPOSITORY, sha, base, client=gateway)
-    assert result.reused
+    assert isinstance(result, VerifiedReviewedValidation)
+    assert result.source == sha
+    assert result.comparison_base == base
+    assert result.tree == tree
+    assert result.reviewed_source == HEAD
+    assert result.run.identifier == 7
+    assert result.run.attempt == 1
+    assert result.artifact.identifier == 9
+    assert result.artifact.digest.startswith("sha256:")
     assert "identical tree" in result.reason
     assert gateway.downloads == 1
     assert not gateway.responses
@@ -226,9 +253,10 @@ def test_wrong_or_unavailable_proof_requires_fresh_validation(
     repository: RepositoryFixture, tmp_path: Path, case: str
 ) -> None:
     root, base, sha, tree = repository.root, repository.base, repository.sha, repository.tree
-    assert not reuse(
-        root, REPOSITORY, sha, base, client=_gateway(tmp_path, base, sha, tree, case=case)
-    ).reused
+    assert isinstance(
+        reuse(root, REPOSITORY, sha, base, client=_gateway(tmp_path, base, sha, tree, case=case)),
+        FreshValidationRequired,
+    )
 
 
 @pytest.mark.parametrize("changed", ["base", "sha"])
@@ -244,7 +272,7 @@ def test_local_checkout_and_push_parent_must_match(
         BASE if changed == "base" else base,
         client=gateway,
     )
-    assert not result.reused
+    assert isinstance(result, FreshValidationRequired)
     assert gateway.downloads == 0
 
 

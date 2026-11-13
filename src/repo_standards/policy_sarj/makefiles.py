@@ -127,7 +127,6 @@ def _apply_allowance(
         )
     return replace(
         diagnostic,
-        disposition="excepted",
         exception=ExceptionUse(
             owner=allowance.owner,
             issue=allowance.issue,

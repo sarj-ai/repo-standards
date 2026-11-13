@@ -20,9 +20,10 @@ from repo_standards.core.models import (
     Baseline,
     Component,
     ComponentId,
+    CurrentRatchetEntry,
     Diagnostic,
     ExceptionRecord,
-    ExecutionIssue,
+    ExceptionUse,
     FindingsReport,
     IncompleteReport,
     Manifest,
@@ -32,9 +33,11 @@ from repo_standards.core.models import (
     RatchetClassification,
     Remediation,
     RepositoryId,
+    ResolvedRatchetEntry,
     Rule,
     RuleId,
 )
+from repo_standards.core.outcome import ExecutionIssue
 from repo_standards.core.parser import parse_baseline_bytes
 from repo_standards.core.render import render_text, report_dict
 from repo_standards.core.rule_reviews import RuleVersion
@@ -315,6 +318,12 @@ def test_ratchet_rejects_new_and_stale_findings() -> None:
     )
     assert comparison.fingerprints(RatchetClassification.KNOWN) == ()
     assert comparison.fingerprints(RatchetClassification.RESOLVED) == ("f" * 64,)
+    current = next(item for item in comparison.entries if isinstance(item, CurrentRatchetEntry))
+    resolved = next(item for item in comparison.entries if isinstance(item, ResolvedRatchetEntry))
+    assert current.diagnostic.fingerprint == current.fingerprint
+    assert resolved.diagnostic is None
+    with pytest.raises((TypeError, ValueError), match="init=False"):
+        replace(resolved, diagnostic=current.diagnostic)
 
 
 def test_scope_digest_allows_inventory_changes_to_be_ratcheted() -> None:
@@ -394,7 +403,17 @@ def test_bounded_text_prioritizes_active_errors_and_keeps_complete_report() -> N
     assert len(report.diagnostics) == 2
     assert report_dict(report)["summary"] == report.summary
     assert "a-warning:" in render_text(report)
-    excepted = replace(error, disposition="excepted", path="a-excepted")
+    excepted = replace(
+        error,
+        exception=ExceptionUse(
+            owner="fixture",
+            issue="TEST-1",
+            reason="Reviewed fixture",
+            created_on="2026-01-01",
+            expires_on="2027-01-01",
+        ),
+        path="a-excepted",
+    )
     mixed = replace(report, diagnostics=(excepted, error))
     assert "z-error:" in render_text(mixed, max_diagnostics=1)
     assert "a-excepted:" not in render_text(mixed, max_diagnostics=1)

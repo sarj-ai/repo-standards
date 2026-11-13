@@ -8,7 +8,7 @@ import shutil
 import stat
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git query
 import tempfile
-from typing import Final, Literal, NamedTuple
+from typing import ClassVar, Final, Literal, NamedTuple, TypeIs, assert_never
 
 from conventional_pre_commit.format import ConventionalCommit
 
@@ -50,15 +50,57 @@ class CommitMessageFinding:
 
 
 @dataclass(frozen=True, slots=True)
-class CommitMessageResult:
+class ValidCommitMessage:
+    kind: ClassVar[Literal["valid"]] = "valid"
     header: str
-    findings: tuple[CommitMessageFinding, ...]
-    replacement_header: str | None = None
-    fix_applied: bool = False
 
-    @property
-    def satisfied(self) -> bool:
-        return not self.findings
+
+@dataclass(frozen=True, slots=True)
+class RejectedCommitMessage:
+    kind: ClassVar[Literal["rejected"]] = "rejected"
+    header: str
+    finding: CommitMessageFinding
+
+
+@dataclass(frozen=True, slots=True)
+class ProposedCommitRepair:
+    kind: ClassVar[Literal["proposed-repair"]] = "proposed-repair"
+    header: str
+    finding: CommitMessageFinding
+    replacement_header: str
+
+
+@dataclass(frozen=True, slots=True)
+class AppliedCommitRepair:
+    kind: ClassVar[Literal["applied-repair"]] = "applied-repair"
+    header: str
+
+
+type CommitMessageResult = (
+    ValidCommitMessage | RejectedCommitMessage | ProposedCommitRepair | AppliedCommitRepair
+)
+
+
+def is_commit_message_satisfied(
+    result: CommitMessageResult,
+) -> TypeIs[ValidCommitMessage | AppliedCommitRepair]:
+    match result:
+        case ValidCommitMessage() | AppliedCommitRepair():
+            return True
+        case RejectedCommitMessage() | ProposedCommitRepair():
+            return False
+        case _:
+            assert_never(result)
+
+
+def commit_message_findings(result: CommitMessageResult) -> tuple[CommitMessageFinding, ...]:
+    match result:
+        case ValidCommitMessage() | AppliedCommitRepair():
+            return ()
+        case RejectedCommitMessage(finding=finding) | ProposedCommitRepair(finding=finding):
+            return (finding,)
+        case _:
+            assert_never(result)
 
 
 def analyze_commit_header(header: str) -> CommitMessageResult:
@@ -96,7 +138,7 @@ def analyze_commit_header(header: str) -> CommitMessageResult:
             "Use `[(i/n) ][TICKET] type(scope)!: description`; prefixes and scope are optional.",
             replacement=_safe_replacement(header),
         )
-    return CommitMessageResult(header=header, findings=())
+    return ValidCommitMessage(header)
 
 
 def descriptive_subject(header: str, *, allow_plain: bool = False) -> str | None:
@@ -157,20 +199,15 @@ def _check_regular_message(
         if temporary is not None:
             return temporary
     result = analyze_commit_message_bytes(content)
-    if not fix_safe or result.replacement_header is None:
+    if not fix_safe or not isinstance(result, ProposedCommitRepair):
         return result
     replacement = _replace_header(content, result.replacement_header)
     verified = analyze_commit_message_bytes(replacement)
     second_pass = _replace_header(replacement, result.replacement_header)
-    if not verified.satisfied or second_pass != replacement:
+    if not is_commit_message_satisfied(verified) or second_pass != replacement:
         ConfigurationError.fail("safe commit-message repair could not be verified")
     _atomic_replace(path, replacement, metadata)
-    return CommitMessageResult(
-        header=result.replacement_header,
-        findings=(),
-        replacement_header=result.replacement_header,
-        fix_applied=True,
-    )
+    return AppliedCommitRepair(result.replacement_header)
 
 
 def check_local_commit_message_file(
@@ -184,10 +221,14 @@ def check_local_commit_message_file(
     if _merge_in_progress(root, message_file=path):
         unsafe = tuple(
             finding
-            for finding in safety.findings
+            for finding in commit_message_findings(safety)
             if finding.code in {"commit-message.empty", "commit-message.control-character"}
         )
-        return CommitMessageResult(header=safety.header, findings=unsafe)
+        return (
+            RejectedCommitMessage(safety.header, unsafe[0])
+            if unsafe
+            else ValidCommitMessage(safety.header)
+        )
     return _check_regular_message(path, regular, fix_safe=fix_safe, allow_temporary=True)
 
 
@@ -197,7 +238,7 @@ def _temporary_commit_result(content: bytes) -> CommitMessageResult | None:
         header.startswith(prefix) and header.removeprefix(prefix).strip()
         for prefix in ("fixup! ", "squash! ", "amend! ")
     ):
-        return CommitMessageResult(header=header, findings=())
+        return ValidCommitMessage(header)
     return None
 
 
@@ -271,7 +312,7 @@ def _safe_replacement(header: str) -> str | None:
         conventional += "!"
     conventional += f": {matched.group('description')}"
     replacement = " ".join((*pieces, conventional))
-    if replacement != header and analyze_commit_header(replacement).satisfied:
+    if replacement != header and is_commit_message_satisfied(analyze_commit_header(replacement)):
         return replacement
     return None
 
@@ -285,7 +326,11 @@ def _replace_header(content: bytes, replacement: str) -> bytes:
 
 
 def _read_regular_file(path: Path) -> _RegularFile:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        no_follow = os.O_NOFOLLOW
+    except AttributeError:
+        no_follow = 0
+    flags = os.O_RDONLY | no_follow
     try:  # ruff: ignore[too-many-statements-in-try-clause] - guarded descriptor lifetime
         if path.is_symlink():
             ConfigurationError.fail("commit message path must be a regular file, not a symlink")
@@ -344,8 +389,7 @@ def _finding(
     *,
     replacement: str | None = None,
 ) -> CommitMessageResult:
-    return CommitMessageResult(
-        header=header,
-        findings=(CommitMessageFinding(code, message, remediation),),
-        replacement_header=replacement,
-    )
+    finding = CommitMessageFinding(code, message, remediation)
+    if replacement is None:
+        return RejectedCommitMessage(header, finding)
+    return ProposedCommitRepair(header, finding, replacement)

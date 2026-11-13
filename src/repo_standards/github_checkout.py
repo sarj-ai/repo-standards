@@ -9,7 +9,7 @@ import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed read-only Git query
 import sys
-from typing import Literal
+from typing import ClassVar, Literal, NewType
 
 from repo_standards._git_environment import GIT_NO_PAGER_ENVIRONMENT
 
@@ -21,16 +21,35 @@ _METADATA_LINES = 3
 
 
 class GitHubCheckoutError(ValueError):
-    """The checkout cannot be bound to the GitHub event."""
+    pass
+
+
+CheckoutCommitId = NewType("CheckoutCommitId", str)
+CheckoutTreeId = NewType("CheckoutTreeId", str)
 
 
 @dataclass(frozen=True, slots=True)
-class GitHubCheckout:
-    comparison_base: str
-    source_commit: str
-    tree: str
-    event_head: str
-    mode: Literal["head", "merge"]
+class HeadCheckout:
+    comparison_base: CheckoutCommitId
+    source_commit: CheckoutCommitId
+    tree: CheckoutTreeId
+    mode: ClassVar[Literal["head"]] = "head"
+
+    @property
+    def event_head(self) -> CheckoutCommitId:
+        return self.source_commit
+
+
+@dataclass(frozen=True, slots=True)
+class MergeCheckout:
+    comparison_base: CheckoutCommitId
+    source_commit: CheckoutCommitId
+    tree: CheckoutTreeId
+    event_head: CheckoutCommitId
+    mode: ClassVar[Literal["merge"]] = "merge"
+
+
+GitHubCheckout = HeadCheckout | MergeCheckout
 
 
 def resolve_github_checkout(
@@ -66,22 +85,28 @@ def resolve_github_checkout(
     if not _OBJECT_ID.fullmatch(checkout) or not _OBJECT_ID.fullmatch(tree):
         message = "Git could not verify the GitHub merge checkout"
         raise GitHubCheckoutError(message)
-    mode: Literal["head", "merge"] = "head"
-    if checkout != head_sha:
-        if checkout != github_sha:
-            message = "checkout does not match the GitHub event head or GITHUB_SHA"
-            raise GitHubCheckoutError(message)
-        parents = parent_line.split()
-        if (
-            len(parents) != _MERGE_PARENT_COUNT
-            or any(_OBJECT_ID.fullmatch(parent) is None for parent in parents)
-            or parents[1] != head_sha
-        ):
-            message = "GitHub merge checkout must have the event head as its second parent"
-            raise GitHubCheckoutError(message)
-        base_sha = parents[0]
-        mode = "merge"
-    return GitHubCheckout(base_sha, checkout, tree, head_sha, mode)
+    if checkout == head_sha:
+        return HeadCheckout(
+            CheckoutCommitId(base_sha), CheckoutCommitId(checkout), CheckoutTreeId(tree)
+        )
+    if checkout != github_sha:
+        message = "checkout does not match the GitHub event head or GITHUB_SHA"
+        raise GitHubCheckoutError(message)
+    parents = parent_line.split()
+    if (
+        len(parents) != _MERGE_PARENT_COUNT
+        or any(_OBJECT_ID.fullmatch(parent) is None for parent in parents)
+        or parents[1] != head_sha
+    ):
+        message = "GitHub merge checkout must have the event head as its second parent"
+        raise GitHubCheckoutError(message)
+    base_sha = parents[0]
+    return MergeCheckout(
+        CheckoutCommitId(base_sha),
+        CheckoutCommitId(checkout),
+        CheckoutTreeId(tree),
+        CheckoutCommitId(head_sha),
+    )
 
 
 def main() -> int:

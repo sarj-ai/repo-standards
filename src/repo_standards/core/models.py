@@ -3,9 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
-from typing import ClassVar, Literal, NewType, Protocol, runtime_checkable
+from typing import ClassVar, Literal, NewType, Protocol, assert_never, runtime_checkable
 
 from repo_standards.core.activation_policy import ActivationPolicy
+from repo_standards.core.outcome import (
+    CommandOutcome,
+    CompletedOutcome,
+    ExecutionIssue,
+    IncompleteCommand,
+    JSONValue,
+)
 
 
 RepositoryId = NewType("RepositoryId", str)
@@ -20,8 +27,6 @@ RuleCategoryId = NewType("RuleCategoryId", str)
 Severity = Literal["warning", "error"]
 ExampleLanguage = Literal["json", "text", "toml", "yaml"]
 EvidenceLevel = Literal["verified", "declared", "external", "unknown"]
-type JSONScalar = str | int | float | bool | None
-type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 MAX_RULE_TITLE_LENGTH = 72
 MAX_RULE_EXAMPLE_TITLE_LENGTH = 56
 MAX_REPOSITORY_INPUT_BYTES = 1_048_576
@@ -99,11 +104,29 @@ class JavaScriptArtifactKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class JavaScriptArtifact:
+class GeneratedJavaScriptArtifact:
     path: str
-    kind: JavaScriptArtifactKind
     reason: str
-    source: str | None = None
+    source: str
+    kind: Literal[JavaScriptArtifactKind.GENERATED] = field(
+        init=False, default=JavaScriptArtifactKind.GENERATED
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class DeclaredJavaScriptArtifact:
+    path: str
+    kind: Literal[
+        JavaScriptArtifactKind.TOOL_CONFIG,
+        JavaScriptArtifactKind.VENDOR,
+        JavaScriptArtifactKind.FIXTURE,
+        JavaScriptArtifactKind.RUNTIME,
+    ]
+    reason: str
+    source: None = field(init=False, default=None)
+
+
+type JavaScriptArtifact = GeneratedJavaScriptArtifact | DeclaredJavaScriptArtifact
 
 
 class ImageArtifactKind(StrEnum):
@@ -281,15 +304,6 @@ class ExceptionUse:
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionIssue:
-    code: str
-    phase: str
-    message: str
-    retryable: bool
-    remediation: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class Diagnostic:
     rule_id: RuleId
     rule_version: int
@@ -304,7 +318,6 @@ class Diagnostic:
     manifest_anchor: str
     remediation: Remediation
     prerequisites: tuple[str, ...] = ()
-    disposition: Literal["active", "excepted"] = "active"
     exception: ExceptionUse | None = None
     fingerprint: str = ""
     finding_key: str = ""
@@ -313,6 +326,10 @@ class Diagnostic:
     observed_value: JSONValue | None = None
     expected_value: JSONValue | None = None
     baselineable: bool = True
+
+    @property
+    def disposition(self) -> Literal["active", "excepted"]:
+        return "excepted" if self.exception is not None else "active"
 
 
 @dataclass(frozen=True, slots=True)
@@ -416,6 +433,20 @@ class InventoryUnit:
 
 
 @dataclass(frozen=True, slots=True)
+class BaselineProvenance:
+    path: str
+    object_id: GitObjectId
+    digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class ComparisonProvenance:
+    revision: str
+    tree_digest: str
+    basis: Literal["explicit", "last-commit", "staged", "empty"]
+
+
+@dataclass(frozen=True, slots=True)
 class InputProvenance:
     mode: Literal["git-tree", "git-index", "worktree"]
     source_revision: str
@@ -423,12 +454,32 @@ class InputProvenance:
     manifest_path: str
     manifest_object_id: GitObjectId | None
     manifest_digest: str
-    baseline_path: str | None = None
-    baseline_object_id: GitObjectId | None = None
-    baseline_digest: str | None = None
-    comparison_base_revision: str | None = None
-    comparison_base_tree_digest: str | None = None
-    comparison_basis: Literal["explicit", "last-commit", "staged", "empty"] | None = None
+    baseline: BaselineProvenance | None = None
+    comparison: ComparisonProvenance | None = None
+
+    @property
+    def baseline_path(self) -> str | None:
+        return self.baseline.path if self.baseline is not None else None
+
+    @property
+    def baseline_object_id(self) -> GitObjectId | None:
+        return self.baseline.object_id if self.baseline is not None else None
+
+    @property
+    def baseline_digest(self) -> str | None:
+        return self.baseline.digest if self.baseline is not None else None
+
+    @property
+    def comparison_base_revision(self) -> str | None:
+        return self.comparison.revision if self.comparison is not None else None
+
+    @property
+    def comparison_base_tree_digest(self) -> str | None:
+        return self.comparison.tree_digest if self.comparison is not None else None
+
+    @property
+    def comparison_basis(self) -> Literal["explicit", "last-commit", "staged", "empty"] | None:
+        return self.comparison.basis if self.comparison is not None else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -458,7 +509,6 @@ class MigrationComparison:
 
 @dataclass(frozen=True, slots=True)
 class RepositoryInspection:
-    completion: Literal["complete", "incomplete"]
     source_revision: str
     tree_digest: str
     tracked_file_count: int
@@ -471,6 +521,10 @@ class RepositoryInspection:
     tracked_files: tuple[TrackedFileEvidence, ...] = ()
     workspaces: tuple[WorkspaceEvidence, ...] = ()
     inventory_units: tuple[InventoryUnit, ...] = ()
+
+    @property
+    def completion(self) -> Literal["complete", "incomplete"]:
+        return "incomplete" if self.issues else "complete"
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,10 +550,22 @@ class RepositoryPolicy(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class RatchetEntry:
+class CurrentRatchetEntry:
     fingerprint: str
-    classification: RatchetClassification
-    diagnostic: Diagnostic | None = None
+    classification: Literal[RatchetClassification.NEW, RatchetClassification.KNOWN]
+    diagnostic: Diagnostic
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedRatchetEntry:
+    fingerprint: str
+    classification: Literal[RatchetClassification.RESOLVED] = field(
+        init=False, default=RatchetClassification.RESOLVED
+    )
+    diagnostic: None = field(init=False, default=None)
+
+
+type RatchetEntry = CurrentRatchetEntry | ResolvedRatchetEntry
 
 
 @dataclass(frozen=True, slots=True)
@@ -560,3 +626,15 @@ class IncompleteReport(_AnalysisReportBase):
 
 
 type AnalysisReport = PassedReport | FindingsReport | IncompleteReport
+
+
+def report_outcome(report: AnalysisReport) -> CommandOutcome:
+    match report:
+        case PassedReport():
+            return CompletedOutcome.PASSED
+        case FindingsReport():
+            return CompletedOutcome.FINDINGS
+        case IncompleteReport():
+            return IncompleteCommand(report.execution_issues)
+        case _:
+            assert_never(report)

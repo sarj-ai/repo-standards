@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import sys
 import tomllib
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
 import yaml
 
-from repo_standards.core.models import JSONValue
+from repo_standards.core.outcome import JSONValue
 
 
 if TYPE_CHECKING:
@@ -43,9 +44,9 @@ EXCLUDED_DIRECTORIES = frozenset(
     }
 )
 JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
-OBJECT_MAP = TypeAdapter(dict[str, object])
+OBJECT_MAP = TypeAdapter(dict[str, JSONValue])
 STRING_MAP = TypeAdapter(dict[str, str])
-OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+OBJECT_LIST = TypeAdapter(list[dict[str, JSONValue]])
 
 
 def test_public_distribution_has_no_legacy_compatibility_surface() -> None:
@@ -130,7 +131,9 @@ def test_public_scan_prunes_dependencies_and_keeps_exposed_links(
     (tmp_path / ".venv/private.py").write_text("private\n")
     (tmp_path / "public.py").write_text("public\n")
     (tmp_path / "exposed").symlink_to(tmp_path / ".venv", target_is_directory=True)
-    monkeypatch.setitem(globals(), "REPOSITORY_ROOT", tmp_path)
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- retain the real scanner and symlink checks.
+        sys.modules[__name__], "REPOSITORY_ROOT", tmp_path
+    )
     assert {path.relative_to(tmp_path).as_posix() for path in _public_files()} == {
         "public.py",
         "exposed",

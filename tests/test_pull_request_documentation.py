@@ -103,6 +103,8 @@ def test_cli_rejects_added_readme_content_without_new_pages(
     assert result.exit_code == 1
     if output_format == "json":
         payload = TypeAdapter(dict[str, object]).validate_json(result.stdout)
+        assert payload["completion"] == "complete"
+        assert payload["conclusion"] == "findings"
         assert payload["content_findings"] == ["README.md"]
         assert payload["summary"] == {
             "satisfied": False,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 import re
 import tomllib
@@ -9,18 +10,23 @@ from typing import (
     TYPE_CHECKING,
     Literal,
     NamedTuple,
+    NewType,
     NoReturn,
-    cast,  # ruff: ignore[banned-api] - checks precede narrowing
 )
 
 from repo_standards.core._json import parse_json_object
+from repo_standards.core._toml import parse_toml_object
 from repo_standards.core.canonical import canonical_path
 from repo_standards.core.errors import ConfigurationError
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable
 
+    from repo_standards.core.outcome import ParsedValue
+
+
+InstrumentationCapabilityId = NewType("InstrumentationCapabilityId", str)
 
 type Language = Literal["artifact", "python", "typescript", "java", "go", "rust"]
 type StaticCoverage = Literal["committed-contract", "operation-identity-map", "manifest-candidate"]
@@ -31,7 +37,7 @@ type DetectionCompletion = Literal["complete", "incomplete"]
 type EvidenceKind = Literal[
     "manifest-dependency", "manifest-project", "committed-spec", "operation-map"
 ]
-type EvidenceTriple = tuple[str, EvidenceKind, str]
+type EvidenceTriple = tuple[InstrumentationCapabilityId, EvidenceKind, str]
 
 _MAX_FILES = 1_000
 _MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -78,7 +84,7 @@ class TrackedFile:
 
 @dataclass(frozen=True, slots=True)
 class InstrumentationCapability:
-    capability_id: str
+    capability_id: InstrumentationCapabilityId
     language: Language
     framework: str
     support: SupportLevel
@@ -111,12 +117,15 @@ class DetectionIssue:
 
 @dataclass(frozen=True, slots=True)
 class InstrumentationDetectionReport:
-    schema_version: int
-    completion: DetectionCompletion
+    schema_version: Literal[2] = field(init=False, default=2)
     candidates: tuple[DetectedInstrumentation, ...]
     issues: tuple[DetectionIssue, ...]
     files_scanned: int
     bytes_scanned: int
+
+    @property
+    def completion(self) -> DetectionCompletion:
+        return "incomplete" if self.issues else "complete"
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +148,7 @@ class _ValidatedFiles(NamedTuple):
 
 
 def _framework_capability(  # ruff: ignore[too-many-arguments] - immutable capability fields
-    capability_id: str,
+    capability_id: InstrumentationCapabilityId,
     language: Language,
     framework: str,
     *,
@@ -167,7 +176,7 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
     sorted(
         (
             InstrumentationCapability(
-                "committed-openapi",
+                InstrumentationCapabilityId("committed-openapi"),
                 "artifact",
                 "OpenAPI",
                 "stable",
@@ -184,7 +193,7 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 ),
             ),
             InstrumentationCapability(
-                "operation-map",
+                InstrumentationCapabilityId("operation-map"),
                 "artifact",
                 "API operation map",
                 "stable",
@@ -195,7 +204,7 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 ("The map does not discover routes or prove runtime instrumentation coverage.",),
             ),
             _framework_capability(
-                "fastapi",
+                InstrumentationCapabilityId("fastapi"),
                 "python",
                 "FastAPI",
                 limitation=(
@@ -208,7 +217,7 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 preview=True,
             ),
             _framework_capability(
-                "django-drf-spectacular",
+                InstrumentationCapabilityId("django-drf-spectacular"),
                 "python",
                 "Django REST Framework with drf-spectacular",
                 limitation=(
@@ -219,7 +228,7 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 ),
             ),
             _framework_capability(
-                "flask-smorest",
+                InstrumentationCapabilityId("flask-smorest"),
                 "python",
                 "flask-smorest",
                 limitation=(
@@ -230,7 +239,7 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 ),
             ),
             _framework_capability(
-                "nestjs",
+                InstrumentationCapabilityId("nestjs"),
                 "typescript",
                 "NestJS",
                 limitation=(
@@ -239,7 +248,7 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 guidance="Provide a reviewed SwaggerModule.createDocument exporter.",
             ),
             _framework_capability(
-                "express",
+                InstrumentationCapabilityId("express"),
                 "typescript",
                 "Express",
                 limitation=(
@@ -251,14 +260,14 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 ),
             ),
             _framework_capability(
-                "hono",
+                InstrumentationCapabilityId("hono"),
                 "typescript",
                 "Hono",
                 limitation="Route and schema modules, including Zod refinements, are not imported.",
                 guidance="Prefer a reviewed OpenAPIHono or application-owned contract exporter.",
             ),
             _framework_capability(
-                "springdoc",
+                InstrumentationCapabilityId("springdoc"),
                 "java",
                 "Spring with springdoc-openapi",
                 limitation=(
@@ -267,7 +276,7 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 guidance="Provide a reviewed build/runtime schema export isolated from services.",
             ),
             _framework_capability(
-                "go-net-http",
+                InstrumentationCapabilityId("go-net-http"),
                 "go",
                 "net/http",
                 limitation=(
@@ -279,21 +288,21 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 ),
             ),
             _framework_capability(
-                "go-chi",
+                InstrumentationCapabilityId("go-chi"),
                 "go",
                 "chi",
                 limitation="Router construction and chi.Walk are not executed.",
                 guidance="Provide a reviewed exporter using chi's public route traversal API.",
             ),
             _framework_capability(
-                "go-gin",
+                InstrumentationCapabilityId("go-gin"),
                 "go",
                 "Gin",
                 limitation="Router construction and Engine.Routes are not executed.",
                 guidance="Provide a reviewed exporter using Engine.Routes plus an OpenAPI source.",
             ),
             _framework_capability(
-                "go-echo",
+                InstrumentationCapabilityId("go-echo"),
                 "go",
                 "Echo",
                 limitation="Router construction and Echo.Routes are not executed.",
@@ -302,14 +311,14 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 ),
             ),
             _framework_capability(
-                "go-huma",
+                InstrumentationCapabilityId("go-huma"),
                 "go",
                 "Huma",
                 limitation="Typed operation registration and schema generation are not executed.",
                 guidance="Provide a reviewed exporter that marshals the Huma OpenAPI document.",
             ),
             _framework_capability(
-                "rust-axum",
+                InstrumentationCapabilityId("rust-axum"),
                 "rust",
                 "Axum",
                 limitation=(
@@ -318,21 +327,21 @@ _CAPABILITIES: tuple[InstrumentationCapability, ...] = tuple(
                 guidance="Provide a reviewed code-first exporter or operation map.",
             ),
             _framework_capability(
-                "rust-actix",
+                InstrumentationCapabilityId("rust-actix"),
                 "rust",
                 "Actix Web",
                 limitation="Cargo, route attributes, factories, guards, and macros are not run.",
                 guidance="Provide a reviewed collecting-wrapper or code-first exporter.",
             ),
             _framework_capability(
-                "rust-rocket",
+                InstrumentationCapabilityId("rust-rocket"),
                 "rust",
                 "Rocket",
                 limitation="Cargo, route macros, mounts, ranks, and guards are not run.",
                 guidance="Provide a reviewed exporter with explicit ranked-route handling.",
             ),
             _framework_capability(
-                "rust-utoipa",
+                InstrumentationCapabilityId("rust-utoipa"),
                 "rust",
                 "utoipa",
                 limitation="Cargo and utoipa derive/path procedural macros are not run.",
@@ -346,29 +355,33 @@ _CAPABILITY_BY_ID = MappingProxyType({item.capability_id: item for item in _CAPA
 
 _PYTHON_DEPENDENCIES = MappingProxyType(
     {
-        "fastapi": "fastapi",
-        "drf-spectacular": "django-drf-spectacular",
-        "flask-smorest": "flask-smorest",
+        "fastapi": InstrumentationCapabilityId("fastapi"),
+        "drf-spectacular": InstrumentationCapabilityId("django-drf-spectacular"),
+        "flask-smorest": InstrumentationCapabilityId("flask-smorest"),
     }
 )
 _NPM_DEPENDENCIES = MappingProxyType(
-    {"@nestjs/core": "nestjs", "express": "express", "hono": "hono"}
+    {
+        "@nestjs/core": InstrumentationCapabilityId("nestjs"),
+        "express": InstrumentationCapabilityId("express"),
+        "hono": InstrumentationCapabilityId("hono"),
+    }
 )
 _GO_DEPENDENCIES = MappingProxyType(
     {
-        "github.com/go-chi/chi": "go-chi",
-        "github.com/go-chi/chi/v5": "go-chi",
-        "github.com/gin-gonic/gin": "go-gin",
-        "github.com/labstack/echo/v4": "go-echo",
-        "github.com/danielgtaylor/huma/v2": "go-huma",
+        "github.com/go-chi/chi": InstrumentationCapabilityId("go-chi"),
+        "github.com/go-chi/chi/v5": InstrumentationCapabilityId("go-chi"),
+        "github.com/gin-gonic/gin": InstrumentationCapabilityId("go-gin"),
+        "github.com/labstack/echo/v4": InstrumentationCapabilityId("go-echo"),
+        "github.com/danielgtaylor/huma/v2": InstrumentationCapabilityId("go-huma"),
     }
 )
 _RUST_DEPENDENCIES = MappingProxyType(
     {
-        "axum": "rust-axum",
-        "actix-web": "rust-actix",
-        "rocket": "rust-rocket",
-        "utoipa": "rust-utoipa",
+        "axum": InstrumentationCapabilityId("rust-axum"),
+        "actix-web": InstrumentationCapabilityId("rust-actix"),
+        "rocket": InstrumentationCapabilityId("rust-rocket"),
+        "utoipa": InstrumentationCapabilityId("rust-utoipa"),
     }
 )
 
@@ -379,7 +392,7 @@ def instrumentation_capabilities() -> tuple[InstrumentationCapability, ...]:
 
 def detect_instrumentation(files: tuple[TrackedFile, ...]) -> InstrumentationDetectionReport:
     ordered, total_bytes = _validate_files(files)
-    evidence_by_id: dict[str, set[DetectionEvidence]] = {}
+    evidence_by_id: dict[InstrumentationCapabilityId, set[DetectionEvidence]] = {}
     issues: list[DetectionIssue] = []
     for tracked in ordered:
         basename = PurePosixPath(tracked.path).name.lower()
@@ -413,12 +426,10 @@ def detect_instrumentation(files: tuple[TrackedFile, ...]) -> InstrumentationDet
     )
     ordered_issues = tuple(sorted(issues, key=lambda item: (item.path, item.code, item.message)))
     return InstrumentationDetectionReport(
-        2,
-        "incomplete" if ordered_issues else "complete",
-        candidates,
-        ordered_issues,
-        len(ordered),
-        total_bytes,
+        candidates=candidates,
+        issues=ordered_issues,
+        files_scanned=len(ordered),
+        bytes_scanned=total_bytes,
     )
 
 
@@ -466,10 +477,20 @@ def _detect_file(tracked: TrackedFile, basename: str) -> tuple[EvidenceTriple, .
     result: tuple[EvidenceTriple, ...]
     if basename == _CONVENTIONAL_OPERATION_MAP_NAME:
         operation_map = parse_api_operation_map(tracked.content)
-        result = (("operation-map", "operation-map", operation_map.openapi_sha256),)
+        result = (
+            (
+                InstrumentationCapabilityId("operation-map"),
+                "operation-map",
+                operation_map.openapi_sha256,
+            ),
+        )
     elif basename in _CONVENTIONAL_SPEC_NAMES:
         marker = _spec_marker(tracked.content, basename)
-        result = (("committed-openapi", "committed-spec", marker),) if marker is not None else ()
+        result = (
+            ((InstrumentationCapabilityId("committed-openapi"), "committed-spec", marker),)
+            if marker is not None
+            else ()
+        )
     elif basename == "package.json":
         root = _json_object(tracked.content)
         result = _mapped_manifest(
@@ -508,11 +529,14 @@ def _detect_file(tracked: TrackedFile, basename: str) -> tuple[EvidenceTriple, .
 
 
 def _springdoc_evidence(dependencies: Iterable[str]) -> tuple[EvidenceTriple, ...]:
-    return tuple(("springdoc", "manifest-dependency", item) for item in dependencies)
+    return tuple(
+        (InstrumentationCapabilityId("springdoc"), "manifest-dependency", item)
+        for item in dependencies
+    )
 
 
 def _mapped_dependencies(
-    dependencies: set[str], mapping: Mapping[str, str]
+    dependencies: set[str], mapping: Mapping[str, InstrumentationCapabilityId]
 ) -> tuple[EvidenceTriple, ...]:
     return tuple(
         sorted(
@@ -524,7 +548,9 @@ def _mapped_dependencies(
 
 
 def _mapped_manifest(
-    dependencies: set[str], project_name: str | None, mapping: Mapping[str, str]
+    dependencies: set[str],
+    project_name: str | None,
+    mapping: Mapping[str, InstrumentationCapabilityId],
 ) -> tuple[EvidenceTriple, ...]:
     result = list(_mapped_dependencies(dependencies, mapping))
     if project_name is not None and project_name in mapping:
@@ -532,7 +558,7 @@ def _mapped_manifest(
     return tuple(sorted(result))
 
 
-def _json_object(content: bytes) -> dict[str, object]:
+def _json_object(content: bytes) -> Mapping[str, ParsedValue]:
     try:
         parsed = parse_json_object(content)
     except ValueError, RecursionError:
@@ -540,23 +566,23 @@ def _json_object(content: bytes) -> dict[str, object]:
     return dict(parsed)
 
 
-def _package_json_dependencies(root: dict[str, object]) -> set[str]:
+def _package_json_dependencies(root: Mapping[str, ParsedValue]) -> set[str]:
     dependencies: set[str] = set()
-    for field in ("dependencies", "optionalDependencies", "peerDependencies"):
-        value = root.get(field)
+    for dependency_group in ("dependencies", "optionalDependencies", "peerDependencies"):
+        value = root.get(dependency_group)
         dependency_map = _mapping(value)
         if dependency_map is not None:
             dependencies.update(dependency_map)
     return dependencies
 
 
-def _package_json_project_name(root: dict[str, object]) -> str | None:
+def _package_json_project_name(root: Mapping[str, ParsedValue]) -> str | None:
     name = root.get("name")
     return name if isinstance(name, str) else None
 
 
-def _toml_object(content: bytes) -> dict[str, object]:
-    return cast("dict[str, object]", tomllib.loads(content.decode("utf-8")))
+def _toml_object(content: bytes) -> Mapping[str, ParsedValue]:
+    return parse_toml_object(content)
 
 
 def _dependency_name(requirement: str) -> str | None:
@@ -566,16 +592,11 @@ def _dependency_name(requirement: str) -> str | None:
     return re.sub(r"[-_.]+", "-", match.group(1)).lower()
 
 
-def _mapping(value: object) -> dict[str, object] | None:
-    if not isinstance(value, dict):
-        return None
-    raw = cast("dict[object, object]", value)
-    if not all(isinstance(key, str) for key in raw):
-        return None
-    return {key: item for key, item in raw.items() if isinstance(key, str)}
+def _mapping(value: ParsedValue | Mapping[str, ParsedValue]) -> Mapping[str, ParsedValue] | None:
+    return value if isinstance(value, Mapping) else None
 
 
-def _pyproject_dependencies(root: dict[str, object]) -> set[str]:
+def _pyproject_dependencies(root: Mapping[str, ParsedValue]) -> set[str]:
     result: set[str] = set()
     project = _mapping(root.get("project"))
     if project is not None:
@@ -594,7 +615,7 @@ def _pyproject_dependencies(root: dict[str, object]) -> set[str]:
     return result
 
 
-def _pyproject_project_name(root: dict[str, object]) -> str | None:
+def _pyproject_project_name(root: Mapping[str, ParsedValue]) -> str | None:
     project = _mapping(root.get("project"))
     if project is None:
         return None
@@ -602,10 +623,10 @@ def _pyproject_project_name(root: dict[str, object]) -> str | None:
     return _dependency_name(name) if isinstance(name, str) else None
 
 
-def _string_list(value: object) -> tuple[str, ...]:
+def _string_list(value: ParsedValue) -> tuple[str, ...]:
     if not isinstance(value, list):
         return ()
-    return tuple(item for item in cast("list[object]", value) if isinstance(item, str))
+    return tuple(item for item in value if isinstance(item, str))
 
 
 def _requirements_dependencies(content: bytes) -> set[str]:
@@ -676,7 +697,7 @@ def _go_dependencies(content: bytes) -> set[str]:
 def _cargo_dependencies(content: bytes) -> set[str]:
     root = _toml_object(content)
     result: set[str] = set()
-    pending: list[tuple[object, str]] = [(root, "")]
+    pending: list[tuple[ParsedValue | Mapping[str, ParsedValue], str]] = [(root, "")]
     while pending:
         value, section = pending.pop()
         current = _mapping(value)
@@ -693,7 +714,7 @@ def _cargo_dependencies(content: bytes) -> set[str]:
     return result
 
 
-def _cargo_dependency_names(dependencies: dict[str, object]) -> set[str]:
+def _cargo_dependency_names(dependencies: Mapping[str, ParsedValue]) -> set[str]:
     result: set[str] = set()
     for name, declaration in dependencies.items():
         details = _mapping(declaration)
@@ -745,7 +766,7 @@ def parse_api_operation_map(content: bytes) -> ApiOperationMap:
     raw_operations = root["operations"]
     if not isinstance(raw_operations, list):
         InstrumentationInputError.fail("operation map operations must be an array")
-    raw_operation_list = cast("list[object]", raw_operations)
+    raw_operation_list = raw_operations
     if len(raw_operation_list) > _MAX_OPERATIONS:
         InstrumentationInputError.fail(f"operation count exceeds {_MAX_OPERATIONS}")
     operations: list[RuntimeOperation] = []
@@ -774,7 +795,7 @@ def parse_api_operation_map(content: bytes) -> ApiOperationMap:
     )
 
 
-def _parse_runtime_operation(raw_operation: object, index: int) -> RuntimeOperation:
+def _parse_runtime_operation(raw_operation: ParsedValue, index: int) -> RuntimeOperation:
     operation = _mapping(raw_operation)
     if operation is None or set(operation) != {"operation_id", "method", "route_template"}:
         InstrumentationInputError.fail(f"operations[{index}] has invalid keys")

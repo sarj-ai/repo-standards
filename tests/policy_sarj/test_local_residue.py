@@ -50,7 +50,6 @@ def _snapshot(*paths: str) -> RepositorySnapshot:
         manifest=Manifest(repository_id=RepositoryId("example-repository"), components=()),
         baseline=None,
         inspection=RepositoryInspection(
-            completion="complete",
             source_revision="a" * 40,
             tree_digest="b" * 40,
             tracked_file_count=len(tracked),

@@ -8,9 +8,7 @@ from .commit_message import descriptive_subject
 
 
 MAXIMUM_SUBJECT_CHARACTERS = 72
-_ISSUE_PREFIX = re.compile(
-    r"^(?:\[[1-9][0-9]*\.[0-9]+\] )?(?:gh|bpo)-[1-9][0-9]*: ", re.IGNORECASE
-)
+_ISSUE_PREFIX = re.compile(r"^(?:\[[1-9][0-9]*\.[0-9]+\] )?(?:gh|bpo)-[1-9][0-9]*: ", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)

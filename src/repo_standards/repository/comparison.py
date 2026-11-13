@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Literal
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import (
@@ -12,6 +12,7 @@ from repo_standards.core.inspection import (
     tracked_files_for_identity,
 )
 from repo_standards.core.models import (
+    ComparisonProvenance,
     MakefileComparison,
     MakefileMetric,
     MigrationComparison,
@@ -44,9 +45,20 @@ _BLOB_BATCH = 100
 
 
 @dataclass(frozen=True, slots=True)
-class _ComparisonBase:
-    identity: GitIdentity | None
-    basis: Literal["explicit", "last-commit", "staged", "empty"]
+class _ExistingComparisonBase:
+    kind: ClassVar[Literal["existing"]] = "existing"
+    identity: GitIdentity
+    basis: Literal["explicit", "last-commit", "staged"]
+
+
+@dataclass(frozen=True, slots=True)
+class _EmptyComparisonBase:
+    kind: ClassVar[Literal["empty"]] = "empty"
+    basis: Literal["empty", "staged"]
+    identity: None = field(init=False, default=None)
+
+
+type _ComparisonBase = _ExistingComparisonBase | _EmptyComparisonBase
 
 
 def with_makefile_comparison(
@@ -81,9 +93,9 @@ def with_makefile_comparison(
         makefile_comparison=comparison,
         provenance=replace(
             provenance,
-            comparison_base_revision=comparison.base_revision,
-            comparison_base_tree_digest=comparison.base_tree_digest,
-            comparison_basis=comparison.basis,
+            comparison=ComparisonProvenance(
+                comparison.base_revision, comparison.base_tree_digest, comparison.basis
+            ),
         ),
     )
 
@@ -144,13 +156,11 @@ def with_migration_comparison(
         ),
         provenance=replace(
             provenance,
-            comparison_base_revision=(
-                base.source_revision if base else "0" * len(head.source_revision)
+            comparison=ComparisonProvenance(
+                revision=base.source_revision if base else "0" * len(head.source_revision),
+                tree_digest=base.tree_digest if base else "0" * len(head.source_revision),
+                basis=provenance.comparison_basis or comparison_base.basis,
             ),
-            comparison_base_tree_digest=(
-                base.tree_digest if base else "0" * len(head.source_revision)
-            ),
-            comparison_basis=provenance.comparison_basis or comparison_base.basis,
         ),
     )
 
@@ -186,19 +196,19 @@ def _flag_lone_concurrent_indexes(
 
 def _comparison_base(root: Path, head: GitIdentity, base_revision: str | None) -> _ComparisonBase:
     if head.mode == "git-index":
-        return _ComparisonBase(
-            None
-            if _empty_revision(head.source_revision)
-            else git_revision_identity(root, head.source_revision),
-            "staged",
-        )
+        if _empty_revision(head.source_revision):
+            return _EmptyComparisonBase("staged")
+        return _ExistingComparisonBase(git_revision_identity(root, head.source_revision), "staged")
     if base_revision is not None:
-        base = (
-            None if _empty_revision(base_revision) else git_revision_identity(root, base_revision)
-        )
-        return _ComparisonBase(base, "empty" if base is None else "explicit")
+        if _empty_revision(base_revision):
+            return _EmptyComparisonBase("empty")
+        return _ExistingComparisonBase(git_revision_identity(root, base_revision), "explicit")
     base = git_parent_identity(root, head)
-    return _ComparisonBase(base, "empty" if base is None else "last-commit")
+    return (
+        _EmptyComparisonBase("empty")
+        if base is None
+        else _ExistingComparisonBase(base, "last-commit")
+    )
 
 
 def _empty_revision(revision: str) -> bool:

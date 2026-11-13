@@ -6,26 +6,37 @@ import argparse  # ruff: ignore[banned-api] -- dependency-free artifact bootstra
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- fixed GitHub API argv only
 import tempfile
 import time
-from typing import Protocol, cast  # ruff: ignore[banned-api] -- one validated JSON mapping boundary.
-from zipfile import BadZipFile, ZipFile
+from typing import ClassVar, Final, Literal, NewType, Protocol, TypeGuard
+from zipfile import BadZipFile, ZipFile, ZipInfo
 
 
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_JOBS = {"packages": "Build and install artifacts", "site": "Build documentation"}
+ArtifactKind = Literal["packages", "site"]
+type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
+_JOBS: Final[dict[ArtifactKind, str]] = {
+    "packages": "Build and install artifacts",
+    "site": "Build documentation",
+}
 _MAX_BYTES = 100_000_000
 _MAX_FILES = 10_000
 _MAX_WAIT = 300
+WorkflowRunId = NewType("WorkflowRunId", int)
+WorkflowRunAttempt = NewType("WorkflowRunAttempt", int)
+CIArtifactId = NewType("CIArtifactId", int)
+CIArtifactDigest = NewType("CIArtifactDigest", str)
+SourceCommit = NewType("SourceCommit", str)
 
 
 class Transport(Protocol):
-    def get(self, endpoint: str) -> object: ...
+    def get(self, endpoint: str) -> JsonValue: ...
     def download(self, endpoint: str, destination: Path) -> None: ...
 
 
@@ -33,7 +44,7 @@ class Transport(Protocol):
 class GitHub:
     executable: str
 
-    def get(self, endpoint: str) -> object:
+    def get(self, endpoint: str) -> JsonValue:
         process = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv, never a shell.
             (self.executable, "api", "--method", "GET", endpoint),
             check=True,
@@ -41,8 +52,8 @@ class GitHub:
             text=True,
             timeout=30,
         )
-        result: object = json.loads(process.stdout)
-        return result
+        result: object = json.loads(process.stdout)  # pyright: ignore[reportAny] -- stdlib decoder boundary; recursively validated before returning.
+        return json_value(result)
 
     def download(self, endpoint: str, destination: Path) -> None:
         with destination.open("wb") as stream:
@@ -55,61 +66,99 @@ class GitHub:
 
 
 @dataclass(frozen=True)
-class Result:
-    reused: bool
-    waiting: bool
+class VerifiedArtifact:
+    kind: ClassVar[Literal["verified"]] = "verified"
+    source: SourceCommit
+    run: RunIdentity
+    artifact: Artifact
+
+    @property
+    def reason(self) -> str:
+        return f"verified exact main CI {self.run.identifier}, attempt {self.run.attempt}"
+
+
+@dataclass(frozen=True)
+class AwaitingArtifact:
+    kind: ClassVar[Literal["awaiting"]] = "awaiting"
     reason: str
 
 
-def _object(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
-        message = "invalid GitHub object"
-        raise ValueError(message)
-    return cast("dict[str, object]", value)
+@dataclass(frozen=True)
+class FreshValidationRequired:
+    kind: ClassVar[Literal["fresh-validation-required"]] = "fresh-validation-required"
+    reason: str
 
 
-def _rows(value: object, name: str) -> list[dict[str, object]]:
-    response = _object(value)
+type Result = VerifiedArtifact | AwaitingArtifact | FreshValidationRequired
+
+
+def json_object(value: object) -> dict[str, JsonValue]:
+    result = json_value(value)
+    match result:
+        case dict():
+            return result
+        case _:
+            message = "invalid GitHub object"
+            raise ValueError(message)
+
+
+def json_value(value: object) -> JsonValue:
+    match value:
+        case None | str() | bool() | int():
+            return value
+        case float() if math.isfinite(value):
+            return value
+        case _:
+            if _is_array(value):
+                return [json_value(item) for item in value]
+            if _is_object(value):
+                result: dict[str, JsonValue] = {}
+                for key, item in value.items():
+                    if not isinstance(key, str):
+                        message = "invalid JSON object key"
+                        raise TypeError(message)
+                    result[key] = json_value(item)
+                return result
+            message = "invalid JSON value"
+            raise ValueError(message)
+
+
+def _is_array(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def collection_rows(value: object, name: str) -> list[dict[str, JsonValue]]:
+    response = json_object(value)
     rows = response.get(name)
-    if not isinstance(rows, list) or response.get("total_count") != len(rows):
+    count = response.get("total_count")
+    if not isinstance(rows, list) or type(count) is not int or count != len(rows):
         message = "incomplete GitHub response"
         raise ValueError(message)
-    return [_object(row) for row in rows]
+    return [json_object(row) for row in rows]
 
 
-def _positive(value: object) -> int:
+def positive_integer(value: object) -> int:
     if type(value) is not int or value <= 0:
         message = "invalid GitHub identifier or attempt"
         raise ValueError(message)
     return value
 
 
-def extract(archive: Path, destination: Path, *, digest: str, sha: str, kind: str) -> None:
+def extract(archive: Path, destination: Path, *, digest: str, sha: str, kind: ArtifactKind) -> None:
+    if kind not in _JOBS:
+        message = "invalid CI artifact kind"
+        raise ValueError(message)
     with archive.open("rb") as stream:
         if "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest() != digest:
             message = "CI archive digest mismatch"
             raise ValueError(message)
     with ZipFile(archive) as bundle:
         members = bundle.infolist()
-        paths = [PurePosixPath(member.filename) for member in members]
-        if len(members) > _MAX_FILES or sum(member.file_size for member in members) > _MAX_BYTES:
-            message = "CI archive exceeds size or file limits"
-            raise ValueError(message)
-        if len(paths) != len(set(paths)) or any(
-            path.is_absolute()
-            or ".." in path.parts
-            or "\\" in str(path)
-            or (
-                kind == "packages"
-                and (
-                    len(path.parts) != 1
-                    or (str(path) != "SOURCE_COMMIT" and path.suffix not in {".whl", ".gz"})
-                )
-            )
-            for path in paths
-        ):
-            message = "unsafe or unexpected CI archive member"
-            raise ValueError(message)
+        paths = _archive_paths(members, kind)
         if bundle.read("SOURCE_COMMIT").decode("ascii").strip() != sha:
             message = "CI archive source commit mismatch"
             raise ValueError(message)
@@ -125,7 +174,32 @@ def extract(archive: Path, destination: Path, *, digest: str, sha: str, kind: st
             target.write_bytes(bundle.read(member))
 
 
-def lookup(repository: str, sha: str, kind: str, destination: Path, transport: Transport) -> Result:
+def _archive_paths(members: list[ZipInfo], kind: ArtifactKind) -> list[PurePosixPath]:
+    paths = [PurePosixPath(member.filename) for member in members]
+    if len(members) > _MAX_FILES or sum(member.file_size for member in members) > _MAX_BYTES:
+        message = "CI archive exceeds size or file limits"
+        raise ValueError(message)
+    if len(paths) != len(set(paths)) or any(
+        path.is_absolute()
+        or ".." in path.parts
+        or "\\" in str(path)
+        or (
+            kind == "packages"
+            and (
+                len(path.parts) != 1
+                or (str(path) != "SOURCE_COMMIT" and path.suffix not in {".whl", ".gz"})
+            )
+        )
+        for path in paths
+    ):
+        message = "unsafe or unexpected CI archive member"
+        raise ValueError(message)
+    return paths
+
+
+def lookup(
+    repository: str, sha: str, kind: ArtifactKind, destination: Path, transport: Transport
+) -> Result:
     if (
         re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
         or _SHA.fullmatch(sha) is None
@@ -133,7 +207,7 @@ def lookup(repository: str, sha: str, kind: str, destination: Path, transport: T
     ):
         message = "CI reuse requires repository, full commit SHA and artifact kind"
         raise ValueError(message)
-    runs = _rows(
+    runs = collection_rows(
         transport.get(
             f"repos/{repository}/actions/workflows/ci.yml/runs?head_sha={sha}&event=push&per_page=100"
         ),
@@ -146,14 +220,14 @@ def lookup(repository: str, sha: str, kind: str, destination: Path, transport: T
         and run.get("head_branch") == "main"
         and run.get("event") == "push"
         and run.get("path") == ".github/workflows/ci.yml"
-        and _object(run.get("head_repository")).get("full_name") == repository
+        and json_object(run.get("head_repository")).get("full_name") == repository
     ]
     if not owned:
-        return Result(reused=False, waiting=True, reason="waiting for exact main CI")
-    run = max(owned, key=lambda row: _positive(row.get("id")))
+        return AwaitingArtifact("waiting for exact main CI")
+    run = max(owned, key=lambda row: positive_integer(row.get("id")))
     identity = _identity(run)
     artifact = _find_artifact(run, repository, sha, kind, transport)
-    if isinstance(artifact, Result):
+    if isinstance(artifact, AwaitingArtifact | FreshValidationRequired):
         return artifact
     with tempfile.TemporaryDirectory(prefix="repo-standards-ci-") as temporary:
         archive = Path(temporary) / "artifact.zip"
@@ -162,60 +236,60 @@ def lookup(repository: str, sha: str, kind: str, destination: Path, transport: T
         )
         staged = Path(temporary) / "verified"
         extract(archive, staged, digest=artifact.digest, sha=sha, kind=kind)
-        latest = _object(transport.get(f"repos/{repository}/actions/runs/{identity.identifier}"))
+        latest = json_object(
+            transport.get(f"repos/{repository}/actions/runs/{identity.identifier}")
+        )
         if (
             _identity(latest) != identity
             or latest.get("head_sha") != sha
             or (latest.get("conclusion") is not None and latest.get("conclusion") != "success")
         ):
-            return Result(
-                reused=False, waiting=False, reason="CI changed while verifying its artifact"
-            )
+            return FreshValidationRequired("CI changed while verifying its artifact")
         shutil.copytree(staged, destination, dirs_exist_ok=True)
-    return Result(
-        reused=True,
-        waiting=False,
-        reason=f"verified exact main CI {identity.identifier}, attempt {identity.attempt}",
-    )
+    return VerifiedArtifact(SourceCommit(sha), identity, artifact)
 
 
 @dataclass(frozen=True)
 class RunIdentity:
-    identifier: int
-    attempt: int
+    identifier: WorkflowRunId
+    attempt: WorkflowRunAttempt
 
 
 @dataclass(frozen=True)
 class Artifact:
-    identifier: int
-    digest: str
+    kind: ClassVar[Literal["artifact"]] = "artifact"
+    identifier: CIArtifactId
+    digest: CIArtifactDigest
 
 
-def _identity(run: dict[str, object]) -> RunIdentity:
-    return RunIdentity(_positive(run.get("id")), _positive(run.get("run_attempt")))
+def _identity(run: dict[str, JsonValue]) -> RunIdentity:
+    return RunIdentity(
+        WorkflowRunId(positive_integer(run.get("id"))),
+        WorkflowRunAttempt(positive_integer(run.get("run_attempt"))),
+    )
 
 
 def _find_artifact(
-    run: dict[str, object], repository: str, sha: str, kind: str, transport: Transport
-) -> Artifact | Result:
+    run: dict[str, JsonValue], repository: str, sha: str, kind: ArtifactKind, transport: Transport
+) -> Artifact | AwaitingArtifact | FreshValidationRequired:
     identity = _identity(run)
     run_id, attempt = identity.identifier, identity.attempt
     conclusion = run.get("conclusion")
     if conclusion is not None and conclusion != "success":
-        return Result(
-            reused=False, waiting=False, reason="exact main CI failed; fresh validation required"
-        )
-    jobs = _rows(
+        return FreshValidationRequired("exact main CI failed; fresh validation required")
+    jobs = collection_rows(
         transport.get(f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=100"), "jobs"
     )
     selected = [job for job in jobs if job.get("name") == _JOBS[kind]]
     if len(selected) != 1 or selected[0].get("status") != "completed":
-        return Result(
-            reused=False, waiting=conclusion is None, reason="waiting for successful artifact job"
+        return (
+            AwaitingArtifact("waiting for successful artifact job")
+            if conclusion is None
+            else FreshValidationRequired("waiting for successful artifact job")
         )
     if selected[0].get("conclusion") != "success":
-        return Result(reused=False, waiting=False, reason="artifact job did not succeed")
-    artifacts = _rows(
+        return FreshValidationRequired("artifact job did not succeed")
+    artifacts = collection_rows(
         transport.get(f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100"),
         "artifacts",
     )
@@ -225,66 +299,72 @@ def _find_artifact(
         if item.get("name") == f"tested-{kind}-{attempt}" and item.get("expired") is False
     ]
     if len(selected) != 1:
-        return Result(
-            reused=False, waiting=False, reason="current-attempt artifact missing or expired"
-        )
+        return FreshValidationRequired("current-attempt artifact missing or expired")
     artifact = selected[0]
-    identity = _object(artifact.get("workflow_run"))
-    repository_id = _positive(_object(run.get("head_repository")).get("id"))
+    artifact_identity = json_object(artifact.get("workflow_run"))
+    repository_id = positive_integer(json_object(run.get("head_repository")).get("id"))
     digest = artifact.get("digest")
-    actual = tuple(
-        identity.get(key)
-        for key in ("id", "head_sha", "head_branch", "repository_id", "head_repository_id")
+    actual = (
+        positive_integer(artifact_identity.get("id")),
+        artifact_identity.get("head_sha"),
+        artifact_identity.get("head_branch"),
+        positive_integer(artifact_identity.get("repository_id")),
+        positive_integer(artifact_identity.get("head_repository_id")),
     )
     expected = (run_id, sha, "main", repository_id, repository_id)
     if actual != expected or not isinstance(digest, str) or _DIGEST.fullmatch(digest) is None:
-        return Result(
-            reused=False,
-            waiting=False,
-            reason="artifact identity or digest does not match exact main CI",
+        return FreshValidationRequired(
+            "artifact identity or digest does not match exact main CI",
         )
-    return Artifact(_positive(artifact.get("id")), digest)
+    return Artifact(CIArtifactId(positive_integer(artifact.get("id"))), CIArtifactDigest(digest))
 
 
 def reuse(  # ruff: ignore[too-many-arguments] -- explicit artifact identity plus bounded wait and injected transport.
     repository: str,
     sha: str,
-    kind: str,
+    kind: ArtifactKind,
     destination: Path,
     *,
     wait: int = 0,
     transport: Transport | None = None,
 ) -> Result:
-    if not 0 <= wait <= _MAX_WAIT:
-        return Result(reused=False, waiting=False, reason="fresh validation: invalid wait bound")
+    if type(wait) is not int or not 0 <= wait <= _MAX_WAIT:
+        return FreshValidationRequired("fresh validation: invalid wait bound")
     client = GitHub(shutil.which("gh") or "gh") if transport is None else transport
     deadline = time.monotonic() + wait
     while True:
         try:
             result = lookup(repository, sha, kind, destination, client)
-        except (OSError, ValueError, KeyError, BadZipFile, subprocess.SubprocessError) as error:
-            return Result(
-                reused=False,
-                waiting=False,
-                reason=f"fresh validation: CI proof unavailable ({type(error).__name__})",
+        except (
+            OSError,
+            TypeError,
+            ValueError,
+            KeyError,
+            BadZipFile,
+            subprocess.SubprocessError,
+        ) as error:
+            return FreshValidationRequired(
+                f"fresh validation: CI proof unavailable ({type(error).__name__})",
             )
-        if not result.waiting or time.monotonic() >= deadline:
+        if not isinstance(result, AwaitingArtifact) or time.monotonic() >= deadline:
             return result
         time.sleep(min(3, max(0, deadline - time.monotonic())))
 
 
 class Arguments(argparse.Namespace):
-    repository: str
-    sha: str
-    kind: str
-    destination: Path
-    github_output: Path
-    summary: Path
-    wait: int
+    repository: str = ""
+    sha: str = ""
+    kind: ArtifactKind = "packages"
+    destination: Path = Path()
+    github_output: Path = Path()
+    summary: Path = Path()
+    wait: int = 0
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(  # sarj-noqa: SARJ533 -- pre-install CLI; typed decode.
+        description=__doc__
+    )
     parser.add_argument("--repository", required=True)
     parser.add_argument("--sha", required=True)
     parser.add_argument("--kind", choices=tuple(_JOBS), required=True)
@@ -296,7 +376,7 @@ def main() -> None:
     started = time.monotonic()
     result = reuse(args.repository, args.sha, args.kind, args.destination, wait=args.wait)
     with args.github_output.open("a") as stream:
-        stream.write(f"reused={str(result.reused).lower()}\n")
+        stream.write(f"reused={str(isinstance(result, VerifiedArtifact)).lower()}\n")
     with args.summary.open("a") as stream:
         stream.write(
             f"CI artifact ({args.kind}): {result.reason}; {time.monotonic() - started:.2f}s\n"
