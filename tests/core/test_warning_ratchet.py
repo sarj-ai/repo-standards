@@ -17,12 +17,18 @@ from repo_standards.core.engine import baseline_from_report, check_baseline
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import (
     MAX_REPOSITORY_INPUT_BYTES,
+    ExceptionUse,
     FindingsReport,
-    JSONValue,
     Mode,
 )
+from repo_standards.core.outcome import JSONValue
 from repo_standards.core.parser import parse_baseline_bytes
-from repo_standards.repository import RepositoryAnalysisRequest, analyze_repository
+from repo_standards.repository import (
+    RatchetAnalysis,
+    RepositoryAnalysisRequest,
+    analyze_repository,
+    select_analysis,
+)
 
 
 if TYPE_CHECKING:
@@ -241,9 +247,8 @@ def test_warning_opt_in_rejects_contradictory_check_mode_and_api_request(tmp_pat
     cli = _RUNNER.invoke(app, ["check", str(root), "--ratchet-warnings", "--format", "json"])
     assert cli.exit_code == 2, cli.stdout
     assert "ratchet" in cli.stdout
-    api = analyze_repository(RepositoryAnalysisRequest(root=root, include_warnings=True))
-    assert api.completion == "incomplete"
-    assert "ratchet" in api.execution_issues[0].message
+    with pytest.raises(ConfigurationError, match="ratchet"):
+        select_analysis(Mode.STRICT, None, include_warnings=True)
 
 
 def test_warning_setting_is_a_strict_optional_baseline_boolean(tmp_path: Path) -> None:
@@ -272,9 +277,7 @@ def test_warning_ratchet_api_returns_explicit_comparison_metadata(tmp_path: Path
     report = analyze_repository(
         RepositoryAnalysisRequest(
             root=root,
-            baseline_path=".repo-standards/baseline.json",
-            mode=Mode.RATCHET,
-            include_warnings=True,
+            selection=RatchetAnalysis(".repo-standards/baseline.json", include_warnings=True),
         )
     )
     assert report.completion == "complete"
@@ -318,7 +321,21 @@ def test_native_baseline_helper_cannot_cap_uncappable_or_excepted_findings(tmp_p
     baseline = baseline_from_report(uncappable, include_warnings=True)
     assert baseline.fingerprints == ()
     assert len(check_baseline(uncappable, baseline, include_warnings=True)) == 1
-    excepted = replace(report, diagnostics=(replace(finding, disposition="excepted"),))
+    excepted = replace(
+        report,
+        diagnostics=(
+            replace(
+                finding,
+                exception=ExceptionUse(
+                    owner="fixture",
+                    issue="TEST-1",
+                    reason="Reviewed fixture",
+                    created_on="2026-01-01",
+                    expires_on="2027-01-01",
+                ),
+            ),
+        ),
+    )
     assert baseline_from_report(excepted, include_warnings=True).fingerprints == ()
 
 
@@ -384,3 +401,22 @@ def test_native_baseline_cli_wire_size_includes_its_trailing_newline(
         assert result.stdout.endswith("\n")
         assert len(result.stdout.encode()) == MAX_REPOSITORY_INPUT_BYTES
         assert parse_baseline_bytes(result.stdout.encode()).include_warnings is True
+
+
+def test_disposition_cannot_hide_a_finding_without_exception_evidence(tmp_path: Path) -> None:
+    report = analyze_repository(RepositoryAnalysisRequest(root=_repository(tmp_path)))
+    assert isinstance(report, FindingsReport)
+    finding = report.diagnostics[0]
+    assert finding.disposition == "active"
+    assert finding.exception is None
+    with pytest.raises(TypeError, match="disposition"):
+        replace(finding, disposition="excepted")
+
+
+def test_provenance_rejects_a_baseline_digest_without_its_input_identity(tmp_path: Path) -> None:
+    report = analyze_repository(RepositoryAnalysisRequest(root=_repository(tmp_path)))
+    provenance = report.input_provenance
+    assert provenance is not None
+    assert provenance.baseline is None
+    with pytest.raises(TypeError, match="baseline_digest"):
+        replace(provenance, baseline_digest="a" * 64)

@@ -7,8 +7,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from repo_standards.core._json import parse_json_object
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.models import GitObjectId
+from repo_standards.core.outcome import JSONValue
 
-from ._context import NotApplicable, PullRequestContext, RepositoryNumericId
+from ._context import (
+    GitHubPullRequestContext,
+    NotApplicable,
+    PullRequestContext,
+    RepositoryNumericId,
+)
 
 
 if TYPE_CHECKING:
@@ -57,7 +63,7 @@ class _MergeGroupEventInput(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore", frozen=True, strict=True)
 
     action: LiteralChecksRequested
-    merge_group: dict[str, object]
+    merge_group: dict[str, JSONValue]
 
 
 def load_github_pull_request_context(
@@ -81,18 +87,17 @@ def load_github_pull_request_context(
         event = _PullRequestEventInput.model_validate(document)
     except ValidationError:
         ConfigurationError.fail("GitHub pull-request event is malformed")
-    return PullRequestContext(
+    return GitHubPullRequestContext(
         base_sha=GitObjectId(event.pull_request.base.sha),
         head_sha=GitObjectId(event.pull_request.head.sha),
         base_ref=event.pull_request.base.ref,
         head_ref=event.pull_request.head.ref,
         base_repository_id=RepositoryNumericId(event.pull_request.base.repo.id),
         head_repository_id=RepositoryNumericId(event.pull_request.head.repo.id),
-        source="github-event",
     )
 
 
-def _load_event_document(path: Path) -> object:
+def _load_event_document(path: Path) -> dict[str, JSONValue]:
     try:
         resolved = path.resolve(strict=True)
         if not resolved.is_file():

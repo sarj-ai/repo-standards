@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from heapq import nsmallest
-from typing import TYPE_CHECKING, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
+from pydantic import ConfigDict, TypeAdapter  # ruff: ignore[banned-api] -- validates the generic serialized JSON tree, without a domain envelope.
+
+from .models import PolicyId, RepositoryId
+from .outcome import JSONValue, issue_document
+
+
+_JSON_OBJECT = TypeAdapter(
+    dict[str, JSONValue], config=ConfigDict(allow_inf_nan=False, strict=True)
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from .models import (
         AnalysisReport,
         Baseline,
@@ -20,8 +27,21 @@ if TYPE_CHECKING:
 
 
 class _OutcomeSchema(TypedDict):
-    properties: dict[str, dict[str, object]]
+    properties: dict[str, dict[str, JSONValue]]
     required: NotRequired[list[str]]
+
+
+class BaselineDocument(TypedDict):
+    schema_version: Literal[2]
+    repository_id: RepositoryId
+    policy: PolicyId
+    policy_version: int
+    scope_digest: str
+    fingerprints: list[str]
+    include_warnings: bool
+
+
+type JsonSchema = dict[str, JSONValue]
 
 
 OUTPUT_SCHEMA_VERSION = 3
@@ -61,7 +81,7 @@ def analysis_outcome_schema(*, repeat_required_members: bool) -> list[_OutcomeSc
     return outcomes
 
 
-def diagnostic_dict(diagnostic: Diagnostic) -> Mapping[str, object]:
+def diagnostic_dict(diagnostic: Diagnostic) -> dict[str, JSONValue]:
     exception = asdict(diagnostic.exception) if diagnostic.exception is not None else None
     remediation = {
         "summary": diagnostic.remediation.summary,
@@ -76,29 +96,35 @@ def diagnostic_dict(diagnostic: Diagnostic) -> Mapping[str, object]:
         }
     else:
         location["manifest_anchor"] = diagnostic.manifest_anchor
-    payload: dict[str, object] = {
-        "rule_id": diagnostic.rule_id,
-        "rule_version": diagnostic.rule_version,
-        "severity": diagnostic.severity,
-        "evidence_level": diagnostic.evidence_level,
-        "component_id": diagnostic.component_id,
-        "subject_kind": diagnostic.subject_kind,
-        "observed": (
-            diagnostic.observed if diagnostic.observed_value is None else diagnostic.observed_value
-        ),
-        "expected": (
-            diagnostic.expected if diagnostic.expected_value is None else diagnostic.expected_value
-        ),
-        "message": diagnostic.message,
-        "path": diagnostic.path,
-        "manifest_anchor": diagnostic.manifest_anchor,
-        "location": location,
-        "remediation": remediation,
-        "prerequisites": list(diagnostic.prerequisites),
-        "disposition": diagnostic.disposition,
-        "exception": exception,
-        "fingerprint": diagnostic.fingerprint,
-    }
+    payload: dict[str, JSONValue] = _JSON_OBJECT.validate_python(
+        {
+            "rule_id": diagnostic.rule_id,
+            "rule_version": diagnostic.rule_version,
+            "severity": diagnostic.severity,
+            "evidence_level": diagnostic.evidence_level,
+            "component_id": diagnostic.component_id,
+            "subject_kind": diagnostic.subject_kind,
+            "observed": (
+                diagnostic.observed
+                if diagnostic.observed_value is None
+                else diagnostic.observed_value
+            ),
+            "expected": (
+                diagnostic.expected
+                if diagnostic.expected_value is None
+                else diagnostic.expected_value
+            ),
+            "message": diagnostic.message,
+            "path": diagnostic.path,
+            "manifest_anchor": diagnostic.manifest_anchor,
+            "location": location,
+            "remediation": remediation,
+            "prerequisites": list(diagnostic.prerequisites),
+            "disposition": diagnostic.disposition,
+            "exception": exception,
+            "fingerprint": diagnostic.fingerprint,
+        }
+    )
     if diagnostic.finding_key:
         payload["finding_key"] = diagnostic.finding_key
     if diagnostic.related_locations:
@@ -108,10 +134,10 @@ def diagnostic_dict(diagnostic: Diagnostic) -> Mapping[str, object]:
     return payload
 
 
-def _source_location_dict(location: SourceLocation | None) -> dict[str, object] | None:
+def _source_location_dict(location: SourceLocation | None) -> dict[str, JSONValue] | None:
     if location is None:
         return None
-    payload: dict[str, object] = {"path": location.path}
+    payload: dict[str, JSONValue] = {"path": location.path}
     if location.line is not None:
         payload["line"] = location.line
     if location.column is not None:
@@ -125,7 +151,7 @@ def _source_location_dict(location: SourceLocation | None) -> dict[str, object] 
     return payload
 
 
-def _related_location_dict(location: RelatedLocation) -> Mapping[str, object]:
+def _related_location_dict(location: RelatedLocation) -> dict[str, JSONValue]:
     return {
         "location": _source_location_dict(location.location),
         "message": location.message,
@@ -133,8 +159,21 @@ def _related_location_dict(location: RelatedLocation) -> Mapping[str, object]:
     }
 
 
-def input_provenance_dict(provenance: InputProvenance) -> Mapping[str, object]:
-    payload: dict[str, object] = asdict(provenance)
+def input_provenance_dict(provenance: InputProvenance) -> dict[str, JSONValue]:
+    payload: dict[str, JSONValue] = {
+        "mode": provenance.mode,
+        "source_revision": provenance.source_revision,
+        "tree_digest": provenance.tree_digest,
+        "manifest_path": provenance.manifest_path,
+        "manifest_object_id": provenance.manifest_object_id,
+        "manifest_digest": provenance.manifest_digest,
+        "baseline_path": provenance.baseline_path,
+        "baseline_object_id": provenance.baseline_object_id,
+        "baseline_digest": provenance.baseline_digest,
+        "comparison_base_revision": provenance.comparison_base_revision,
+        "comparison_base_tree_digest": provenance.comparison_base_tree_digest,
+        "comparison_basis": provenance.comparison_basis,
+    }
     return {
         key: value
         for key, value in payload.items()
@@ -142,23 +181,25 @@ def input_provenance_dict(provenance: InputProvenance) -> Mapping[str, object]:
     }
 
 
-def ratchet_dict(comparison: RatchetComparison) -> Mapping[str, object]:
-    return {
-        "include_warnings": comparison.include_warnings,
-        "entries": [
-            {
-                "fingerprint": item.fingerprint,
-                "classification": item.classification,
-                "diagnostic": (
-                    diagnostic_dict(item.diagnostic) if item.diagnostic is not None else None
-                ),
-            }
-            for item in comparison.entries
-        ],
-    }
+def ratchet_dict(comparison: RatchetComparison) -> dict[str, JSONValue]:
+    return _JSON_OBJECT.validate_python(
+        {
+            "include_warnings": comparison.include_warnings,
+            "entries": [
+                {
+                    "fingerprint": item.fingerprint,
+                    "classification": item.classification,
+                    "diagnostic": (
+                        diagnostic_dict(item.diagnostic) if item.diagnostic is not None else None
+                    ),
+                }
+                for item in comparison.entries
+            ],
+        }
+    )
 
 
-def baseline_dict(baseline: Baseline) -> Mapping[str, object]:
+def baseline_dict(baseline: Baseline) -> BaselineDocument:
     return {
         "schema_version": 2,
         "repository_id": baseline.repository_id,
@@ -170,7 +211,7 @@ def baseline_dict(baseline: Baseline) -> Mapping[str, object]:
     }
 
 
-def baseline_schema() -> Mapping[str, object]:
+def baseline_schema() -> JsonSchema:
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "urn:repo-standards:schema:baseline:v2",
@@ -200,19 +241,21 @@ def baseline_schema() -> Mapping[str, object]:
     }
 
 
-def report_dict(report: AnalysisReport) -> Mapping[str, object]:
-    payload: dict[str, object] = {
-        "schema_version": OUTPUT_SCHEMA_VERSION,
-        "completion": report.completion,
-        "conclusion": report.conclusion,
-        "mode": report.mode,
-        "repository_id": report.repository_id,
-        "policy": {"id": report.policy_id, "version": report.policy_version},
-        "scope_digest": report.scope_digest,
-        "summary": dict(sorted(report.summary.items())),
-        "execution_issues": [asdict(item) for item in report.execution_issues],
-        "diagnostics": [diagnostic_dict(item) for item in report.diagnostics],
-    }
+def report_dict(report: AnalysisReport) -> dict[str, JSONValue]:
+    payload: dict[str, JSONValue] = _JSON_OBJECT.validate_python(
+        {
+            "schema_version": OUTPUT_SCHEMA_VERSION,
+            "completion": report.completion,
+            "conclusion": report.conclusion,
+            "mode": report.mode,
+            "repository_id": report.repository_id,
+            "policy": {"id": report.policy_id, "version": report.policy_version},
+            "scope_digest": report.scope_digest,
+            "summary": dict(sorted(report.summary.items())),
+            "execution_issues": [issue_document(item) for item in report.execution_issues],
+            "diagnostics": [diagnostic_dict(item) for item in report.diagnostics],
+        }
+    )
     if report.input_provenance is not None:
         payload["input_provenance"] = input_provenance_dict(report.input_provenance)
     if report.ratchet is not None:
@@ -263,7 +306,7 @@ def render_text(report: AnalysisReport, *, max_diagnostics: int | None = None) -
     return "\n".join(lines) + "\n"
 
 
-def output_schema() -> Mapping[str, object]:
+def output_schema() -> dict[str, JSONValue]:
     remediation = {
         "type": "object",
         "additionalProperties": False,
@@ -371,55 +414,57 @@ def output_schema() -> Mapping[str, object]:
             },
         },
     }
-    return {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "urn:repo-standards:schema:report:v3",
-        "type": "object",
-        "additionalProperties": False,
-        "required": [
-            "schema_version",
-            "completion",
-            "conclusion",
-            "mode",
-            "repository_id",
-            "policy",
-            "scope_digest",
-            "summary",
-            "execution_issues",
-            "diagnostics",
-        ],
-        "properties": {
-            "schema_version": {"const": 3},
-            "completion": {"enum": ["complete", "incomplete"]},
-            "conclusion": {"enum": ["passed", "findings", "inconclusive"]},
-            "mode": {"enum": ["report", "ratchet", "strict"]},
-            "repository_id": {"type": "string"},
-            "policy": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["id", "version"],
-                "properties": {"id": {"type": "string"}, "version": {"type": "integer"}},
-            },
-            "scope_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            "summary": {"type": "object", "additionalProperties": {"type": "integer"}},
-            "execution_issues": {
-                "type": "array",
-                "items": {
+    return _JSON_OBJECT.validate_python(
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "urn:repo-standards:schema:report:v3",
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "schema_version",
+                "completion",
+                "conclusion",
+                "mode",
+                "repository_id",
+                "policy",
+                "scope_digest",
+                "summary",
+                "execution_issues",
+                "diagnostics",
+            ],
+            "properties": {
+                "schema_version": {"const": 3},
+                "completion": {"enum": ["complete", "incomplete"]},
+                "conclusion": {"enum": ["passed", "findings", "inconclusive"]},
+                "mode": {"enum": ["report", "ratchet", "strict"]},
+                "repository_id": {"type": "string"},
+                "policy": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["code", "phase", "message", "retryable", "remediation"],
-                    "properties": {
-                        "code": {"type": "string", "pattern": "^[a-z][a-z0-9.-]+$"},
-                        "phase": {"type": "string"},
-                        "message": {"type": "string"},
-                        "retryable": {"type": "boolean"},
-                        "remediation": {"type": "array", "items": {"type": "string"}},
+                    "required": ["id", "version"],
+                    "properties": {"id": {"type": "string"}, "version": {"type": "integer"}},
+                },
+                "scope_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "summary": {"type": "object", "additionalProperties": {"type": "integer"}},
+                "execution_issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["code", "phase", "message", "retryable", "remediation"],
+                        "properties": {
+                            "code": {"type": "string", "pattern": "^[a-z][a-z0-9.-]+$"},
+                            "phase": {"type": "string"},
+                            "message": {"type": "string"},
+                            "retryable": {"type": "boolean"},
+                            "remediation": {"type": "array", "items": {"type": "string"}},
+                        },
                     },
                 },
+                "diagnostics": {"type": "array", "items": diagnostic},
+                "input_provenance": {"type": "object"},
+                "ratchet_comparison": {"type": "object"},
             },
-            "diagnostics": {"type": "array", "items": diagnostic},
-            "input_provenance": {"type": "object"},
-            "ratchet_comparison": {"type": "object"},
-        },
-        "oneOf": analysis_outcome_schema(repeat_required_members=False),
-    }
+            "oneOf": analysis_outcome_schema(repeat_required_members=False),
+        }
+    )

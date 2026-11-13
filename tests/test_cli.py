@@ -14,7 +14,8 @@ import pytest
 from typer.testing import CliRunner
 
 from repo_standards.cli import app
-from repo_standards.core.models import Diagnostic, JSONValue, RepositorySnapshot, RuleId
+from repo_standards.core.models import Diagnostic, RepositorySnapshot, RuleId
+from repo_standards.core.outcome import IncompleteCommand, JSONValue
 from repo_standards.github_review_policy import GitHubRepositoryId, trusted_manifest
 from repo_standards.policy_sarj import policy as sarj_policy
 from repo_standards.repository import RepositoryAnalysisRequest, analyze_repository
@@ -22,6 +23,28 @@ from repo_standards.repository import RepositoryAnalysisRequest, analyze_reposit
 
 runner = CliRunner()
 _FIXTURE_REPOSITORY_ID = GitHubRepositoryId(123)
+
+
+def test_incomplete_command_requires_execution_evidence() -> None:
+    with pytest.raises(ValueError, match="execution issue"):
+        IncompleteCommand(())
+
+
+def test_rest_doctor_preserves_inspection_only_failure_evidence(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text('{"name":"fixture","workspaces":[1]}', encoding="utf-8")
+    _commit_fixture(tmp_path)
+
+    result = runner.invoke(app, ["rest", "doctor", str(tmp_path)])
+
+    assert result.exit_code == 2, result.stdout
+    payload = RootModel[dict[str, JSONValue]].model_validate_json(result.stdout).root
+    assert payload["completion"] == "incomplete"
+    assert payload["conclusion"] == "inconclusive"
+    issues = payload["execution_issues"]
+    assert isinstance(issues, list)
+    assert any(
+        isinstance(issue, dict) and issue.get("code") == "metadata.invalid" for issue in issues
+    )
 
 
 def test_version_matches_installed_distribution() -> None:

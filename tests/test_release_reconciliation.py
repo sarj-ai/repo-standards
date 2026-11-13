@@ -11,12 +11,19 @@ import pytest
 
 from release_reconciliation import (
     Artifact,
-    ReconciliationPlan,
+    CompleteRelease,
+    JsonValue,
+    NewRelease,
+    PublishPyPIFromGitHub,
     RegistrySide,
     ReleaseState,
     ReleaseStateError,
+    RestoreGitHubFromPyPI,
+    SourceCommit,
+    TaggedReleaseWithoutArtifacts,
     parse_github_registry_side,
     parse_pypi_registry_side,
+    plan_outputs,
     reconciliation_plan,
     render_release_readme,
     verify_distribution_release_identity,
@@ -27,8 +34,10 @@ from release_reconciliation import (
 VERSION = "3.0.0"
 HEAD_SHA = "a" * 40
 TAG_SHA = "b" * 40
-WHEEL = Artifact(f"repo_standards-{VERSION}-py3-none-any.whl", "1" * 64)
-SDIST = Artifact(f"repo_standards-{VERSION}.tar.gz", "2" * 64)
+WHEEL = Artifact(
+    f"repo_standards-{VERSION}-py3-none-any.whl", "1" * 64, "https://example.invalid/wheel"
+)
+SDIST = Artifact(f"repo_standards-{VERSION}.tar.gz", "2" * 64, "https://example.invalid/sdist")
 
 
 def _side(source_sha: str = TAG_SHA) -> RegistrySide:
@@ -45,21 +54,31 @@ def _state(
 
 
 def test_new_release_anchors_head_before_building() -> None:
-    assert reconciliation_plan(_state(tag_sha=None)) == ReconciliationPlan(
-        artifact_source="build",
-        create_tag=True,
-        create_github_release=True,
-        prepare_artifacts=True,
-        publish_pypi=True,
-        source_sha=HEAD_SHA,
-    )
+    plan = reconciliation_plan(_state(tag_sha=None))
+    assert plan == NewRelease(SourceCommit(HEAD_SHA))
+    assert plan_outputs(plan, VERSION) == {
+        "artifact_source": "build",
+        "create_tag": "true",
+        "prepare_artifacts": "true",
+        "publish_primary": "true",
+        "release": "true",
+        "source_sha": HEAD_SHA,
+        "version": VERSION,
+    }
 
 
 def test_failed_initial_release_rebuilds_only_the_anchored_tag() -> None:
     plan = reconciliation_plan(_state())
-    assert plan.artifact_source == "build"
-    assert plan.create_tag is False
-    assert plan.source_sha == TAG_SHA
+    assert plan == TaggedReleaseWithoutArtifacts(SourceCommit(TAG_SHA))
+    assert plan_outputs(plan, VERSION) == {
+        "artifact_source": "build",
+        "create_tag": "false",
+        "prepare_artifacts": "true",
+        "publish_primary": "true",
+        "release": "true",
+        "source_sha": TAG_SHA,
+        "version": VERSION,
+    }
 
 
 @pytest.mark.parametrize(
@@ -78,10 +97,24 @@ def test_partial_states_reuse_exact_published_artifacts(
     expected_release: str,
 ) -> None:
     plan = reconciliation_plan(_state(github=github, pypi=pypi))
-    assert plan.artifact_source == artifact_source
-    assert str(plan.publish_pypi).lower() == expected_publish
-    assert str(plan.create_github_release).lower() == expected_release
-    assert plan.source_sha == TAG_SHA
+    match artifact_source:
+        case "github":
+            assert plan == PublishPyPIFromGitHub(SourceCommit(TAG_SHA))
+        case "pypi":
+            assert plan == RestoreGitHubFromPyPI(SourceCommit(TAG_SHA))
+        case "none":
+            assert plan == CompleteRelease(SourceCommit(TAG_SHA))
+        case _:
+            pytest.fail("Unexpected fixture artifact source")
+    assert plan_outputs(plan, VERSION) == {
+        "artifact_source": artifact_source,
+        "create_tag": "false",
+        "prepare_artifacts": "false" if artifact_source == "none" else "true",
+        "publish_primary": expected_publish,
+        "release": expected_release,
+        "source_sha": TAG_SHA,
+        "version": VERSION,
+    }
 
 
 def test_published_side_without_tag_is_refused() -> None:
@@ -98,7 +131,7 @@ def test_published_source_must_match_tag(label: str) -> None:
 
 
 def test_cross_registry_hash_mismatch_is_refused() -> None:
-    different = RegistrySide((SDIST, Artifact(WHEEL.name, "3" * 64)), TAG_SHA)
+    different = RegistrySide((SDIST, Artifact(WHEEL.name, "3" * 64, WHEEL.url)), TAG_SHA)
     with pytest.raises(ReleaseStateError, match="artifact hashes differ"):
         reconciliation_plan(_state(github=_side(), pypi=different))
 
@@ -269,7 +302,7 @@ def test_installed_distribution_verifier_rejects_wrong_installed_version(
 
 
 def test_github_snapshot_preserves_source_sorted_artifacts_and_ignores_other_named_assets() -> None:
-    document: dict[str, object] = {
+    document: dict[str, JsonValue] = {
         "target_commitish": TAG_SHA,
         "assets": [
             {
@@ -305,7 +338,7 @@ def test_github_snapshot_preserves_source_sorted_artifacts_and_ignores_other_nam
         ({"assets": []}, "target is missing"),
         ({"target_commitish": TAG_SHA}, "assets are missing"),
         ({"target_commitish": TAG_SHA, "assets": [None]}, "malformed asset"),
-        ({"target_commitish": TAG_SHA, "assets": [dict[str, object]()]}, "malformed asset"),
+        ({"target_commitish": TAG_SHA, "assets": [dict[str, JsonValue]()]}, "malformed asset"),
         ({"target_commitish": TAG_SHA, "assets": []}, "missing SHA256SUMS"),
         ({"target_commitish": TAG_SHA, "assets": [{"name": WHEEL.name}]}, "digest is unavailable"),
         (
@@ -315,14 +348,14 @@ def test_github_snapshot_preserves_source_sorted_artifacts_and_ignores_other_nam
     ],
 )
 def test_github_snapshot_rejects_incomplete_publication_evidence(
-    document: dict[str, object], message: str
+    document: dict[str, JsonValue], message: str
 ) -> None:
     with pytest.raises(ReleaseStateError, match=message):
         parse_github_registry_side(document, VERSION)
 
 
 def test_pypi_snapshot_preserves_source_sorted_artifacts_and_ignores_unrelated_files() -> None:
-    document: dict[str, object] = {
+    document: dict[str, JsonValue] = {
         "info": {"description": f"- uses: sarj-ai/repo-standards@{TAG_SHA} # v{VERSION}\n"},
         "urls": [
             None,
@@ -354,9 +387,9 @@ def test_pypi_snapshot_preserves_source_sorted_artifacts_and_ignores_unrelated_f
     ],
 )
 def test_pypi_snapshot_rejects_incomplete_artifact_evidence(
-    artifact: dict[str, object], message: str
+    artifact: dict[str, JsonValue], message: str
 ) -> None:
-    document: dict[str, object] = {
+    document: dict[str, JsonValue] = {
         "info": {"description": f"- uses: sarj-ai/repo-standards@{TAG_SHA} # v{VERSION}\n"},
         "urls": [artifact],
     }

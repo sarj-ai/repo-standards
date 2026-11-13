@@ -63,13 +63,6 @@ class _TrackedFilesExampleSource(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
-class RuleExampleResult:
-    rule_ids: tuple[RuleId, ...]
-    complete: bool
-    execution_issue_codes: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class RuleExampleCase:
     fixture_id: FixtureId
     rule_id: RuleId
@@ -85,7 +78,7 @@ def rule_example_cases() -> tuple[RuleExampleCase, ...]:
     )
 
 
-def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
+def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
     case = next((case for case in rule_example_cases() if case.fixture_id == fixture_id), None)
     if case is None:
         message = f"unknown rule example: {fixture_id}"
@@ -118,11 +111,11 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> RuleExampleResult:
     return _run_repository_path(source)
 
 
-def _run_repository_path(source: str) -> RuleExampleResult:
+def _run_repository_path(source: str) -> tuple[RuleId, ...]:
     return _run_snapshot((source.strip(),))
 
 
-def _run_makefile_comparison(source: str) -> RuleExampleResult:
+def _run_makefile_comparison(source: str) -> tuple[RuleId, ...]:
     context = _MakefileExampleSource.model_validate_json(source)
     comparison = MakefileComparison(
         base_revision="f" * 40,
@@ -141,7 +134,7 @@ def _run_makefile_comparison(source: str) -> RuleExampleResult:
     return _run_snapshot(tuple(sorted(context.head)), comparison=comparison)
 
 
-def _run_pull_request_template(source: str) -> RuleExampleResult:
+def _run_pull_request_template(source: str) -> tuple[RuleId, ...]:
     context = _PullRequestTemplateExampleSource.model_validate_json(source)
     path = ".github/pull_request_template.md"
     manifest = Manifest(
@@ -173,13 +166,12 @@ def _run_snapshot(
     manifest: Manifest | None = None,
     templates: tuple[PullRequestTemplate, ...] = (),
     migration_comparison: MigrationComparison | None = None,
-) -> RuleExampleResult:
+) -> tuple[RuleId, ...]:
     snapshot = RepositorySnapshot(
         manifest=manifest
         or Manifest(repository_id=RepositoryId("example-repository"), components=()),
         baseline=None,
         inspection=RepositoryInspection(
-            completion="complete",
             source_revision="b" * 40,
             tree_digest="c" * 40,
             tracked_file_count=len(paths),
@@ -206,6 +198,4 @@ def _run_snapshot(
         migration_comparison=migration_comparison,
     )
     diagnostics = SarjPolicy.evaluate_repository(snapshot)
-    return RuleExampleResult(
-        tuple(sorted((item.rule_id for item in diagnostics), key=str)), complete=True
-    )
+    return tuple(sorted((item.rule_id for item in diagnostics), key=str))

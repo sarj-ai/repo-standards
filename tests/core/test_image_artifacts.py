@@ -61,7 +61,6 @@ def _snapshot(*paths: str, manifest: Manifest | None = None) -> RepositorySnapsh
         manifest=manifest or parse_manifest_bytes(_manifest()),
         baseline=None,
         inspection=RepositoryInspection(
-            completion="complete",
             source_revision="a" * 40,
             tree_digest="b" * 40,
             tracked_file_count=len(paths),

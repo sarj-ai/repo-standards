@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import RootModel
 import pytest
@@ -24,8 +24,12 @@ from repo_standards.core.inspection import (
     parse_workspace_metadata,
     read_tracked_blob_contents,
 )
-from repo_standards.core.models import InventoryKind, JSONValue, RuleId
+from repo_standards.core.models import InventoryKind, RuleId
 from repo_standards.policy_sarj import SarjPolicy
+
+
+if TYPE_CHECKING:
+    from repo_standards.core.outcome import ConfigValue, JSONValue
 
 
 _MANIFEST = b"""\
@@ -207,7 +211,7 @@ def test_snapshot_parses_each_project_document_once(
         json_inputs.append(content)
         return parse_json_object(content)
 
-    def parse_toml(content: str) -> object:
+    def parse_toml(content: str) -> dict[str, ConfigValue]:
         toml_inputs.append(content)
         return toml_parser(content)
 

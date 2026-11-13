@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -11,6 +13,11 @@ from repo_standards.rest import (
     instrumentation_capabilities,
     parse_api_operation_map,
 )
+from repo_standards.rest.instrumentation import InstrumentationCapabilityId
+
+
+if TYPE_CHECKING:
+    from repo_standards.core.outcome import JSONValue
 
 
 def _json(value: object) -> bytes:
@@ -21,7 +28,7 @@ def _candidate_ids(files: tuple[TrackedFile, ...]) -> list[str]:
     return [item.capability.capability_id for item in detect_instrumentation(files).candidates]
 
 
-def _operation_map(*operations: object, digest: str = "a" * 64) -> bytes:
+def _operation_map(*operations: JSONValue, digest: str = "a" * 64) -> bytes:
     return _json(
         {
             "schema_version": "api-operation-map.v2",
@@ -61,8 +68,8 @@ def test_registry_is_closed_sorted_and_honest_about_support() -> None:
         "committed-openapi",
         "operation-map",
     }
-    assert by_id["fastapi"].support == "preview"
-    assert by_id["fastapi"].runtime_integration == "preview"
+    assert by_id[InstrumentationCapabilityId("fastapi")].support == "preview"
+    assert by_id[InstrumentationCapabilityId("fastapi")].runtime_integration == "preview"
     assert all(
         item.runtime_integration == "unsupported"
         for item in capabilities
@@ -134,6 +141,8 @@ def test_recursive_toml_parser_failure_is_an_incomplete_report(path: str, conten
     assert report.candidates == ()
     assert len(report.issues) == 1
     assert report.issues[0].code == "instrumentation.manifest-invalid"
+    with pytest.raises(TypeError, match="completion"):
+        replace(report, completion="complete")
 
 
 def test_deep_cargo_tables_are_detected_without_recursive_traversal() -> None:

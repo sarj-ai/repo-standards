@@ -1,6 +1,6 @@
 [project]
 name = "repo-standards"
-version = "6.24.0"
+version = "7.0.0"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
@@ -70,6 +70,10 @@ line-length = 100
 extend-select = ["B", "E", "F", "I", "PERF", "PL", "RUF", "S", "SIM", "UP"]
 
 [tool.ruff.per-file-target-version]
+# These dependency-free helpers run before the project environment on Ubuntu 24.04.
+"ci_artifacts.py" = "py312"
+"ci_reviewed_validation.py" = "py312"
+"release_reconciliation.py" = "py312"
 # Imported by the system-Python CI certificate bootstrap before project activation.
 "test_selection.py" = "py312"
 # Shared with the dependency-free GitHub checkout Action on system Python.

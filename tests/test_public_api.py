@@ -14,14 +14,17 @@ import yaml
 
 from repo_standards.cli import app
 from repo_standards.core import engine
+from repo_standards.core.errors import BaselineError
 from repo_standards.core.models import AnalysisReport, Baseline, Mode, RatchetComparison
 from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.pull_request import analyze_pull_request_commits, analyze_pull_request_size
 from repo_standards.repository import (
+    RatchetAnalysis,
     RepositoryAnalysisRequest,
     analysis as repository_analysis,
     analyze_repository,
     inspect_repository,
+    select_analysis,
 )
 
 
@@ -298,8 +301,7 @@ def test_repository_analysis_api_classifies_a_selected_ratchet_baseline(
     report = analyze_repository(
         RepositoryAnalysisRequest(
             root=tmp_path,
-            baseline_path=".repo-standards/baseline.json",
-            mode=Mode.RATCHET,
+            selection=RatchetAnalysis(".repo-standards/baseline.json"),
         )
     )
 
@@ -310,11 +312,15 @@ def test_repository_analysis_api_classifies_a_selected_ratchet_baseline(
     assert report.ratchet is classifications[0]
 
 
-def test_repository_analysis_api_requires_a_ratchet_baseline_path(tmp_path: Path) -> None:
-    report = analyze_repository(RepositoryAnalysisRequest(root=tmp_path, mode=Mode.RATCHET))
+def test_repository_analysis_api_requires_a_ratchet_baseline_path() -> None:
+    with pytest.raises(BaselineError, match="baseline_path"):
+        select_analysis(Mode.RATCHET, None)
 
-    assert report.completion == "incomplete"
-    assert "baseline_path" in report.execution_issues[0].message
+
+@pytest.mark.parametrize("baseline_path", ["", " ", "\t"])
+def test_ratchet_selection_rejects_empty_baseline_paths(baseline_path: str) -> None:
+    with pytest.raises(BaselineError, match="baseline_path"):
+        select_analysis(Mode.RATCHET, baseline_path)
 
 
 def test_manifest_rejects_removed_delivery_configuration() -> None:

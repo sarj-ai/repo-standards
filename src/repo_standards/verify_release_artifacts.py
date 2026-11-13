@@ -21,7 +21,7 @@ import typer
 
 from repo_standards.core.canonical import canonical_json, canonical_path
 from repo_standards.core.errors import ConfigurationError
-from repo_standards.core.models import JSONValue
+from repo_standards.core.outcome import JSONValue
 from repo_standards.site import WEBSITE_URL
 
 

@@ -7,7 +7,7 @@ from ._json import parse_json_object
 
 
 if TYPE_CHECKING:
-    from .models import JSONValue
+    from .outcome import JSONValue
 
 
 _DEPENDENCY_FIELDS = frozenset(

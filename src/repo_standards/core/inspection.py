@@ -24,12 +24,14 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from repo_standards._git_environment import GIT_ENVIRONMENT
 
 from ._json import parse_json_object
+from ._toml import parse_toml_object
 from .canonical import canonical_path
 from .errors import BaselineError, ConfigurationError, ManifestAbsentError
 from .images import validate_image_artifacts
 from .javascript import validate_javascript_artifacts
 from .models import (
     Baseline,
+    BaselineProvenance,
     GitObjectId,
     InputProvenance,
     InventoryKind,
@@ -42,6 +44,7 @@ from .models import (
     TrackedFileEvidence,
     WorkspaceEvidence,
 )
+from .outcome import ConfigValue, JSONValue, ParsedValue
 from .parser import parse_baseline_bytes, parse_manifest_bytes
 
 
@@ -134,8 +137,11 @@ class _MetadataProjection:
 @dataclass(frozen=True, slots=True)
 class _PythonMetadata:
     name: str | None
-    workspace_root: bool
-    workspace: object
+    workspace: ConfigValue
+
+    @property
+    def workspace_root(self) -> bool:
+        return self.workspace is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +176,7 @@ class _MetadataBatch(NamedTuple):
 class _NpmWorkspaces(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow", strict=True)
 
-    packages: list[object] | None = None
+    packages: list[JSONValue] | None = None
 
 
 class _NpmPackage(BaseModel):
@@ -178,7 +184,7 @@ class _NpmPackage(BaseModel):
 
     name: str | None = None
     private: bool | None = None
-    workspaces: list[object] | _NpmWorkspaces | None = None
+    workspaces: list[JSONValue] | _NpmWorkspaces | None = None
 
 
 class _PnpmWorkspace(BaseModel):
@@ -249,22 +255,27 @@ def load_repository_snapshot(
     if manifest_blob is None:
         ManifestAbsentError.fail("manifest is absent from the selected Git tree")
     selected = [manifest_blob]
-    canonical_baseline: str | None = None
     baseline_blob: TrackedBlob | None = None
     if baseline_path is not None:
-        canonical_baseline = canonical_path(baseline_path)
-        baseline_blob = by_path.get(canonical_baseline)
-        if baseline_blob is None:
-            BaselineError.fail("baseline is absent from the selected Git tree")
-        selected.append(baseline_blob)
+        baseline_blob = by_path.get(canonical_path(baseline_path))
+        if baseline_blob is not None:
+            selected.append(baseline_blob)
     contents, issues = _read_metadata_batch(resolved, tuple(selected))
     if issues:
         ConfigurationError.fail("selected policy input exceeds the per-file safety limit")
     manifest_content = _required_content(contents, manifest_blob)
-    baseline_content = (
-        _required_content(contents, baseline_blob) if baseline_blob is not None else None
-    )
     manifest = parse_manifest_bytes(manifest_content)
+    if baseline_path is not None and baseline_blob is None:
+        BaselineError.fail("baseline is absent from the selected Git tree")
+    baseline = None
+    baseline_provenance = None
+    if baseline_blob is not None:
+        baseline = _snapshot_baseline(_required_content(contents, baseline_blob))
+        baseline_provenance = BaselineProvenance(
+            path=baseline_blob.path,
+            object_id=GitObjectId(baseline_blob.object_id),
+            digest=_content_digest(_required_content(contents, baseline_blob)),
+        )
     _validate_documentation_entrypoints(manifest, by_path)
     validate_javascript_artifacts(manifest.javascript_artifacts, frozenset(by_path))
     validate_image_artifacts(manifest.image_artifacts, frozenset(by_path))
@@ -273,7 +284,7 @@ def load_repository_snapshot(
         ConfigurationError.fail("repository inspection is incomplete")
     return RepositorySnapshot(
         manifest=manifest,
-        baseline=(_snapshot_baseline(baseline_content) if baseline_content is not None else None),
+        baseline=baseline,
         inspection=inspection,
         pull_request_templates=_pull_request_templates(resolved, manifest, blobs),
         provenance=InputProvenance(
@@ -283,13 +294,7 @@ def load_repository_snapshot(
             manifest_path=canonical_manifest,
             manifest_object_id=GitObjectId(manifest_blob.object_id),
             manifest_digest=_content_digest(manifest_content),
-            baseline_path=canonical_baseline,
-            baseline_object_id=(
-                GitObjectId(baseline_blob.object_id) if baseline_blob is not None else None
-            ),
-            baseline_digest=(
-                _content_digest(baseline_content) if baseline_content is not None else None
-            ),
+            baseline=baseline_provenance,
         ),
     )
 
@@ -410,7 +415,6 @@ def _inspection_from_blobs(
     inventory_units.extend(terraform_modules)
     tracked_files = _tracked_file_evidence(root, blobs, packages)
     return RepositoryInspection(
-        completion="incomplete" if issues else "complete",
         source_revision=identity.source_revision,
         tree_digest=identity.tree_digest,
         tracked_file_count=len(blobs),
@@ -919,17 +923,21 @@ def _project_document(relative: str, content: bytes) -> _NpmPackage | _PythonMet
 
 
 def _project_evidence(relative: str, document: _NpmPackage | _PythonMetadata) -> ProjectCoordinate:
-    if isinstance(document, _NpmPackage):
-        return _npm_project(relative, document)
-    return _python_project(relative, document)
+    match document:
+        case _NpmPackage():
+            return _npm_project(relative, document)
+        case _PythonMetadata():
+            return _python_project(relative, document)
 
 
 def _workspace_evidence(
     relative: str, document: _NpmPackage | _PythonMetadata
 ) -> WorkspaceEvidence | None:
-    if isinstance(document, _NpmPackage):
-        return _npm_workspace(relative, document)
-    return _python_workspace(relative, document)
+    match document:
+        case _NpmPackage():
+            return _npm_workspace(relative, document)
+        case _PythonMetadata():
+            return _python_workspace(relative, document)
 
 
 def parse_workspace_metadata(relative: str, content: bytes) -> WorkspaceEvidence | None:
@@ -952,7 +960,7 @@ def parse_workspace_metadata(relative: str, content: bytes) -> WorkspaceEvidence
 
 def _pnpm_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None:
     document = _pnpm_document(content)
-    packages = _PnpmWorkspace.model_validate(document).packages
+    packages = document.packages
     members = [item for item in packages if not item.startswith("!") or item.startswith("!(")]
     excludes = [
         item.removeprefix("!")
@@ -971,14 +979,14 @@ def _pnpm_workspace(relative: str, content: bytes) -> WorkspaceEvidence | None:
     )
 
 
-def _pnpm_document(content: bytes) -> object:
+def _pnpm_document(content: bytes) -> _PnpmWorkspace:
     loader = yaml.SafeLoader(content.decode("utf-8"))
     try:
         node = loader.get_single_node()
         if node is None:
-            return None
+            return _PnpmWorkspace.model_validate(None)
         _unique_pnpm_selectors(node)
-        return loader.construct_document(node)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- construct only after validating declared workspace selectors.
+        return _PnpmWorkspace.model_validate(loader.construct_document(node))  # pyright: ignore[reportUnknownMemberType] -- validate PyYAML's untyped result after duplicate-selector checks.
     finally:
         loader.dispose()  # pyright: ignore[reportUnknownMemberType] -- PyYAML parser lifetime boundary.
 
@@ -1271,25 +1279,19 @@ def _npm_workspace(relative: str, package: _NpmPackage) -> WorkspaceEvidence | N
 
 
 def _python_metadata(content: bytes) -> _PythonMetadata:
-    raw = _erase_parser_type(tomllib.loads(content.decode("utf-8")))
-    if not isinstance(raw, dict):
-        ConfigurationError.fail("Python metadata must be a table")
-    project = raw.get("project")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
-    tool = raw.get("tool")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
+    raw = parse_toml_object(content)
+    project = raw.get("project")
+    tool = raw.get("tool")
     name: str | None = None
     if isinstance(project, dict):
-        observed = project.get("name")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
+        observed = project.get("name")
         name = observed if isinstance(observed, str) else None
-    workspace_root = False
-    workspace: object = None
+    workspace: ConfigValue = None
     if isinstance(tool, dict):
-        uv = tool.get("uv")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
-        workspace_root = isinstance(uv, dict) and "workspace" in uv
+        uv = tool.get("uv")
         if isinstance(uv, dict):
-            workspace = _erase_parser_type(
-                uv.get("workspace")  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType] -- Parsed TOML workspace is validated by its projection.
-            )
-    return _PythonMetadata(name, workspace_root, workspace)
+            workspace = uv.get("workspace")
+    return _PythonMetadata(name, workspace)
 
 
 def _python_project(relative: str, metadata: _PythonMetadata) -> ProjectCoordinate:
@@ -1308,16 +1310,8 @@ def _python_workspace(relative: str, metadata: _PythonMetadata) -> WorkspaceEvid
         return None
     if not isinstance(workspace, dict):
         ConfigurationError.fail(f"tool.uv.workspace must be a table: {relative}")
-    members = _erase_parser_type(
-        workspace.get(  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType] -- Parsed TOML containers retain unknown element types after narrowing.
-            "members"
-        )
-    )
-    excludes = _erase_parser_type(
-        workspace.get(  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType] -- Parsed TOML containers retain unknown element types after narrowing.
-            "exclude", []
-        )
-    )
+    members = workspace.get("members")
+    excludes = workspace.get("exclude", [])
     return WorkspaceEvidence(
         ecosystem="python",
         path=relative,
@@ -1326,11 +1320,11 @@ def _python_workspace(relative: str, metadata: _PythonMetadata) -> WorkspaceEvid
     )
 
 
-def _workspace_patterns(value: object, context: str) -> tuple[str, ...]:
+def _workspace_patterns(value: ParsedValue | list[str], context: str) -> tuple[str, ...]:
     if not isinstance(value, list):
         ConfigurationError.fail(f"{context} must be an array")
     patterns: list[str] = []
-    for item in value:  # pyright: ignore[reportUnknownVariableType] -- Parsed TOML containers retain unknown element types after narrowing.
+    for item in value:
         if not isinstance(item, str) or not item:
             ConfigurationError.fail(f"{context} entries must be non-empty strings")
         if (
@@ -1344,7 +1338,3 @@ def _workspace_patterns(value: object, context: str) -> tuple[str, ...]:
             ConfigurationError.fail(f"{context} contains unsupported glob syntax")
         patterns.append(item)
     return tuple(patterns)
-
-
-def _erase_parser_type(value: object) -> object:
-    return value

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from repo_standards.core.activation_policy import ActivationPolicy
 
 from ._json import parse_json_object
+from ._toml import parse_toml_object
 from .canonical import canonical_path
 from .errors import ConfigurationError
 from .images import is_image_path
@@ -22,8 +23,10 @@ from .models import (
     CommitMessageEnforcement,
     Component,
     ComponentId,
+    DeclaredJavaScriptArtifact,
     DocumentationConfig,
     ExceptionRecord,
+    GeneratedJavaScriptArtifact,
     ImageArtifact,
     ImageArtifactKind,
     JavaScriptArtifact,
@@ -43,7 +46,10 @@ from .pull_request_body import MERGE_RISK_SECTION
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
+
+    from .outcome import ParsedValue
 
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
@@ -82,27 +88,20 @@ def _bounded_content(content: bytes, kind: str) -> bytes:
     return content
 
 
-def _mapping(value: object, context: str) -> dict[str, object]:
+def _mapping(value: ParsedValue, context: str) -> Mapping[str, ParsedValue]:
     if not isinstance(value, dict):
         ConfigurationError.fail(f"{context} must be a table/object")
-    return {
-        key: item
-        for key, item in value.items()  # pyright: ignore[reportUnknownVariableType] -- isinstance(dict) cannot type parsed TOML keys and values
-        if isinstance(key, str)
-    }
+    return value
 
 
-def _list(value: object, context: str) -> list[object]:
+def _list(value: ParsedValue, context: str) -> Sequence[ParsedValue]:
     if not isinstance(value, list):
         ConfigurationError.fail(f"{context} must be an array")
-    return [  # ruff: ignore[unnecessary-comprehension] - narrows untyped JSON/TOML arrays
-        item
-        for item in value  # pyright: ignore[reportUnknownVariableType] -- isinstance(list) cannot type parsed TOML items
-    ]
+    return value
 
 
 def _strict_keys(
-    data: dict[str, object], allowed: set[str], required: set[str], context: str
+    data: Mapping[str, ParsedValue], allowed: set[str], required: set[str], context: str
 ) -> None:
     unknown = sorted(set(data) - allowed)
     missing = sorted(required - set(data))
@@ -112,7 +111,7 @@ def _strict_keys(
         ConfigurationError.fail(f"{context} is missing fields: {', '.join(missing)}")
 
 
-def _string(data: dict[str, object], key: str, context: str) -> str:
+def _string(data: Mapping[str, ParsedValue], key: str, context: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or not value:
         ConfigurationError.fail(f"{context}.{key} must be a non-empty string")
@@ -125,7 +124,7 @@ def _identifier(value: str, context: str) -> str:
     return value
 
 
-def _integer(data: dict[str, object], key: str, context: str, *, default: int) -> int:
+def _integer(data: Mapping[str, ParsedValue], key: str, context: str, *, default: int) -> int:
     value = data.get(key, default)
     if isinstance(value, bool) or not isinstance(value, int):
         ConfigurationError.fail(f"{context}.{key} must be an integer")
@@ -160,7 +159,7 @@ def _logical_branch_ref(value: str, context: str) -> str:
     return value
 
 
-def parse_component(value: object, index: int) -> Component:
+def parse_component(value: ParsedValue, index: int) -> Component:
     context = f"components[{index}]"
     data = _mapping(value, context)
     allowed = {
@@ -192,7 +191,7 @@ def parse_component(value: object, index: int) -> Component:
     )
 
 
-def parse_exception(value: object, index: int) -> ExceptionRecord:
+def parse_exception(value: ParsedValue, index: int) -> ExceptionRecord:
     context = f"exceptions[{index}]"
     data = _mapping(value, context)
     fields = {
@@ -240,14 +239,14 @@ def parse_exception(value: object, index: int) -> ExceptionRecord:
     )
 
 
-def _string_list(value: object, context: str) -> list[str]:
+def _string_list(value: ParsedValue, context: str) -> list[str]:
     values = _list(value, context)
     if not all(isinstance(item, str) and item for item in values):
         ConfigurationError.fail(f"{context} must contain non-empty strings")
     return [item for item in values if isinstance(item, str)]
 
 
-def parse_documentation(value: object) -> DocumentationConfig:
+def parse_documentation(value: ParsedValue) -> DocumentationConfig:
     data = _mapping(value, "documentation")
     _strict_keys(
         data,
@@ -284,7 +283,7 @@ def parse_documentation(value: object) -> DocumentationConfig:
 
 
 def parse_pull_request_commit_history_transition(
-    value: object, index: int
+    value: ParsedValue, index: int
 ) -> PullRequestCommitHistoryTransition:
     context = f"pull_request.commit_history.transitions[{index}]"
     data = _mapping(value, context)
@@ -317,7 +316,7 @@ def parse_pull_request_commit_history_transition(
     )
 
 
-def parse_pull_request_commit_history(value: object) -> PullRequestCommitHistoryConfig:
+def parse_pull_request_commit_history(value: ParsedValue) -> PullRequestCommitHistoryConfig:
     context = "pull_request.commit_history"
     data = _mapping(value, context)
     fields = {"maximum_commits", "advisory_base_ref", "transitions"}
@@ -363,7 +362,7 @@ def parse_pull_request_commit_history(value: object) -> PullRequestCommitHistory
 
 
 def parse_pull_request_review_policy(
-    value: object,
+    value: ParsedValue,
     *,
     transitions: tuple[PullRequestCommitHistoryTransition, ...],
 ) -> PullRequestReviewPolicyConfig:
@@ -417,8 +416,8 @@ def parse_pull_request_review_policy(
             f"{_MAXIMUM_COUNTED_LINES}"
         )
 
-    def policy_strings(key: str, *, default: object | None = None) -> tuple[str, ...]:
-        fallback: object = [] if default is None else default
+    def policy_strings(key: str, *, default: ParsedValue | None = None) -> tuple[str, ...]:
+        fallback: ParsedValue = [] if default is None else default
         items = tuple(_string_list(data.get(key, fallback), f"{context}.{key}"))
         if len(items) > _MAXIMUM_REVIEW_POLICY_ITEMS:
             ConfigurationError.fail(
@@ -499,7 +498,7 @@ def parse_pull_request_review_policy(
 
 
 def _body_character_budget(
-    data: dict[str, object],
+    data: Mapping[str, ParsedValue],
     *,
     context: str,
     key: str = "maximum_body_characters",
@@ -522,14 +521,14 @@ def _domain_roots(paths: tuple[str, ...]) -> tuple[str, ...]:
     return roots
 
 
-def _boolean(data: dict[str, object], key: str, context: str, *, default: bool) -> bool:
+def _boolean(data: Mapping[str, ParsedValue], key: str, context: str, *, default: bool) -> bool:
     value = data.get(key, default)
     if not isinstance(value, bool):
         ConfigurationError.fail(f"{context}.{key} must be a boolean")
     return value
 
 
-def _github_logins(data: dict[str, object], key: str, *, context: str) -> tuple[str, ...]:
+def _github_logins(data: Mapping[str, ParsedValue], key: str, *, context: str) -> tuple[str, ...]:
     logins = tuple(_string_list(data.get(key, []), f"{context}.{key}"))
     if len(logins) > _MAXIMUM_REVIEW_POLICY_ITEMS:
         ConfigurationError.fail(
@@ -548,7 +547,9 @@ def _github_logins(data: dict[str, object], key: str, *, context: str) -> tuple[
     return logins
 
 
-def _github_app_logins(data: dict[str, object], key: str, *, context: str) -> tuple[str, ...]:
+def _github_app_logins(
+    data: Mapping[str, ParsedValue], key: str, *, context: str
+) -> tuple[str, ...]:
     logins = _github_logins(data, key, context=context)
     if any(
         not login.casefold().endswith(_GITHUB_APP_LOGIN_SUFFIX)
@@ -560,7 +561,7 @@ def _github_app_logins(data: dict[str, object], key: str, *, context: str) -> tu
 
 
 def _review_policy_transition_actors(
-    data: dict[str, object],
+    data: Mapping[str, ParsedValue],
     *,
     context: str,
     transition_exemptions: tuple[str, ...],
@@ -576,7 +577,7 @@ def _review_policy_transition_actors(
     return actors
 
 
-def parse_pull_request(value: object) -> PullRequestConfig:
+def parse_pull_request(value: ParsedValue) -> PullRequestConfig:
     data = _mapping(value, "pull_request")
     _strict_keys(
         data,
@@ -599,7 +600,7 @@ def parse_pull_request(value: object) -> PullRequestConfig:
     )
 
 
-def _parse_migration_exception(value: object) -> MigrationCouplingException:
+def _parse_migration_exception(value: ParsedValue) -> MigrationCouplingException:
     context = "pull_request.migration_exception"
     data = _mapping(value, context)
     fields = {"reason", "alternatives", "paths"}
@@ -614,7 +615,7 @@ def _parse_migration_exception(value: object) -> MigrationCouplingException:
     return MigrationCouplingException(reason=reason, alternatives=alternatives, paths=paths)
 
 
-def parse_commit_message(value: object) -> CommitMessageConfig:
+def parse_commit_message(value: ParsedValue) -> CommitMessageConfig:
     context = "commit_message"
     data = _mapping(value, context)
     _strict_keys(data, {"enforcement"}, set(), context)
@@ -630,9 +631,7 @@ def parse_commit_message(value: object) -> CommitMessageConfig:
 
 def parse_manifest_bytes(content: bytes) -> Manifest:
     try:
-        parsed_manifest: object = tomllib.loads(
-            _bounded_content(content, "manifest").decode("utf-8")
-        )
+        parsed_manifest = parse_toml_object(_bounded_content(content, "manifest"))
         data = _mapping(parsed_manifest, "manifest")
     except OSError, RecursionError, UnicodeError, ValueError, tomllib.TOMLDecodeError:
         ConfigurationError.fail("cannot read manifest")
@@ -685,7 +684,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
     )
 
 
-def _image_artifacts(value: object) -> tuple[ImageArtifact, ...]:
+def _image_artifacts(value: ParsedValue) -> tuple[ImageArtifact, ...]:
     data = _mapping(value, "images")
     _strict_keys(data, {"artifacts"}, set(), "images")
     records = _list(data.get("artifacts", []), "images.artifacts")
@@ -698,7 +697,7 @@ def _image_artifacts(value: object) -> tuple[ImageArtifact, ...]:
     return artifacts
 
 
-def _image_artifact(value: object, index: int) -> ImageArtifact:
+def _image_artifact(value: ParsedValue, index: int) -> ImageArtifact:
     context = f"images.artifacts[{index}]"
     data = _mapping(value, context)
     fields = {"path", "kind", "reason"}
@@ -716,7 +715,7 @@ def _image_artifact(value: object, index: int) -> ImageArtifact:
     return ImageArtifact(path=path, kind=kind, reason=reason)
 
 
-def _javascript_artifacts(value: object) -> tuple[JavaScriptArtifact, ...]:
+def _javascript_artifacts(value: ParsedValue) -> tuple[JavaScriptArtifact, ...]:
     data = _mapping(value, "javascript")
     _strict_keys(data, {"artifacts"}, set(), "javascript")
     records = _list(data.get("artifacts", []), "javascript.artifacts")
@@ -729,7 +728,7 @@ def _javascript_artifacts(value: object) -> tuple[JavaScriptArtifact, ...]:
     return artifacts
 
 
-def _javascript_artifact(value: object, index: int) -> JavaScriptArtifact:
+def _javascript_artifact(value: ParsedValue, index: int) -> JavaScriptArtifact:
     context = f"javascript.artifacts[{index}]"
     data = _mapping(value, context)
     fields = {"path", "kind", "reason", "source"}
@@ -748,14 +747,14 @@ def _javascript_artifact(value: object, index: int) -> JavaScriptArtifact:
     reason = _string(data, "reason", context)
     if not any(character.isprintable() and not character.isspace() for character in reason):
         ConfigurationError.fail(f"{context}.reason must contain text")
-    source: str | None = None
     if kind is JavaScriptArtifactKind.GENERATED:
         source = _exact_artifact_path(_string(data, "source", context), f"{context}.source")
         if source == path or is_javascript_path(source):
             ConfigurationError.fail(f"{context}.source must be a distinct non-JavaScript file")
-    elif "source" in data:
+        return GeneratedJavaScriptArtifact(path=path, reason=reason, source=source)
+    if "source" in data:
         ConfigurationError.fail(f"{context}.source is only valid for generated artifacts")
-    return JavaScriptArtifact(path=path, kind=kind, reason=reason, source=source)
+    return DeclaredJavaScriptArtifact(path=path, kind=kind, reason=reason)
 
 
 def _exact_artifact_path(raw_path: str, context: str) -> str:
@@ -766,7 +765,7 @@ def _exact_artifact_path(raw_path: str, context: str) -> str:
     return path
 
 
-def _makefile_exceptions(value: object) -> tuple[MakefileException, ...]:
+def _makefile_exceptions(value: ParsedValue) -> tuple[MakefileException, ...]:
     data = _mapping(value, "makefiles")
     _strict_keys(data, {"exceptions"}, set(), "makefiles")
     records = _list(data.get("exceptions", []), "makefiles.exceptions")
@@ -779,7 +778,7 @@ def _makefile_exceptions(value: object) -> tuple[MakefileException, ...]:
     return exceptions
 
 
-def _makefile_exception(value: object, index: int) -> MakefileException:
+def _makefile_exception(value: ParsedValue, index: int) -> MakefileException:
     context = f"makefiles.exceptions[{index}]"
     data = _mapping(value, context)
     fields = {"path", "max_lines", "owner", "reason", "issue", "created_on", "expires_on"}

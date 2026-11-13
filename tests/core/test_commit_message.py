@@ -7,10 +7,15 @@ import subprocess
 import pytest
 
 from repo_standards.core.commit_message import (
+    AppliedCommitRepair,
+    ProposedCommitRepair,
+    RejectedCommitMessage,
     analyze_commit_header,
     analyze_commit_message_bytes,
     check_commit_message_file,
     check_local_commit_message_file,
+    commit_message_findings,
+    is_commit_message_satisfied,
 )
 from repo_standards.core.errors import ConfigurationError
 
@@ -20,15 +25,17 @@ def test_non_lf_line_separators_cannot_hide_header_controls(control: bytes, tmp_
     content = b"fix: valid" + control + b"hidden\n"
     result = analyze_commit_message_bytes(content)
 
-    assert not result.satisfied
-    assert result.findings[0].code == "commit-message.control-character"
+    assert not is_commit_message_satisfied(result)
+    assert commit_message_findings(result)[0].code == "commit-message.control-character"
     path = tmp_path / "COMMIT_EDITMSG"
     path.write_bytes(b"fixup! " + content)
-    assert not check_commit_message_file(path, allow_temporary=True).satisfied
+    assert not is_commit_message_satisfied(check_commit_message_file(path, allow_temporary=True))
 
 
 def test_header_analysis_does_not_scan_body_controls() -> None:
-    assert analyze_commit_message_bytes(b"fix: valid\r\n\nBody\x0bdata").satisfied
+    assert is_commit_message_satisfied(
+        analyze_commit_message_bytes(b"fix: valid\r\n\nBody\x0bdata")
+    )
 
 
 @pytest.mark.parametrize(
@@ -43,7 +50,7 @@ def test_header_analysis_does_not_scan_body_controls() -> None:
     ],
 )
 def test_managed_conventional_headers_pass(header: str) -> None:
-    assert analyze_commit_header(header).satisfied
+    assert is_commit_message_satisfied(analyze_commit_header(header))
 
 
 @pytest.mark.parametrize(
@@ -61,8 +68,8 @@ def test_managed_conventional_headers_pass(header: str) -> None:
 )
 def test_semantic_or_unsafe_headers_fail_without_replacement(header: str) -> None:
     result = analyze_commit_header(header)
-    assert not result.satisfied
-    assert result.replacement_header is None
+    assert not is_commit_message_satisfied(result)
+    assert isinstance(result, RejectedCommitMessage)
 
 
 def test_safe_fix_only_normalizes_structure_and_type(tmp_path: Path) -> None:
@@ -72,10 +79,10 @@ def test_safe_fix_only_normalizes_structure_and_type(tmp_path: Path) -> None:
 
     result = check_commit_message_file(path, fix_safe=True)
 
-    assert result.satisfied
-    assert result.fix_applied
+    assert is_commit_message_satisfied(result)
+    assert isinstance(result, AppliedCommitRepair)
     assert path.read_text() == f"(1/2) [SARJ-1] feat(api)!: Preserve العربية  {body}"
-    assert check_commit_message_file(path, fix_safe=True).fix_applied is False
+    assert isinstance(check_commit_message_file(path, fix_safe=True), AppliedCommitRepair) is False
 
 
 def test_semantic_failure_never_mutates_file(tmp_path: Path) -> None:
@@ -85,7 +92,7 @@ def test_semantic_failure_never_mutates_file(tmp_path: Path) -> None:
 
     result = check_commit_message_file(path, fix_safe=True)
 
-    assert not result.satisfied
+    assert not is_commit_message_satisfied(result)
     assert path.read_bytes() == original
 
 
@@ -120,8 +127,8 @@ def test_local_hook_allows_temporary_autosquash_messages_but_strict_analysis_doe
     path = tmp_path / "COMMIT_EDITMSG"
     path.write_text(f"{prefix}feat: add search\n")
 
-    assert check_local_commit_message_file(path, root=tmp_path).satisfied
-    assert not check_commit_message_file(path).satisfied
+    assert is_commit_message_satisfied(check_local_commit_message_file(path, root=tmp_path))
+    assert not is_commit_message_satisfied(check_commit_message_file(path))
 
 
 @pytest.mark.parametrize("subject", ["amend!", "amend! ", "Amend! feat: add search"])
@@ -132,7 +139,7 @@ def test_local_hook_rejects_noncanonical_or_empty_amend_subjects(
     path = tmp_path / "COMMIT_EDITMSG"
     path.write_text(subject + "\n")
 
-    assert not check_local_commit_message_file(path, root=tmp_path).satisfied
+    assert not is_commit_message_satisfied(check_local_commit_message_file(path, root=tmp_path))
 
 
 def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> None:
@@ -164,9 +171,9 @@ def test_local_hook_allows_a_structurally_proven_merge_only(tmp_path: Path) -> N
         marker = tmp_path / marker
     marker.write_text("0" * 40 + "\n")
 
-    assert check_local_commit_message_file(message, root=tmp_path).satisfied
+    assert is_commit_message_satisfied(check_local_commit_message_file(message, root=tmp_path))
     marker.unlink()
-    assert not check_local_commit_message_file(message, root=tmp_path).satisfied
+    assert not is_commit_message_satisfied(check_local_commit_message_file(message, root=tmp_path))
 
 
 def test_merge_state_does_not_bypass_message_file_safety(tmp_path: Path) -> None:
@@ -178,7 +185,7 @@ def test_merge_state_does_not_bypass_message_file_safety(tmp_path: Path) -> None
     message = git_dir / "COMMIT_EDITMSG"
     message.write_bytes(b"Merge branch 'feature'\x00\n")
 
-    assert not check_local_commit_message_file(message, root=tmp_path).satisfied
+    assert not is_commit_message_satisfied(check_local_commit_message_file(message, root=tmp_path))
     message.unlink()
     with pytest.raises(ConfigurationError, match="cannot read commit message"):
         check_local_commit_message_file(message, root=tmp_path)
@@ -197,4 +204,19 @@ def test_merge_state_cannot_exempt_another_repository_message(tmp_path: Path) ->
     message = second / ".git" / "COMMIT_EDITMSG"
     message.write_text("Merge branch 'feature'\n")
 
-    assert not check_local_commit_message_file(message, root=first).satisfied
+    assert not is_commit_message_satisfied(check_local_commit_message_file(message, root=first))
+
+
+def test_safe_repair_proposal_requires_explicit_application(tmp_path: Path) -> None:
+    path = tmp_path / "COMMIT_EDITMSG"
+    original = b"FIX : preserve intent\n\nBody\n"
+    path.write_bytes(original)
+    proposed = check_commit_message_file(path, fix_safe=False)
+    assert isinstance(proposed, ProposedCommitRepair)
+    assert proposed.replacement_header == "fix: preserve intent"
+    assert proposed.finding.code == "commit-message.type-case"
+    assert path.read_bytes() == original
+    applied = check_commit_message_file(path, fix_safe=True)
+    assert isinstance(applied, AppliedCommitRepair)
+    assert applied.header == "fix: preserve intent"
+    assert path.read_bytes() == b"fix: preserve intent\n\nBody\n"

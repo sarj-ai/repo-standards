@@ -27,6 +27,9 @@ from repo_standards.core.parser import (
     parse_manifest_bytes as parse_manifest_bytes,
 )
 from repo_standards.repository.analysis import (
+    RatchetAnalysis as RatchetAnalysis,
     RepositoryAnalysisRequest as RepositoryAnalysisRequest,
+    UnratchetedAnalysis as UnratchetedAnalysis,
     analyze_repository as analyze_repository,
+    select_analysis as select_analysis,
 )

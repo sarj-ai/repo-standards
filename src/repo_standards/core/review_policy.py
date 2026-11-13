@@ -102,6 +102,20 @@ class ReviewPolicyReason(StrEnum):
     MIGRATION_EXCEPTION_ACCEPTED = "migration_exception_accepted"
 
 
+_BLOCKING_REASONS = frozenset(ReviewPolicyReason) - {
+    ReviewPolicyReason.ZERO_REVIEW_THRESHOLD,
+    ReviewPolicyReason.ONE_REVIEW_THRESHOLD,
+    ReviewPolicyReason.TWO_REVIEW_THRESHOLD,
+    ReviewPolicyReason.MIGRATION_REVIEW_FLOOR,
+    ReviewPolicyReason.AUTHOR_REVIEW_FLOOR,
+    ReviewPolicyReason.STALE_APPROVAL,
+    ReviewPolicyReason.APPROVAL_CARRIED_FORWARD,
+    ReviewPolicyReason.ALLOWLISTED_BOT_APPROVAL_NOT_COUNTED,
+    ReviewPolicyReason.DOMAIN_REVIEW_FLOOR,
+    ReviewPolicyReason.MIGRATION_EXCEPTION_ACCEPTED,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class ReviewPolicyConfig:
     zero_review_below_lines: int = ZERO_REVIEW_BELOW_LINES
@@ -243,14 +257,20 @@ class ReviewPolicyResult:
     required_human_reviews: RequiredReviewCount
     current_human_approvals: int
     touches_migration: bool
-    merge_ready: bool
     reasons: tuple[ReviewPolicyReason, ...]
     carried_forward_reviewers: tuple[str, ...] = ()
     allowlisted_bot_approvers: tuple[str, ...] = ()
     touches_domain: bool = False
     migration_coupled_paths: tuple[str, ...] = ()
-    migration_exception_accepted: bool = False
     description: DescriptionMetrics | None = None
+
+    @property
+    def merge_ready(self) -> bool:
+        return not any(reason in _BLOCKING_REASONS for reason in self.reasons)
+
+    @property
+    def migration_exception_accepted(self) -> bool:
+        return ReviewPolicyReason.MIGRATION_EXCEPTION_ACCEPTED in self.reasons
 
 
 def evaluate_review_policy(
@@ -319,29 +339,15 @@ def evaluate_review_policy(
         elif not evidence.threads_resolved:
             reasons.append(ReviewPolicyReason.THREADS_UNRESOLVED)
 
-    blocking = frozenset(ReviewPolicyReason) - {
-        ReviewPolicyReason.ZERO_REVIEW_THRESHOLD,
-        ReviewPolicyReason.ONE_REVIEW_THRESHOLD,
-        ReviewPolicyReason.TWO_REVIEW_THRESHOLD,
-        ReviewPolicyReason.MIGRATION_REVIEW_FLOOR,
-        ReviewPolicyReason.AUTHOR_REVIEW_FLOOR,
-        ReviewPolicyReason.STALE_APPROVAL,
-        ReviewPolicyReason.APPROVAL_CARRIED_FORWARD,
-        ReviewPolicyReason.ALLOWLISTED_BOT_APPROVAL_NOT_COUNTED,
-        ReviewPolicyReason.DOMAIN_REVIEW_FLOOR,
-        ReviewPolicyReason.MIGRATION_EXCEPTION_ACCEPTED,
-    }
     return ReviewPolicyResult(
         required_human_reviews=required_reviews,
         current_human_approvals=review_assessment.human_approvals,
         touches_migration=touches_migration,
-        merge_ready=not any(reason in blocking for reason in reasons),
         reasons=tuple(reasons),
         carried_forward_reviewers=review_assessment.carried_forward_reviewers,
         allowlisted_bot_approvers=review_assessment.allowlisted_bot_approvers,
         touches_domain=touches_domain,
         migration_coupled_paths=coupled_paths,
-        migration_exception_accepted=ReviewPolicyReason.MIGRATION_EXCEPTION_ACCEPTED in reasons,
         description=description,
     )
 

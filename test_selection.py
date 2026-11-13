@@ -13,6 +13,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import] -- fixed Git and
 import sys
 import time
 import tomllib
+from typing import ClassVar, Literal
 
 
 type _TomlValue = (
@@ -212,16 +213,41 @@ def _git(root: Path, *arguments: str) -> str:
     ).stdout
 
 
+@dataclass(frozen=True)
+class PreviewTests:
+    kind: ClassVar[Literal["preview"]] = "preview"
+    base: str
+    report: Path | None
+
+
+@dataclass(frozen=True)
+class ExecuteTests:
+    kind: ClassVar[Literal["execute"]] = "execute"
+    base: str
+    report: Path | None
+    jobs: Literal[1, 2, 4]
+    summary: Path | None
+
+
+type TestCommand = PreviewTests | ExecuteTests
+
+
 class _Arguments(argparse.Namespace):
     base: str = ""
     run: bool = False
-    jobs: int = 2
+    jobs: Literal[1, 2, 4] = 2
     report: Path | None = None
     summary: Path | None = None
 
 
+def selection_command(args: _Arguments) -> TestCommand:
+    if args.run:
+        return ExecuteTests(args.base, args.report, args.jobs, args.summary)
+    return PreviewTests(args.base, args.report)
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(  # sarj-noqa: SARJ533 -- pre-install test selector.
         description=__doc__,
         epilog="Reviewed docs, delivery-tool and test-only changes use explicit cohorts. "
         "Shared source/config, deletions, renames and unavailable Git evidence run every test. "
@@ -235,8 +261,7 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, choices=(1, 2, 4), default=2)
     parser.add_argument("--report", type=Path, help="save the selected-test plan as JSON")
     parser.add_argument("--summary", type=Path, help="append coverage, timing and exit status")
-    args = _Arguments()
-    parser.parse_args(namespace=args)
+    args = selection_command(parser.parse_args(namespace=_Arguments()))
     root = Path(__file__).resolve().parent
     started = time.monotonic()
     plan = select_tests(root, base=args.base)
@@ -245,7 +270,7 @@ def main() -> int:
         args.report.write_text(rendered)
     sys.stdout.write(rendered)
     sys.stdout.flush()
-    if not args.run:
+    if isinstance(args, PreviewTests):
         return 0
     parallel = (
         ("-n", str(args.jobs), "--dist", "worksteal")

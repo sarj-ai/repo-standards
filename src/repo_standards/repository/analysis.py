@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
+from typing import ClassVar, Literal, assert_never
 
 from repo_standards.core.engine import analyze, check_baseline_comparison, classify_baseline
 from repo_standards.core.errors import BaselineError, ConfigurationError, ManifestAbsentError
@@ -11,29 +12,82 @@ from repo_standards.core.models import (
     AnalysisReport,
     Baseline,
     Diagnostic,
-    ExecutionIssue,
     IncompleteReport,
     Mode,
     PolicyId,
     RepositoryId,
 )
+from repo_standards.core.outcome import ExecutionIssue
 from repo_standards.core.rule_reviews import RuleVersion, activated_rule_ids
 from repo_standards.policy_sarj import SarjPolicy
 
 from .comparison import with_makefile_comparison, with_migration_comparison
 
 
+@dataclass(frozen=True, slots=True)
+class UnratchetedAnalysis:
+    kind: ClassVar[Literal["unratcheted"]] = "unratcheted"
+    mode: Literal[Mode.REPORT, Mode.STRICT] = Mode.STRICT
+    baseline_path: ClassVar[None] = None
+    include_warnings: ClassVar[Literal[False]] = False
+
+    def __post_init__(self) -> None:
+        if self.mode not in {Mode.REPORT, Mode.STRICT}:
+            ConfigurationError.fail("unratcheted analysis requires report or strict mode")
+
+
+@dataclass(frozen=True, slots=True)
+class RatchetAnalysis:
+    kind: ClassVar[Literal["ratchet"]] = "ratchet"
+    baseline_path: str
+    include_warnings: bool = False
+    mode: ClassVar[Literal[Mode.RATCHET]] = Mode.RATCHET
+
+    def __post_init__(self) -> None:
+        if not self.baseline_path.strip():
+            BaselineError.fail("ratchet analysis requires a baseline_path")
+
+
+type AnalysisSelection = UnratchetedAnalysis | RatchetAnalysis
+
+
+def select_analysis(
+    mode: Mode, baseline_path: str | None, *, include_warnings: bool = False
+) -> AnalysisSelection:
+    match mode:
+        case Mode.RATCHET:
+            if baseline_path is None:
+                BaselineError.fail("ratchet analysis requires a baseline_path")
+            return RatchetAnalysis(baseline_path, include_warnings)
+        case Mode.REPORT | Mode.STRICT:
+            if include_warnings:
+                ConfigurationError.fail("include_warnings requires ratchet analysis mode")
+            return UnratchetedAnalysis(mode)
+        case _:
+            assert_never(mode)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RepositoryAnalysisRequest:
     root: Path
+    selection: AnalysisSelection = UnratchetedAnalysis()
     manifest_path: str = ".repo-standards/repository.toml"
-    baseline_path: str | None = None
-    mode: Mode = Mode.STRICT
     as_of: date | None = None
     staged: bool = False
     enabled_rule_ids: tuple[str, ...] = ()
     base_revision: str | None = None
-    include_warnings: bool = False
+
+    @property
+    def mode(self) -> Mode:
+        return self.selection.mode
+
+    @property
+    def baseline_path(self) -> str | None:
+        return self.selection.baseline_path
+
+    @property
+    def include_warnings(self) -> bool:
+        return self.selection.include_warnings
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,14 +115,10 @@ def analyze_repository(request: RepositoryAnalysisRequest) -> AnalysisReport:
 def complete_repository_analysis(
     request: RepositoryAnalysisRequest, *, policy: SarjPolicy
 ) -> RepositoryAnalysis:
-    if request.include_warnings and request.mode is not Mode.RATCHET:
-        ConfigurationError.fail("include_warnings requires ratchet analysis mode")
     try:
         root = request.root.resolve(strict=True)
     except OSError:
         ConfigurationError.fail(f"repository root is unavailable: {request.root}")
-    if request.mode is Mode.RATCHET and request.baseline_path is None:
-        BaselineError.fail("ratchet analysis requires a baseline_path")
     snapshot = load_repository_snapshot(
         root,
         manifest_path=request.manifest_path,

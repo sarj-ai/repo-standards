@@ -19,12 +19,8 @@ def test_canonical_rule_examples_execute(case: RuleExampleCase) -> None:
     flagged = run_rule_example(case.fixture_id, case.flagged)
     passes = run_rule_example(case.fixture_id, case.passes)
 
-    assert flagged.complete
-    assert flagged.execution_issue_codes == ()
-    assert flagged.rule_ids == (case.rule_id,)
-    assert passes.complete
-    assert passes.execution_issue_codes == ()
-    assert passes.rule_ids == ()
+    assert flagged == (case.rule_id,)
+    assert passes == ()
 
 
 def test_every_sarj_rule_has_unique_executable_issue_examples() -> None:

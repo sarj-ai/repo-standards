@@ -13,7 +13,17 @@ import sys
 import tempfile
 import time
 import tomllib
-from typing import BinaryIO, Final, NamedTuple, NewType, Protocol, TypeGuard, final
+from typing import (
+    BinaryIO,
+    ClassVar,
+    Final,
+    Literal,
+    NamedTuple,
+    NewType,
+    Protocol,
+    TypeGuard,
+    final,
+)
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
@@ -24,6 +34,8 @@ from repo_standards.activation_verification import (
     authenticate_activation,
     policy_at_base,
 )
+from repo_standards.core._json import parse_json_value
+from repo_standards.core.outcome import JSONValue
 
 
 _COMMENT_MARKER: Final = "<!-- repo-standards-review-policy -->"
@@ -47,6 +59,8 @@ _MERGE_GROUP_REF = re.compile(
 )
 GitHubUserId = NewType("GitHubUserId", int)
 GitHubRepositoryId = NewType("GitHubRepositoryId", int)
+PullRequestNumber = NewType("PullRequestNumber", int)
+GitHubAppId = NewType("GitHubAppId", int)
 type ReviewEvidence = dict[str, str | bool | None]
 
 
@@ -57,9 +71,58 @@ class MergeGroupPullRequest(NamedTuple):
 
 
 @dataclass(frozen=True, slots=True)
-class FinalPolicyDecision:
-    passed: bool
-    reason: str | None
+class PolicyAccepted:
+    kind: ClassVar[Literal["accepted"]] = "accepted"
+    passed: ClassVar[Literal[True]] = True
+    reason: ClassVar[None] = None
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyRejected:
+    # The policy receipt already contains the substantive refusal evidence.
+    kind: ClassVar[Literal["policy-rejected"]] = "policy-rejected"
+    passed: ClassVar[Literal[False]] = False
+    reason: ClassVar[None] = None
+
+
+type OperationalPolicyReason = Literal[
+    "review_optional_lane_disabled",
+    "review_optional_fork_blocked",
+    "review_optional_bot_author_blocked",
+    "review_optional_draft_blocked",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalPolicyRejected:
+    kind: ClassVar[Literal["operational-rejected"]] = "operational-rejected"
+    passed: ClassVar[Literal[False]] = False
+    reason: OperationalPolicyReason
+
+
+type FinalPolicyDecision = PolicyAccepted | PolicyRejected | OperationalPolicyRejected
+
+
+@dataclass(frozen=True, slots=True)
+class PullRequestCommand:
+    kind: ClassVar[Literal["pull-request"]] = "pull-request"
+    root: str
+    manifest_path: str
+    pr_number: PullRequestNumber
+    required_check_app_id: GitHubAppId
+    review_optional_enabled: bool
+
+
+@dataclass(frozen=True, slots=True)
+class MergeGroupCommand:
+    kind: ClassVar[Literal["merge-group"]] = "merge-group"
+    root: str
+    head_sha: str
+    head_ref: str
+    policy_workflow_path: str
+
+
+type ReconciliationCommand = PullRequestCommand | MergeGroupCommand
 
 
 @final
@@ -76,13 +139,45 @@ class Arguments(argparse.Namespace):
         self.review_optional_enabled = False
 
 
+def reconciliation_command(args: Arguments) -> ReconciliationCommand:
+    if args.merge_group_head_sha:
+        if args.pr_number is not None:
+            raise ReconciliationError("pr-number and merge-group-head-sha are mutually exclusive")
+        if args.merge_group_head_ref is None:
+            raise ReconciliationError("merge-group-head-ref is required in merge-group mode")
+        return MergeGroupCommand(
+            args.root,
+            args.merge_group_head_sha,
+            args.merge_group_head_ref,
+            args.policy_workflow_path,
+        )
+    if args.merge_group_head_ref is not None:
+        raise ReconciliationError("merge-group-head-ref requires merge-group-head-sha")
+    if args.pr_number is None:
+        raise ReconciliationError("pr-number is required outside merge-group mode")
+    if (
+        type(args.pr_number) is not int
+        or type(args.required_check_app_id) is not int
+        or args.pr_number <= 0
+        or args.required_check_app_id <= 0
+    ):
+        raise ReconciliationError("pull request number and required check app must be positive")
+    return PullRequestCommand(
+        args.root,
+        args.manifest_path,
+        PullRequestNumber(args.pr_number),
+        GitHubAppId(args.required_check_app_id),
+        args.review_optional_enabled,
+    )
+
+
 class ReconciliationError(RuntimeError):
-    """Provider evidence could not be collected or reconciled completely."""
+    pass
 
 
 @dataclass(frozen=True, slots=True)
 class PullRequestSnapshot:
-    number: int
+    number: PullRequestNumber
     base_sha: str
     head_sha: str
     base_ref: str
@@ -101,7 +196,7 @@ class PullRequestSnapshot:
 @dataclass(frozen=True, slots=True)
 class CommandResult:
     returncode: int
-    receipt: Mapping[str, object]
+    receipt: Mapping[str, JSONValue]
     stdout: str
 
 
@@ -109,7 +204,7 @@ class CommandResult:
 class CollectedEvidence:
     snapshot: PullRequestSnapshot
     checks: tuple[dict[str, str], ...]
-    raw_reviews: tuple[object, ...]
+    raw_reviews: tuple[JSONValue, ...]
     reviews: tuple[ReviewEvidence, ...]
     threads_resolved: bool
 
@@ -143,10 +238,10 @@ class _NoArtifactRedirect(HTTPRedirectHandler):
     def redirect_request(  # ruff: ignore[no-self-use,too-many-positional-arguments] -- urllib override signature
         self,
         req: Request,
-        fp: object,
+        fp: object,  # sarj-noqa: SARJ528 -- unused urllib callback argument.
         code: int,
         msg: str,
-        headers: object,
+        headers: object,  # sarj-noqa: SARJ528 -- unused urllib callback argument.
         newurl: str,
     ) -> None:
         _rejected_redirect = req, fp, code, msg, headers, newurl
@@ -171,8 +266,8 @@ class GitHubClient:
         method: str,
         path: str,
         *,
-        payload: Mapping[str, object] | None = None,
-    ) -> object:
+        payload: Mapping[str, JSONValue] | None = None,
+    ) -> JSONValue:
         url = path if path.startswith("https://") else f"{self.api_url}{path}"
         data = None if payload is None else json.dumps(payload).encode()
         request = Request(
@@ -211,8 +306,8 @@ class GitHubClient:
         if not raw:
             return None
         try:
-            parsed: object = json.loads(raw)  # pyright: ignore[reportAny] -- JSON parser boundary; callers narrow every field
-        except json.JSONDecodeError as error:
+            parsed = parse_json_value(raw)
+        except ValueError as error:
             raise ReconciliationError(
                 f"GitHub API {method} {path} returned invalid JSON"
             ) from error
@@ -262,8 +357,8 @@ class GitHubClient:
     def _artifact_opener() -> ArtifactOpener:
         return build_opener(_NoArtifactRedirect())
 
-    def rest_pages(self, path: str, *, collection_key: str | None = None) -> list[object]:
-        items: list[object] = []
+    def rest_pages(self, path: str, *, collection_key: str | None = None) -> list[JSONValue]:
+        items: list[JSONValue] = []
         separator = "&" if "?" in path else "?"
         for page in range(1, _MAX_PAGES + 1):
             payload = self.request("GET", f"{path}{separator}per_page=100&page={page}")
@@ -281,9 +376,11 @@ class GitHubClient:
                 return items
         raise ReconciliationError("GitHub API pagination exceeded 100 pages")
 
-    def graphql(self, query: str, variables: Mapping[str, object]) -> Mapping[str, object]:
+    def graphql(self, query: str, variables: Mapping[str, JSONValue]) -> Mapping[str, JSONValue]:
         payload = _mapping(
-            self.request("POST", "/graphql", payload={"query": query, "variables": variables}),
+            self.request(
+                "POST", "/graphql", payload={"query": query, "variables": dict(variables)}
+            ),
             "GitHub GraphQL response",
         )
         errors = payload.get("errors")
@@ -292,31 +389,31 @@ class GitHubClient:
         return _mapping(payload.get("data"), "GitHub GraphQL response data")
 
 
-def _is_json_object(value: object) -> TypeGuard[Mapping[str, object]]:
+def _is_json_object(value: JSONValue) -> TypeGuard[Mapping[str, JSONValue]]:
     return isinstance(value, dict)
 
 
-def _is_json_array(value: object) -> TypeGuard[Sequence[object]]:
+def _is_json_array(value: JSONValue) -> TypeGuard[Sequence[JSONValue]]:
     return isinstance(value, list)
 
 
-def _mapping(value: object, context: str) -> Mapping[str, object]:
+def _mapping(value: JSONValue, context: str) -> Mapping[str, JSONValue]:
     if not _is_json_object(value):
         raise ReconciliationError(f"{context} must be an object")
     return value
 
 
-def _array(value: object, context: str) -> Sequence[object]:
+def _array(value: JSONValue, context: str) -> Sequence[JSONValue]:
     if not _is_json_array(value):
         raise ReconciliationError(f"{context} must be an array")
     return value
 
 
-def _optional_mapping(value: object) -> Mapping[str, object] | None:
+def _optional_mapping(value: JSONValue) -> Mapping[str, JSONValue] | None:
     return value if _is_json_object(value) else None
 
 
-def _optional_array(value: object) -> Sequence[object] | None:
+def _optional_array(value: JSONValue) -> Sequence[JSONValue] | None:
     return value if _is_json_array(value) else None
 
 
@@ -333,8 +430,9 @@ def _integer(value: object, context: str) -> int:
 
 
 def pull_request_snapshot(client: GitHubClient, number: int) -> PullRequestSnapshot:
+    checked_number = PullRequestNumber(_integer(number, "pull request number"))
     value = _mapping(
-        client.request("GET", f"/repos/{client.repository}/pulls/{number}"),
+        client.request("GET", f"/repos/{client.repository}/pulls/{checked_number}"),
         "pull request",
     )
     base = _mapping(value.get("base"), "pull request base")
@@ -347,7 +445,7 @@ def pull_request_snapshot(client: GitHubClient, number: int) -> PullRequestSnaps
     if _OBJECT_ID.fullmatch(base_sha) is None or _OBJECT_ID.fullmatch(head_sha) is None:
         raise ReconciliationError("pull request revisions must be lowercase 40-character SHAs")
     return PullRequestSnapshot(
-        number=number,
+        number=checked_number,
         base_sha=base_sha,
         head_sha=head_sha,
         base_ref=_string(base.get("ref"), "base ref"),
@@ -520,7 +618,7 @@ def trusted_manifest(
     destination: Path,
     *,
     manifest_path: str = ".repo-standards/repository.toml",
-) -> Mapping[str, object]:
+) -> Mapping[str, JSONValue]:
     pure_path = PurePosixPath(manifest_path)
     if (
         not manifest_path
@@ -538,7 +636,7 @@ def trusted_manifest(
     return parsed
 
 
-def allowlisted_bot_reviewer_logins(manifest: Mapping[str, object]) -> frozenset[str]:
+def allowlisted_bot_reviewer_logins(manifest: Mapping[str, JSONValue]) -> frozenset[str]:
     pull_request = _mapping(manifest.get("pull_request"), "manifest pull_request")
     policy = _mapping(pull_request.get("review_policy"), "manifest pull_request.review_policy")
     raw = _optional_array(policy.get("allowlisted_bot_reviewers", []))
@@ -562,7 +660,7 @@ def _is_allowlisted_bot_reviewer(user_type: str, login: str, trusted: frozenset[
     return user_type == "Bot" and login.casefold() in trusted
 
 
-def required_check_names(manifest: Mapping[str, object]) -> tuple[str, ...]:
+def required_check_names(manifest: Mapping[str, JSONValue]) -> tuple[str, ...]:
     pull_request = _mapping(manifest.get("pull_request"), "manifest pull_request")
     policy = _mapping(pull_request.get("review_policy"), "manifest pull_request.review_policy")
     raw = _optional_array(policy.get("required_checks")) or ()
@@ -574,7 +672,7 @@ def required_check_names(manifest: Mapping[str, object]) -> tuple[str, ...]:
     return names
 
 
-def check_conclusion(check: Mapping[str, object]) -> str:
+def check_conclusion(check: Mapping[str, JSONValue]) -> str:
     if check.get("status") != "completed":
         return "pending"
     conclusion = check.get("conclusion")
@@ -607,7 +705,7 @@ def collect_required_checks(
     )
     result: list[dict[str, str]] = []
     for name in names:
-        candidates: list[Mapping[str, object]] = []
+        candidates: list[Mapping[str, JSONValue]] = []
         for raw in runs:
             check = _mapping(raw, "check run")
             if check.get("name") != name:
@@ -657,7 +755,7 @@ def _actions_run_id(target_url: str, *, repository: str) -> int:
 
 def eligible_reviewer_ids(
     client: GitHubClient,
-    reviews: Sequence[object],
+    reviews: Sequence[JSONValue],
     *,
     author_id: int,
     allowlisted_bot_reviewers: frozenset[str] = frozenset(),
@@ -712,7 +810,7 @@ def _can_write(client: GitHubClient, *, user_id: int, login: str) -> bool:
 
 
 def latest_human_reviews(
-    reviews: Sequence[object],
+    reviews: Sequence[JSONValue],
     *,
     author_id: int,
     eligible_ids: frozenset[int],
@@ -760,7 +858,7 @@ def latest_human_reviews(
     return tuple(latest[key][1] for key in sorted(latest))
 
 
-def _review_commit_sha(value: object) -> str | None:
+def _review_commit_sha(value: JSONValue) -> str | None:
     if value is not None and (not isinstance(value, str) or _OBJECT_ID.fullmatch(value) is None):
         raise ReconciliationError("review commit_id must be an exact SHA or null")
     return value
@@ -893,8 +991,8 @@ def run_policy_cli(
         timeout=_COMMAND_TIMEOUT_SECONDS,
     )
     try:
-        receipt: object = json.loads(process.stdout)  # pyright: ignore[reportAny] -- JSON parser boundary; the receipt is narrowed below
-    except json.JSONDecodeError as error:
+        receipt = parse_json_value(process.stdout.encode())
+    except ValueError as error:
         raise ReconciliationError(
             f"review policy CLI returned invalid JSON (exit {process.returncode}): "
             f"{process.stderr[:1000]}"
@@ -907,12 +1005,12 @@ def run_policy_cli(
     return CommandResult(process.returncode, receipt, process.stdout)
 
 
-def _summary(receipt: Mapping[str, object]) -> Mapping[str, object]:
+def _summary(receipt: Mapping[str, JSONValue]) -> Mapping[str, JSONValue]:
     return _mapping(receipt.get("summary"), "review policy receipt summary")
 
 
 def render_comment(
-    receipt: Mapping[str, object],
+    receipt: Mapping[str, JSONValue],
     *,
     final_passed: bool,
     lane_enabled: bool,
@@ -951,7 +1049,7 @@ def render_comment(
     )
 
 
-def _description_line(summary: Mapping[str, object], receipt: Mapping[str, object]) -> str:
+def _description_line(summary: Mapping[str, JSONValue], receipt: Mapping[str, JSONValue]) -> str:
     description = _optional_mapping(summary.get("description"))
     policy = _optional_mapping(receipt.get("policy")) or {}
     if description is None:
@@ -973,7 +1071,7 @@ def _description_line(summary: Mapping[str, object], receipt: Mapping[str, objec
     return line
 
 
-def _approvals_line(summary: Mapping[str, object]) -> str:
+def _approvals_line(summary: Mapping[str, JSONValue]) -> str:
     human_approvals = summary.get("current_human_approvals", "?")
     line = f"- Approvals: **{human_approvals}** current human approval(s)"
     bots = _optional_array(summary.get("allowlisted_bot_approvers"))
@@ -983,7 +1081,9 @@ def _approvals_line(summary: Mapping[str, object]) -> str:
     return f"{line}\n"
 
 
-def _earlier_approval_line(approval: Mapping[str, object], unavailable: Mapping[str, str]) -> str:
+def _earlier_approval_line(
+    approval: Mapping[str, JSONValue], unavailable: Mapping[str, str]
+) -> str:
     reviewer = str(approval.get("reviewer", "unknown")).rpartition(":")[2]
     commit_sha = str(approval.get("commit_sha", ""))
     commit = commit_sha[:12]
@@ -1000,12 +1100,12 @@ def _earlier_approval_line(approval: Mapping[str, object], unavailable: Mapping[
     return f"- Earlier {kind} by @{reviewer} on `{commit}`: {measured}, **{outcome}**\n"
 
 
-def _evaluated_head(receipt: Mapping[str, object]) -> object:
+def _evaluated_head(receipt: Mapping[str, JSONValue]) -> JSONValue:
     provenance = _optional_mapping(receipt.get("provenance"))
     return "unknown" if provenance is None else provenance.get("evaluated_head", "unknown")
 
 
-def render_incomplete_comment(receipt: Mapping[str, object]) -> str:
+def render_incomplete_comment(receipt: Mapping[str, JSONValue]) -> str:
     issue_count = len(_optional_array(receipt.get("issues")) or ())
     return (
         f"{_COMMENT_MARKER}\n"
@@ -1046,11 +1146,13 @@ def post_status(
     client: GitHubClient,
     *,
     head_sha: str,
-    state: str,
+    state: Literal["pending", "success", "failure", "error"],
     description: str,
     target_url: str | None,
 ) -> None:
-    payload: dict[str, object] = {
+    if state not in {"pending", "success", "failure", "error"}:
+        raise ReconciliationError("invalid commit status request")
+    payload: dict[str, JSONValue] = {
         "state": state,
         "context": _STATUS_CONTEXT,
         "description": description[:140],
@@ -1066,7 +1168,7 @@ def post_status(
 
 def review_policy_status_passed(
     client: GitHubClient,
-    statuses: Sequence[object],
+    statuses: Sequence[JSONValue],
     *,
     head_sha: str,
     workflow_path: str,
@@ -1104,8 +1206,8 @@ def review_policy_status_passed(
     return refreshed is not None and refreshed.get("id") == latest.get("id")
 
 
-def _latest_review_policy_status(statuses: Sequence[object]) -> Mapping[str, object] | None:
-    matching: list[Mapping[str, object]] = []
+def _latest_review_policy_status(statuses: Sequence[JSONValue]) -> Mapping[str, JSONValue] | None:
+    matching: list[Mapping[str, JSONValue]] = []
     for raw in statuses:
         status = _mapping(raw, "commit status")
         # The statuses endpoint is scoped to the exact commit; its items omit "sha".
@@ -1122,7 +1224,7 @@ def _completed_run(
     *,
     clock: Callable[[], float],
     sleep: Callable[[float], None],
-) -> Mapping[str, object]:
+) -> Mapping[str, JSONValue]:
     deadline = clock() + _RUN_COMPLETION_TIMEOUT_SECONDS
     while True:
         run = _mapping(
@@ -1364,7 +1466,7 @@ def _workflow_url() -> str | None:
 def final_policy_decision(  # ruff: ignore[too-many-return-statements] -- explicit fail-closed decisions
     *,
     policy_passed: bool,
-    tier: object,
+    tier: JSONValue,
     lane_enabled: bool,
     same_repository: bool,
     author_is_bot: bool,
@@ -1372,33 +1474,36 @@ def final_policy_decision(  # ruff: ignore[too-many-return-statements] -- explic
     transition_exempt: bool = False,
     verified_activation: VerifiedActivation | None = None,
 ) -> FinalPolicyDecision:
+    if policy_passed and (type(tier) is not int or tier not in {0, 1, 2}):
+        raise ReconciliationError("accepted policy requires valid tier evidence")
     if verified_activation is not None and same_repository and not draft:
-        return FinalPolicyDecision(passed=policy_passed, reason=None)
+        return PolicyAccepted() if policy_passed else PolicyRejected()
     if not policy_passed or tier != 0 or (transition_exempt and same_repository and not draft):
-        return FinalPolicyDecision(passed=policy_passed, reason=None)
+        return PolicyAccepted() if policy_passed else PolicyRejected()
     if not lane_enabled:
-        return FinalPolicyDecision(passed=False, reason="review_optional_lane_disabled")
+        return OperationalPolicyRejected("review_optional_lane_disabled")
     if not same_repository:
-        return FinalPolicyDecision(passed=False, reason="review_optional_fork_blocked")
+        return OperationalPolicyRejected("review_optional_fork_blocked")
     if author_is_bot:
-        return FinalPolicyDecision(passed=False, reason="review_optional_bot_author_blocked")
+        return OperationalPolicyRejected("review_optional_bot_author_blocked")
     if draft:
-        return FinalPolicyDecision(passed=False, reason="review_optional_draft_blocked")
-    return FinalPolicyDecision(passed=True, reason=None)
+        return OperationalPolicyRejected("review_optional_draft_blocked")
+    return PolicyAccepted()
 
 
-def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - orchestration stays linear and auditable
+def reconcile(args: ReconciliationCommand) -> int:  # ruff: ignore[too-many-statements] - orchestration stays linear and auditable
     root = Path(args.root).resolve(strict=True)
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
     github_token = os.environ.get("GITHUB_TOKEN", "")
     client = GitHubClient(token=github_token, repository=repository, api_url=api_url)
-    if args.merge_group_head_sha:
-        return _reconcile_merge_group_args(args, client, head_sha=args.merge_group_head_sha)
-    if args.merge_group_head_ref is not None:
-        raise ReconciliationError("merge-group-head-ref requires merge-group-head-sha")
-    if args.pr_number is None:
-        raise ReconciliationError("pr-number is required outside merge-group mode")
+    if isinstance(args, MergeGroupCommand):
+        return reconcile_merge_group(
+            client=client,
+            head_sha=args.head_sha,
+            head_ref=args.head_ref,
+            workflow_path=args.policy_workflow_path,
+        )
     snapshot = pull_request_snapshot(client, args.pr_number)
     if snapshot.state != "open":
         raise ReconciliationError("review policy only evaluates open pull requests")
@@ -1515,8 +1620,7 @@ def reconcile(args: Arguments) -> int:  # ruff: ignore[too-many-statements] - or
         transition_exempt=summary.get("transition_exemption") is not None,
         verified_activation=activation,
     )
-    final_passed = decision.passed
-    operational_reason = decision.reason
+    final_passed, operational_reason = decision.passed, decision.reason
     comment = render_comment(
         receipt,
         final_passed=final_passed,
@@ -1590,7 +1694,7 @@ def _require_final_activation(
 
 
 def _activation_from_receipt(
-    client: GitHubClient, snapshot: PullRequestSnapshot, receipt: Mapping[str, object]
+    client: GitHubClient, snapshot: PullRequestSnapshot, receipt: Mapping[str, JSONValue]
 ) -> VerifiedActivation | None:
     activation = None
     if receipt.get("nonproduction_activation") is not None:
@@ -1609,19 +1713,6 @@ def _activation_from_receipt(
     return activation
 
 
-def _reconcile_merge_group_args(args: Arguments, client: GitHubClient, *, head_sha: str) -> int:
-    if args.pr_number is not None:
-        raise ReconciliationError("pr-number and merge-group-head-sha are mutually exclusive")
-    if args.merge_group_head_ref is None:
-        raise ReconciliationError("merge-group-head-ref is required in merge-group mode")
-    return reconcile_merge_group(
-        client=client,
-        head_sha=head_sha,
-        head_ref=args.merge_group_head_ref,
-        workflow_path=args.policy_workflow_path,
-    )
-
-
 def _write_step_summary(comment: str) -> None:
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if path:
@@ -1631,14 +1722,17 @@ def _write_step_summary(comment: str) -> None:
 
 def main() -> None:
     try:
-        raise SystemExit(reconcile(_parser().parse_args(namespace=Arguments())))
+        raise SystemExit(
+            reconcile(reconciliation_command(_parser().parse_args(namespace=Arguments())))
+        )
     except (ReconciliationError, OSError, subprocess.TimeoutExpired) as error:
         print(f"review policy reconciliation incomplete: {error}", file=sys.stderr)
         raise SystemExit(2) from error
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(  # sarj-noqa: SARJ533 -- action CLI; closed decode.
+    )
     parser.add_argument("--root", default=".")
     parser.add_argument("--manifest-path", default=".repo-standards/repository.toml")
     parser.add_argument("--pr-number", type=int)

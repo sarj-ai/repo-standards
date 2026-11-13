@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from importlib import metadata
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict, assert_never
+
+from repo_standards.core.outcome import (
+    CommandOutcome,
+    CompletedOutcome,
+    IncompleteCommand,
+    IssueDocument,
+    JSONValue,
+    issue_document,
+)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping
 
 
 MAX_PAGE_SIZE = 500
@@ -18,16 +26,27 @@ class ToolIdentity(TypedDict):
 
 
 class CommandEnvelope(TypedDict):
-    schema_version: int
+    schema_version: Literal[2, 3]
     tool: ToolIdentity
     command: str
-    completion: str
-    conclusion: str
-    provenance: dict[str, object]
-    execution_issues: list[Mapping[str, object]]
+    completion: Literal["complete", "incomplete"]
+    conclusion: Literal["passed", "findings", "inconclusive"]
+    provenance: dict[str, JSONValue]
+    execution_issues: list[IssueDocument]
 
 
-def capabilities_payload() -> dict[str, object]:
+class CapabilitiesPayload(CommandEnvelope):
+    commands: list[str]
+    formats: list[str]
+    modes: list[str]
+    exit_codes: dict[str, str]
+    safety: dict[str, JSONValue]
+    domains: dict[str, JSONValue]
+    schemas: list[str]
+    pagination: dict[str, int]
+
+
+def capabilities_payload() -> CapabilitiesPayload:
     return {
         **envelope("capabilities"),
         "commands": [
@@ -76,11 +95,19 @@ def capabilities_payload() -> dict[str, object]:
 def envelope(
     command: str,
     *,
-    completion: str = "complete",
-    conclusion: str = "passed",
-    provenance: Mapping[str, object] | None = None,
-    issues: Sequence[Mapping[str, object]] = (),
+    outcome: CommandOutcome = CompletedOutcome.PASSED,
+    provenance: Mapping[str, JSONValue] | None = None,
 ) -> CommandEnvelope:
+    match outcome:
+        case CompletedOutcome():
+            completion: Literal["complete", "incomplete"] = "complete"
+            conclusion: Literal["passed", "findings", "inconclusive"] = outcome.value
+            issues: list[IssueDocument] = []
+        case IncompleteCommand():
+            completion, conclusion = "incomplete", "inconclusive"
+            issues = [issue_document(issue) for issue in outcome.issues]
+        case _:
+            assert_never(outcome)
     return {
         "schema_version": 2,
         "tool": {"name": "repo-standards", "version": installed_version()},
@@ -88,7 +115,7 @@ def envelope(
         "completion": completion,
         "conclusion": conclusion,
         "provenance": dict(provenance or {"kind": "installed-environment"}),
-        "execution_issues": list(issues),
+        "execution_issues": issues,
     }
 
 
