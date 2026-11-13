@@ -133,12 +133,43 @@
       "machine": "Python workspace presence",
       "previousRepresentation": "Independent presence boolean and opaque declaration",
       "authoritativeReplacement": "One typed configuration declaration; presence derives from it"
+    },
+    {
+      "machine": "Bounded Git subprocess ownership",
+      "previousRepresentation": "Background reader, optional stdout and process return code were coordinated by scattered kill calls; several error exits never waited for the killed child.",
+      "authoritativeReplacement": "One try/finally owner reaps the native Popen child on every exit. Once started, the reader exclusively owns and closes its stream; stopping prevents further reads.",
+      "states": [
+        "child spawned, reader not started",
+        "reader owns the pipe",
+        "EOF or read/output failure",
+        "child reaped and pipe closed",
+        "cleanup failure reported, never success"
+      ],
+      "events": [
+        "spawn",
+        "start reader",
+        "bounded read",
+        "EOF",
+        "output cap",
+        "read deadline",
+        "exit deadline",
+        "interruption",
+        "reap"
+      ],
+      "guards": [
+        "32 MiB output cap, 30-second read deadline and one-second exit wait remain.",
+        "Native no-lazy-fetch and optional-lock flags remain.",
+        "Only the owned Popen handle is signalled; no numeric-PID kill is added.",
+        "A reader-owned descriptor is not closed by a different thread."
+      ],
+      "recovery": "Every normal or exceptional exit stops the reader, kills an unfinished owned child and waits for it. A reap timeout fails explicitly. Ten real-child fixtures check closed pipes and actual reaping, with short fixture-only read deadlines.",
+      "exception": "Use the standard library Popen/Thread/Event resource protocols for OS state. A parallel application state engine would duplicate their ownership model; scoped cleanup enforces the lifecycle directly."
     }
   ],
   "retainedProtocolsAndRecovery": {
     "State and storage inventory": "The package owns no database tables, queue or background worker. Repository manifests,\nGit trees/indexes, registered activation receipts, diagnostic baselines and release artifacts\nremain the durable inputs. Consumers' databases and workflow-provider records are external\nand cannot be deleted by this package.\n\n\nExisting passed/findings/incomplete report variants remain authoritative. Findings require\nfindings; incomplete reports require issues. Empty successful rule-example wrappers and\nunused artifact-URL defaults are removed. The five runtime dependencies remain: the commit\nparser, Markdown parser, YAML parser, strict input validation and CLI parser all have active\nproduction readers.",
     "Transitions and recovery": "Commands are synchronous. Invalid inputs fail before mutation. A proposed commit repair\nbecomes applied only after its guarded atomic write; inode, hardlink, permission and fsync\nchecks remain. Read-only previews never execute tests. Runtime JSON and persisted\nconfiguration are validated at their boundaries; bootstrap programs remain dependency-free\nand compatible with their system Python runtimes.\n\nArtifact reuse requires exact source, repository ownership, current attempt, successful job,\ndigest and bounded safe archive contents. Missing, failed or stale evidence requires fresh\nvalidation. Reviewed validation additionally binds the actual tree and comparison base;\nit cannot substitute for exact-main artifact identity.\n\nRelease recovery inspects immutable tags and both registries before choosing a plan. It\nrepairs a missing publication from the same verified source and refuses contradictory\nsources or bytes. A crashed upload is resolved by inspecting registry evidence, never by\nassuming it failed. Existing tags and versions are never retargeted.\n\nGitHub statuses, check conclusions, commit states and provider metadata are validated external\nobservations. Their fields may be independently absent when the provider has not supplied\nevidence; absence cannot qualify policy. Filesystem metadata, optional source coordinates,\npackage/workspace metadata, catalog descriptors and rule configuration are data records,\nnot independently advancing workflows. Their optional facts remain optional. The legacy v6\ntrusted-base marker reader remains necessary while evaluating existing consumer base trees;\nit never reads policy from the proposed head.\n\nCI retains all validation, compatibility, package and documentation gates. The five workflows\nown source qualification, commit policy, standards qualification, documentation publication\nand release publication. Workflow-provider scheduling/retry state is external; exact-source\nartifact and release checks are this package's authoritative admission decisions.",
-    "Boundary exceptions": "GitHub owns its run lifecycle. `github_review_policy._completed_run` observes it with one\nfinite deadline; a timeout or unfinished run cannot qualify the caller. The caller still\nrequires a completed successful allowed workflow and rechecks the current commit status.\nArtifact waiting similarly retains its explicit awaiting/verified/fresh-validation outcome.\nThe fixed HTTP retry schedule applies only to GET requests without a payload. Writes have\none attempt; a transport failure never proves that the external write did not happen.\n\nThe release renderer must work after only its two saved tooling files survive an older\nsource checkout. Its small JSON validator therefore remains self-contained; importing the\nartifact bootstrap broke that recovery contract. The installed package and pre-install\nartifact bootstrap validate their own JSON boundaries. Unused urllib redirect callback\narguments remain opaque; they are never consulted and the callback refuses every redirect.\n\nThe five production Python dependencies have concrete readers: ConventionalCommit parses\ncommit headers; markdown-it parses descriptions and templates; PyYAML validates inert\nworkspace/workflow documents; Pydantic validates inputs and serialized JSON; Typer owns the\ninstalled CLI. The site uses only an ASSETS binding and owns no database, KV or R2 binding.\nMarkdown comment stripping retains its single typed boolean in `_strip_line_comments`:\noutside and inside a comment have identical data, delimiters alone toggle the state, and\nthere is no persistence, external effect, retry or invalid combination to encode. Heading\nnesting uses an ordered stack, with pushes and pops in `_filled_sections`; it has no\nseparate phase flags. The existing Git subprocess protocols are separately under review for reaping on exceptional exits."
+    "Boundary exceptions": "GitHub owns its run lifecycle. `github_review_policy._completed_run` observes it with one\nfinite deadline; a timeout or unfinished run cannot qualify the caller. The caller still\nrequires a completed successful allowed workflow and rechecks the current commit status.\nArtifact waiting similarly retains its explicit awaiting/verified/fresh-validation outcome.\nThe fixed HTTP retry schedule applies only to GET requests without a payload. Writes have\none attempt; a transport failure never proves that the external write did not happen.\n\nThe release renderer must work after only its two saved tooling files survive an older\nsource checkout. Its small JSON validator therefore remains self-contained; importing the\nartifact bootstrap broke that recovery contract. The installed package and pre-install\nartifact bootstrap validate their own JSON boundaries. Unused urllib redirect callback\narguments remain opaque; they are never consulted and the callback refuses every redirect.\n\nThe five production Python dependencies have concrete readers: ConventionalCommit parses\ncommit headers; markdown-it parses descriptions and templates; PyYAML validates inert\nworkspace/workflow documents; Pydantic validates inputs and serialized JSON; Typer owns the\ninstalled CLI. The site uses only an ASSETS binding and owns no database, KV or R2 binding.\nMarkdown comment stripping retains its single typed boolean in `_strip_line_comments`:\noutside and inside a comment have identical data, delimiters alone toggle the state, and\nthere is no persistence, external effect, retry or invalid combination to encode. Heading\nnesting uses an ordered stack, with pushes and pops in `_filled_sections`; it has no\nseparate phase flags. Native Popen/Thread/Event protocols retain OS ownership; one scoped owner now reaps the Git child on success, failure, timeout and interruption. The bounded Git subprocess entry records the exact lifecycle and its real-child recovery tests."
   },
   "publicApiMigration": {
     "release": "7.0.0",

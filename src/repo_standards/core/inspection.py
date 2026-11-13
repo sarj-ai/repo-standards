@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, replace
-from functools import lru_cache
+from functools import lru_cache, partial
 import hashlib
 from io import BytesIO
 import json
@@ -13,7 +13,7 @@ import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - fixed Git metadata query only
 import tempfile
-import threading
+from threading import Event, Thread
 import tomllib
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
@@ -50,6 +50,7 @@ from .parser import parse_baseline_bytes, parse_manifest_bytes
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from typing import IO
 
 
 _MAX_FILES = 100_000
@@ -377,7 +378,6 @@ def _inspection_from_blobs(
     root: Path, identity: GitIdentity, blobs: tuple[TrackedBlob, ...]
 ) -> RepositoryInspection:
     metadata = _metadata_evidence(root, blobs)
-    packages, workspaces, issues = metadata.packages, metadata.workspaces, metadata.issues
     terraform_modules = _terraform_module_units(blobs)
     classified = _classify_blobs(blobs)
     workflow_blobs, cloudbuild_blobs, dockerfile_blobs = (
@@ -392,7 +392,7 @@ def _inspection_from_blobs(
             object_id=project.object_id,
             content_digest=project.content_digest,
         )
-        for project in packages
+        for project in metadata.packages
     ]
     inventory_units.extend(
         InventoryUnit(
@@ -401,7 +401,7 @@ def _inspection_from_blobs(
             object_id=workspace.object_id,
             content_digest=workspace.content_digest,
         )
-        for workspace in workspaces
+        for workspace in metadata.workspaces
     )
     inventory_units.extend(
         _blob_inventory_unit(kind, blob)
@@ -413,19 +413,19 @@ def _inspection_from_blobs(
         for blob in selected
     )
     inventory_units.extend(terraform_modules)
-    tracked_files = _tracked_file_evidence(root, blobs, packages)
+    tracked_files = _tracked_file_evidence(root, blobs, metadata.packages)
     return RepositoryInspection(
         source_revision=identity.source_revision,
         tree_digest=identity.tree_digest,
         tracked_file_count=len(blobs),
-        packages=tuple(sorted(packages, key=lambda item: (item.path, item.ecosystem))),
+        packages=tuple(sorted(metadata.packages, key=lambda item: (item.path, item.ecosystem))),
         workflow_paths=tuple(blob.path for blob in workflow_blobs),
         cloudbuild_paths=tuple(blob.path for blob in cloudbuild_blobs),
         dockerfile_paths=tuple(blob.path for blob in dockerfile_blobs),
         terraform_modules=tuple(item.path for item in terraform_modules),
-        issues=tuple(sorted(issues)),
+        issues=tuple(sorted(metadata.issues)),
         tracked_files=tracked_files,
-        workspaces=tuple(sorted(workspaces, key=lambda item: (item.path, item.ecosystem))),
+        workspaces=tuple(sorted(metadata.workspaces, key=lambda item: (item.path, item.ecosystem))),
         inventory_units=tuple(sorted(inventory_units, key=lambda item: (item.path, item.kind))),
     )
 
@@ -811,42 +811,75 @@ def _bounded_git_payload(
     except OSError:
         ConfigurationError.fail(f"cannot enumerate {noun}")
     stream = process.stdout
-    if stream is None:
-        process.kill()
-        ConfigurationError.fail(f"cannot read {noun} enumeration output")
-    output = bytearray()
-    read_failed = threading.Event()
-
-    def read_bounded_output() -> None:
-        descriptor = stream.fileno()
-        try:
-            while chunk := os.read(descriptor, 65_536):
-                remaining = _MAX_TREE_OUTPUT_BYTES + 1 - len(output)
-                output.extend(chunk[:remaining])
-                if len(output) > _MAX_TREE_OUTPUT_BYTES:
-                    process.kill()
-                    return
-        except OSError:
-            read_failed.set()
-            process.kill()
-
-    reader = threading.Thread(target=read_bounded_output, daemon=True)
-    reader.start()
-    reader.join(timeout=30)
-    if reader.is_alive():
-        process.kill()
-        reader.join(timeout=1)
-        ConfigurationError.fail(f"{noun} enumeration timed out")
+    stopped = Event()
+    reader: Thread | None = None
     try:
-        return_code = process.wait(timeout=1)
-    except subprocess.TimeoutExpired:
+        if stream is None:
+            ConfigurationError.fail(f"cannot read {noun} enumeration output")
+        output = bytearray()
+        read_failed = Event()
+
+        reader = Thread(
+            target=partial(_read_git_stream, stream, output, stopped, read_failed), daemon=True
+        )
+        reader.start()
+        reader.join(timeout=30)
+        if reader.is_alive():
+            ConfigurationError.fail(f"{noun} enumeration timed out")
+        if len(output) > _MAX_TREE_OUTPUT_BYTES:
+            ConfigurationError.fail(f"{noun} output exceeds the 32 MiB safety limit")
+        if read_failed.is_set():
+            ConfigurationError.fail(f"cannot enumerate {noun}")
+        try:
+            return_code = process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            ConfigurationError.fail(f"{noun} enumeration timed out")
+        if return_code != 0:
+            ConfigurationError.fail(f"cannot enumerate {noun}")
+        return bytes(output)
+    finally:
+        stopped.set()
+        try:
+            _reap_git_process(process, noun)
+        finally:
+            if reader is not None and reader.ident is not None:
+                reader.join(timeout=1)
+            # The reader owns its stream after start. Closing it from another
+            # thread could let a delayed os.read consume a reused descriptor.
+            if stream is not None and (reader is None or reader.ident is None):
+                stream.close()
+
+
+def _reap_git_process(process: subprocess.Popen[bytes], noun: str) -> None:
+    if process.poll() is None:
         process.kill()
-        ConfigurationError.fail(f"{noun} enumeration timed out")
-    if len(output) > _MAX_TREE_OUTPUT_BYTES:
-        ConfigurationError.fail(f"{noun} output exceeds the 32 MiB safety limit")
-    if read_failed.is_set() or return_code != 0:
-        ConfigurationError.fail(f"cannot enumerate {noun}")
-    return bytes(output)
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        ConfigurationError.fail(f"cannot reap {noun} enumeration process")
+
+
+def _read_git_stream(
+    stream: IO[bytes], output: bytearray, stopped: Event, read_failed: Event
+) -> None:
+    read_failed.set()
+    try:
+        if not stopped.is_set():
+            _copy_git_stream(stream, output, stopped)
+    except MemoryError, OSError, ValueError:
+        return
+    finally:
+        stream.close()
+    read_failed.clear()
+
+
+def _copy_git_stream(stream: IO[bytes], output: bytearray, stopped: Event) -> None:
+    descriptor = stream.fileno()
+    while not stopped.is_set() and (chunk := os.read(descriptor, 65_536)):
+        remaining = _MAX_TREE_OUTPUT_BYTES + 1 - len(output)
+        output.extend(chunk[:remaining])
+        if len(output) > _MAX_TREE_OUTPUT_BYTES:
+            return
 
 
 def _inspect_metadata(
