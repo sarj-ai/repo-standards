@@ -178,8 +178,8 @@ jobs:
           EXCLUDED_LINES: ${{ steps.size-action.outputs.excluded-lines }}
           TOTAL_LINES: ${{ steps.size-action.outputs.total-lines }}
         run: |
-          test "$COUNTED_LINES" = 1
-          test "$EXCLUDED_LINES" = 1
+          test "$COUNTED_LINES" = 2
+          test "$EXCLUDED_LINES" = 0
           test "$TOTAL_LINES" = 2
       - name: Bind tested packages to exact main
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

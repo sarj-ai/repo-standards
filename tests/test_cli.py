@@ -117,12 +117,12 @@ def test_pull_request_size_command_returns_stable_json(tmp_path: Path) -> None:
     payload = _json_object(result.stdout)
     assert payload["command"] == "pull-request size"
     summary = _object(payload["summary"])
-    assert summary["counted_lines"] == 3
-    assert summary["excluded_lines"] == 20
+    assert summary["counted_lines"] == 23
+    assert summary["excluded_lines"] == 0
     assert summary["additions"] == 22
     assert summary["deletions"] == 1
-    assert summary["counted_files"] == 1
-    assert summary["excluded_files"] == 1
+    assert summary["counted_files"] == 2
+    assert summary["excluded_files"] == 0
     categories = _object_list(payload["categories"])
     assert [(item["category"], item["lines"]) for item in categories] == [
         ("production", 3),
@@ -352,11 +352,14 @@ def _promotion_evidence(  # ruff: ignore[too-many-arguments] - independent trust
     )
 
 
-def test_pull_request_review_policy_emits_ready_tier_zero_receipt(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("lines", "tier", "ready"), [(30, 0, True), (300, 1, False)])
+def test_test_churn_participates_in_review_policy(
+    tmp_path: Path, lines: int, tier: int, ready: bool
+) -> None:
     base = _review_policy_fixture(tmp_path)
     (tmp_path / "README.md").write_text("base\nsmall correction\n", encoding="utf-8")
     (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_large.py").write_text("assert True\n" * 300, encoding="utf-8")
+    (tmp_path / "tests" / "test_large.py").write_text("assert True\n" * lines, encoding="utf-8")
     _commit_changes(tmp_path)
     head = _git(tmp_path, "rev-parse", "HEAD")
     evidence = _review_policy_evidence(tmp_path, head=head)
@@ -376,16 +379,16 @@ def test_pull_request_review_policy_emits_ready_tier_zero_receipt(tmp_path: Path
         ],
     )
 
-    assert result.exit_code == 0, result.stdout
+    assert result.exit_code == (0 if ready else 1), result.stdout
     payload = _json_object(result.stdout)
     assert payload["command"] == "pull-request review-policy"
-    assert payload["conclusion"] == "passed"
+    assert payload["conclusion"] == ("passed" if ready else "findings")
     summary = _object(payload["summary"])
-    assert summary["tier"] == 0
-    assert summary["merge_ready"] is True
+    assert summary["tier"] == tier
+    assert summary["merge_ready"] is ready
     size = _object(payload["size"])
-    assert size["counted_lines"] == 1
-    assert size["excluded_lines"] == 300
+    assert size["counted_lines"] == lines + 1
+    assert size["excluded_lines"] == 0
     assert [item["path"] for item in _object_list(payload["files"])] == [
         "README.md",
         "tests/test_large.py",

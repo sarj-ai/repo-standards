@@ -771,7 +771,7 @@ def _capabilities(commands: tuple[CommandDescriptor, ...]) -> tuple[CapabilityDe
         CapabilityDescriptor(
             capability_id=CapabilityId("pull-request-size"),
             title="Pull-request review size",
-            summary="Count reviewable churn while excluding tests and declared generated output.",
+            summary="Count authored code and test churn; exclude generated and binary output.",
             status="stable",
             command_ids=(CommandId("pull-request.size"),),
             input_kinds=("git-diff", "git-attributes"),
