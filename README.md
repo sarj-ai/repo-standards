@@ -2,11 +2,6 @@
 
 `repo-standards` measures pull-request review size without executing repository code.
 
-Authored production and test churn count equally toward review size, including verification
-helpers and fixtures. Test categories remain visible; they are not a cost exemption.
-Declared generated artifacts and binary files retain their exclusions. Existing consumer review
-thresholds apply to the resulting count; line counts do not establish test quality.
-
 ## Where rules belong
 
 - Exact tracked-tree facts—filenames, placement, topology, migrations, pull-request size,
