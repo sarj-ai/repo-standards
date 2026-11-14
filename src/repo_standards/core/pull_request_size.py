@@ -28,6 +28,7 @@ _CATEGORIES: tuple[PullRequestSizeCategory, ...] = (
     "generated",
     "binary",
 )
+_COUNTED = frozenset({"production", "test"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +117,7 @@ class PullRequestSize:
         for item in self.files:
             additions += item.additions
             deletions += item.deletions
-            if item.category == "production":
+            if item.category in _COUNTED:
                 counted_files += 1
                 counted_additions += item.additions
                 counted_deletions += item.deletions
@@ -187,14 +188,13 @@ def _directory_size(
     files: tuple[PullRequestFileSize, ...],
 ) -> PullRequestDirectorySize:
     categories = tuple(_category_size(category, files) for category in _CATEGORIES)
-    production = next(item for item in categories if item.category == "production")
     return PullRequestDirectorySize(
         path=path,
         changed_files=len(files),
         additions=sum(item.additions for item in files),
         deletions=sum(item.deletions for item in files),
-        counted_lines=production.lines,
-        excluded_lines=sum(item.lines for item in categories if item.category != "production"),
+        counted_lines=sum(item.lines for item in categories if item.category in _COUNTED),
+        excluded_lines=sum(item.lines for item in categories if item.category not in _COUNTED),
         categories=categories,
     )
 

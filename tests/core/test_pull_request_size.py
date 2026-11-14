@@ -38,7 +38,7 @@ class RepositoryFixture(NamedTuple):
                 PullRequestFileSize("icon.png", 0, 0, "binary"),
                 PullRequestFileSize("custom.txt", 9, 1, "custom"),
             ),
-            PullRequestSizeSummary(4, 0, 4, 1, 25, 7, 0, 0, 25, 7),
+            PullRequestSizeSummary(4, 1, 3, 1, 25, 7, 11, 4, 14, 3),
         ),
         (
             (
@@ -46,7 +46,7 @@ class RepositoryFixture(NamedTuple):
                 PullRequestFileSize("tests/test_app.py", 11, 4, "test"),
                 PullRequestFileSize("icon.png", 0, 0, "binary"),
             ),
-            PullRequestSizeSummary(3, 1, 2, 1, 18, 7, 7, 3, 11, 4),
+            PullRequestSizeSummary(3, 2, 1, 1, 18, 7, 18, 7, 0, 0),
         ),
     ],
     ids=["empty", "production", "excluded-and-custom", "mixed"],
@@ -128,7 +128,7 @@ def _repository(tmp_path: Path) -> RepositoryFixture:
         "src/test/java/Latest.java",
     ],
 )
-def test_test_conventions_are_excluded(path: str) -> None:
+def test_test_conventions_are_classified(path: str) -> None:
     assert is_test_path(path)
 
 
@@ -156,7 +156,7 @@ def test_test_conventions_are_excluded(path: str) -> None:
         "src/Contests.cs",
     ],
 )
-def test_test_near_misses_are_counted(path: str) -> None:
+def test_test_near_misses_remain_production(path: str) -> None:
     assert not is_test_path(path)
 
 
@@ -171,18 +171,18 @@ def test_analysis_reports_counted_and_excluded_churn(tmp_path: Path) -> None:
 
     result = analyze_pull_request_size(repository, base=base, head=head)
 
-    assert result.counted_lines == 3
-    assert result.excluded_lines == 90
+    assert result.counted_lines == 53
+    assert result.excluded_lines == 40
     assert result.category_lines() == {"generated": 40, "production": 3, "test": 50}
     assert result.summary.changed_files == 3
-    assert result.summary.counted_files == 1
-    assert result.summary.excluded_files == 2
+    assert result.summary.counted_files == 2
+    assert result.summary.excluded_files == 1
     assert result.summary.binary_files == 0
     assert result.summary.additions == 92
     assert result.summary.deletions == 1
-    assert result.summary.counted_additions == 2
+    assert result.summary.counted_additions == 52
     assert result.summary.counted_deletions == 1
-    assert result.summary.excluded_additions == 90
+    assert result.summary.excluded_additions == 40
     assert result.summary.excluded_deletions == 0
     assert [category.category for category in result.category_sizes()] == [
         "production",
@@ -197,7 +197,8 @@ def test_analysis_reports_counted_and_excluded_churn(tmp_path: Path) -> None:
         "tests",
     ]
     assert result.directory_sizes()[1].counted_lines == 3
-    assert result.directory_sizes()[2].excluded_lines == 50
+    assert result.directory_sizes()[2].counted_lines == 50
+    assert result.directory_sizes()[2].excluded_lines == 0
     assert [item.path for item in result.files] == [
         "generated/client.py",
         "src/app.py",
@@ -245,9 +246,7 @@ def test_production_churn_is_counted_in_ambiguous_directories(tmp_path: Path, pa
 
 
 @pytest.mark.parametrize("destination", ["tests/test_app.py", "conftest.py"])
-def test_production_to_test_move_counts_the_deleted_source(
-    tmp_path: Path, destination: str
-) -> None:
+def test_production_to_test_move_counts_both_sides(tmp_path: Path, destination: str) -> None:
     repository, base = _repository(tmp_path)
     target = repository / destination
     target.parent.mkdir(exist_ok=True)
@@ -256,7 +255,7 @@ def test_production_to_test_move_counts_the_deleted_source(
 
     result = analyze_pull_request_size(repository, base=base, head=head)
 
-    assert result.counted_lines == 1
+    assert result.counted_lines == 2
     assert result.category_lines()["test"] == 1
 
 
@@ -386,7 +385,7 @@ def test_conflict_resolution_is_counted_since_review(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", ["tests/test_app.py", "package/conftest.py"])
-def test_test_edits_since_review_are_excluded(tmp_path: Path, path: str) -> None:
+def test_test_edits_since_review_are_counted(tmp_path: Path, path: str) -> None:
     branch = _reviewed_branch(tmp_path)
     target = branch.path / path
     target.parent.mkdir(exist_ok=True)
@@ -398,8 +397,8 @@ def test_test_edits_since_review_are_excluded(tmp_path: Path, path: str) -> None
     )
 
     assert result is not None
-    assert result.counted_lines == 0
-    assert result.excluded_lines == 40
+    assert result.counted_lines == 40
+    assert result.excluded_lines == 0
 
 
 def test_exclusion_policy_since_review_is_loaded_from_reviewed_change(tmp_path: Path) -> None:
