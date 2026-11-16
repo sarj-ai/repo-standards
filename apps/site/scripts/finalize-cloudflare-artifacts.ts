@@ -30,7 +30,7 @@ verifyCompactReference(outputPaths, documents);
 const hashes = new Set<string>();
 for (const [, document] of documents) {
   for (const match of document.matchAll(
-    /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gu,
+    /<script(?![^>]+\bsrc=)[^>]*>([\s\S]*?)<\/script>/gu,
   )) {
     hashes.add(`'sha256-${hash("sha256", match[1], "base64")}'`);
   }
@@ -219,7 +219,7 @@ if (Buffer.byteLength(policyHeader, "utf8") > 2_000) {
   );
 }
 await Promise.all(
-  documents.map(([path, document]) =>
+  documents.map(async ([path, document]) =>
     writeFile(
       new URL(path, outputDirectory),
       document.replace(policyPattern(), ""),

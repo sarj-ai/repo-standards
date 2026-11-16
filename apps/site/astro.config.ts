@@ -44,7 +44,7 @@ export default defineConfig({
     {
       name: "repo-standards-clean-static-output",
       hooks: {
-        "astro:build:start": () =>
+        "astro:build:start": async () =>
           rm(ASSET_ROOT, { recursive: true, force: true }),
       },
     },

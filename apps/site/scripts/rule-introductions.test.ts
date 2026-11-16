@@ -10,7 +10,7 @@ import { ruleIntroductions } from "../src/lib/rule-introductions.ts";
 
 async function history(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), "rule-introduction-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(async () => rm(root, { recursive: true, force: true }));
   const git = (...args: string[]) =>
     execFileSync("git", args, {
       cwd: root,

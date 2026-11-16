@@ -1,4 +1,4 @@
-import { env } from "node:process";
+import { settings } from "./settings.ts";
 
 export const sourceRevision =
-  env.WORKERS_CI_COMMIT_SHA ?? env.GITHUB_SHA ?? "main";
+  settings.WORKERS_CI_COMMIT_SHA ?? settings.GITHUB_SHA ?? "main";

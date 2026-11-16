@@ -26,8 +26,10 @@ interface VerificationOptions {
   readonly request?: Request;
 }
 
-function sleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+async function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, milliseconds);
+  });
 }
 
 export async function verifyDeployment({

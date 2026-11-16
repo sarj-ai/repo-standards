@@ -4,7 +4,7 @@ interface Environment {
   ASSETS: { fetch(request: Request): Promise<Response> };
 }
 
-export default {
+const worker = {
   fetch(
     request: Request,
     environment: Environment,
@@ -14,4 +14,6 @@ export default {
       ? environment.ASSETS.fetch(request)
       : globalThis.Response.redirect(redirect, 301);
   },
-};
+} as const;
+
+export default worker;

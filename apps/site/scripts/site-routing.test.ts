@@ -46,9 +46,9 @@ await test("the canonical hostname forwards the original request to native asset
   let observed: Request | undefined;
   const result = await worker.fetch(request, {
     ASSETS: {
-      fetch: (candidate) => {
+      fetch: async (candidate) => {
         observed = candidate;
-        return Promise.resolve(response);
+        return response;
       },
     },
   });
