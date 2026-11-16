@@ -7,7 +7,11 @@ from typing import ClassVar, Literal, assert_never
 
 from repo_standards.core.engine import analyze, check_baseline_comparison, classify_baseline
 from repo_standards.core.errors import BaselineError, ConfigurationError, ManifestAbsentError
-from repo_standards.core.inspection import git_index_identity, load_repository_snapshot
+from repo_standards.core.inspection import (
+    git_index_identity,
+    load_repository_snapshot,
+    with_terraform_sources,
+)
 from repo_standards.core.models import (
     AnalysisReport,
     Baseline,
@@ -141,6 +145,8 @@ def complete_repository_analysis(
     snapshot = with_migration_comparison(
         root, snapshot, enabled_rules=enabled_rules, base_revision=request.base_revision
     )
+    if any(item.rule_id == "repository/terraform/unused-module-outputs" for item in enabled_rules):
+        snapshot = with_terraform_sources(root, snapshot)
     repository_diagnostics = policy.evaluate_repository(
         snapshot, enabled_rule_ids=frozenset(item.rule_id for item in enabled_rules)
     )

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib.metadata import version
+from io import StringIO
 import json
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import tokenize
 
 from jsonschema import ValidationError as JSONSchemaValidationError, validate
 from pydantic import RootModel
@@ -1837,14 +1839,40 @@ def test_incomplete_report_and_anchor_locations_validate_against_schema(tmp_path
     assert _object_list(_json_object(findings.stdout)["diagnostics"]) == []
 
 
+def _core_policy_vocabulary(source: str) -> tuple[str, ...]:
+    parts: list[str] = []
+    for token in tokenize.generate_tokens(StringIO(source).readline):
+        text = token.string
+        if token.type == tokenize.COMMENT:
+            # Lint metadata is tooling; its explanation still belongs to the source review.
+            text = re.sub(r"^# sarj-noqa: SARJ[0-9]+(?:, SARJ[0-9]+)* -- ", "# ", text)
+        parts.append(text)
+    text = " ".join(parts).casefold()
+    return tuple(word for word in ("sarj", "foundation-service", "product-library") if word in text)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("value = 1  # sarj-noqa: SARJ541 -- Independent public fields.\n", ()),
+        ("import sarj_policy\n", ("sarj",)),
+        ("label = 'sarj'\n", ("sarj",)),
+        ("# sarj policy\n", ("sarj",)),
+        ("label = '# sarj-noqa: SARJ541 -- Independent fields.'\n", ("sarj",)),
+        ("# sarj-noqa: SARJ541 -- sarj policy\n", ("sarj",)),
+        ("# sarj-noqa: SARJ541 -- foundation-service\n", ("foundation-service",)),
+    ],
+)
+def test_neutral_core_pragmas_do_not_hide_policy_vocabulary(
+    source: str, expected: tuple[str, ...]
+) -> None:
+    assert _core_policy_vocabulary(source) == expected
+
+
 def test_neutral_core_contains_no_sarj_policy_vocabulary() -> None:
     core = Path(__file__).parents[1] / "src" / "repo_standards" / "core"
-    source = "\n".join(
-        path.read_text(encoding="utf-8") for path in sorted(core.glob("*.py"))
-    ).casefold()
-    assert "sarj" not in source
-    assert "foundation-service" not in source
-    assert "product-library" not in source
+    source = "\n".join(path.read_text(encoding="utf-8") for path in sorted(core.glob("*.py")))
+    assert not _core_policy_vocabulary(source)
 
 
 def test_manifest_symlink_is_rejected(tmp_path: Path) -> None:

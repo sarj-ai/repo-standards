@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from itertools import starmap
 from typing import Annotated, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,6 +22,7 @@ from repo_standards.core.models import (
     RepositoryInspection,
     RepositorySnapshot,
     RuleId,
+    TerraformSource,
     TrackedFileEvidence,
 )
 from repo_standards.core.parser import parse_manifest_bytes
@@ -32,6 +34,7 @@ from .makefiles import MAKEFILE_GROWTH_RULE_ID
 from .migrations import MIGRATION_CONSOLIDATION_RULE_ID, migration_roots
 from .policy import RULES, SarjPolicy
 from .pull_request_templates import PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID
+from .terraform import UNUSED_MODULE_OUTPUTS_RULE_ID
 
 
 class _MakefileExampleSource(BaseModel):
@@ -53,6 +56,12 @@ class _PullRequestTemplateExampleSource(BaseModel):
 
     required: tuple[str, ...]
     template: str | None
+
+
+class _TerraformExampleSource(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", strict=True)
+
+    sources: dict[str, str]
 
 
 class _TrackedFilesExampleSource(BaseModel):
@@ -83,19 +92,29 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
     if case is None:
         message = f"unknown rule example: {fixture_id}"
         raise ValueError(message)
+    if case.rule_id == UNUSED_MODULE_OUTPUTS_RULE_ID:
+        context = _TerraformExampleSource.model_validate_json(source)
+        return _run_snapshot(
+            replace(
+                _snapshot(tuple(context.sources)),
+                terraform_sources=tuple(starmap(TerraformSource, context.sources.items())),
+            )
+        )
     if case.rule_id == MAKEFILE_GROWTH_RULE_ID:
         return _run_makefile_comparison(source)
     if case.rule_id == MIGRATION_CONSOLIDATION_RULE_ID:
         context = _MigrationExampleSource.model_validate_json(source)
         manifest = Manifest(repository_id=RepositoryId("example-repository"), components=())
         return _run_snapshot(
-            context.head,
-            manifest=manifest,
-            migration_comparison=MigrationComparison(
-                roots=migration_roots(manifest, (*context.base, *context.head)),
-                base_files=tuple(TrackedFileEvidence(path, "f" * 40) for path in context.base),
-                head_files=tuple(TrackedFileEvidence(path, "a" * 40) for path in context.head),
-            ),
+            _snapshot(
+                context.head,
+                manifest=manifest,
+                migration_comparison=MigrationComparison(
+                    roots=migration_roots(manifest, (*context.base, *context.head)),
+                    base_files=tuple(TrackedFileEvidence(path, "f" * 40) for path in context.base),
+                    head_files=tuple(TrackedFileEvidence(path, "a" * 40) for path in context.head),
+                ),
+            )
         )
     if case.rule_id == PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID:
         return _run_pull_request_template(source)
@@ -106,13 +125,13 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
     } and source.lstrip().startswith("{"):
         context = _TrackedFilesExampleSource.model_validate_json(source)
         return _run_snapshot(
-            context.tracked, manifest=parse_manifest_bytes(context.manifest.encode())
+            _snapshot(context.tracked, manifest=parse_manifest_bytes(context.manifest.encode()))
         )
     return _run_repository_path(source)
 
 
 def _run_repository_path(source: str) -> tuple[RuleId, ...]:
-    return _run_snapshot((source.strip(),))
+    return _run_snapshot(_snapshot((source.strip(),)))
 
 
 def _run_makefile_comparison(source: str) -> tuple[RuleId, ...]:
@@ -131,7 +150,7 @@ def _run_makefile_comparison(source: str) -> tuple[RuleId, ...]:
         ),
         as_of=None,
     )
-    return _run_snapshot(tuple(sorted(context.head)), comparison=comparison)
+    return _run_snapshot(_snapshot(tuple(sorted(context.head)), comparison=comparison))
 
 
 def _run_pull_request_template(source: str) -> tuple[RuleId, ...]:
@@ -153,21 +172,23 @@ def _run_pull_request_template(source: str) -> tuple[RuleId, ...]:
     )
     templates = () if context.template is None else (PullRequestTemplate(path, context.template),)
     return _run_snapshot(
-        tuple(template.path for template in templates),
-        manifest=manifest,
-        templates=templates,
+        _snapshot(
+            tuple(template.path for template in templates),
+            manifest=manifest,
+            templates=templates,
+        )
     )
 
 
-def _run_snapshot(
+def _snapshot(
     paths: tuple[str, ...],
     *,
     comparison: MakefileComparison | None = None,
     manifest: Manifest | None = None,
     templates: tuple[PullRequestTemplate, ...] = (),
     migration_comparison: MigrationComparison | None = None,
-) -> tuple[RuleId, ...]:
-    snapshot = RepositorySnapshot(
+) -> RepositorySnapshot:
+    return RepositorySnapshot(
         manifest=manifest
         or Manifest(repository_id=RepositoryId("example-repository"), components=()),
         baseline=None,
@@ -197,5 +218,8 @@ def _run_snapshot(
         pull_request_templates=templates,
         migration_comparison=migration_comparison,
     )
+
+
+def _run_snapshot(snapshot: RepositorySnapshot) -> tuple[RuleId, ...]:
     diagnostics = SarjPolicy.evaluate_repository(snapshot)
     return tuple(sorted((item.rule_id for item in diagnostics), key=str))

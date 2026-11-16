@@ -278,3 +278,40 @@ def test_migration_calibration_uses_the_exact_commit_comparison(tmp_path: Path) 
     findings = _JSON_OBJECTS.validate_python(payload["findings"])
     assert len(findings) == 1
     assert findings[0]["path"] == "migrations/001.sql"
+
+
+def test_selected_terraform_calibration_loads_unchanged_consumers(tmp_path: Path) -> None:
+    repository, _corpus = _fixture(tmp_path)
+    (repository / "infra/child").mkdir(parents=True)
+    (repository / "infra/main.tf").write_text(
+        'module "child" { source = "./child" }\noutput "public" { value = module.child.used }\n'
+    )
+    (repository / "infra/child/outputs.tf").write_text(
+        'output "used" { value = "used" }\noutput "unused" { value = "unused" }\n'
+    )
+    _git(repository, "add", ".")
+    _git(
+        repository,
+        "-c",
+        "user.name=Rule Calibration",
+        "-c",
+        "user.email=rule-calibration@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "Terraform contracts",
+    )
+    result = _run(
+        "_worker",
+        "--root",
+        str(repository),
+        "--manifest",
+        str(tmp_path / "sidecar.toml"),
+        "--rule",
+        "repository/terraform/unused-module-outputs",
+    )
+    payload = _JSON_OBJECT.validate_json(result.stdout)
+    findings = _JSON_OBJECTS.validate_python(payload["findings"])
+    assert len(findings) == 1
+    assert findings[0]["path"] == "infra/child/outputs.tf"
+    assert "'unused'" in str(findings[0]["message"])

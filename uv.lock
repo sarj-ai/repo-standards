@@ -407,13 +407,14 @@ wheels = [
 
 [[package]]
 name = "repo-standards"
-version = "8.0.0"
+version = "8.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "conventional-pre-commit" },
     { name = "markdown-it-py" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "sarj-iac-lint" },
     { name = "typer" },
 ]
 
@@ -439,6 +440,7 @@ requires-dist = [
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "pydantic", specifier = ">=2.14.1,<3" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
+    { name = "sarj-iac-lint", specifier = "==0.45.2" },
     { name = "typer", specifier = ">=0.27.3,<1" },
 ]
 
@@ -556,6 +558,28 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2c/d4/c3b74e1b4808438ea7f14bb914478025e2d51261f60774a54a0fa222ec46/ruff-0.17.2-py3-none-win32.whl", hash = "sha256:6bce7d1f5165701ae18f5df85c65afe78cddfa6c5fb4b9bdb0014d60388f3edd", size = 9870537, upload-time = "2026-10-22T18:37:52.486Z" },
     { url = "https://files.pythonhosted.org/packages/1c/9a/c7da96c2c96d20704cf9027f7a5121da272a8c05f1d1531ba949e3b3df04/ruff-0.17.2-py3-none-win_amd64.whl", hash = "sha256:1b59d447f197bef9ef48a22ba1a6016137753c6099e9bac9c36eb566e422424c", size = 10282826, upload-time = "2026-10-22T18:37:55.2Z" },
     { url = "https://files.pythonhosted.org/packages/81/60/a3604c79cb02777b6cb84da894104021986f06c4bc41375102cc95049a32/ruff-0.17.2-py3-none-win_arm64.whl", hash = "sha256:195ad918027f817c119310ca89a42d347887dfc28934aaa869325e9c5dc9d962", size = 9827036, upload-time = "2026-10-22T18:37:58.031Z" },
+]
+
+[[package]]
+name = "sarj-iac-lint"
+version = "0.45.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "sarj-rule-contracts" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b2/55/0456577c70ff551513e73c1e7e49ab902f6138d8e69571d71935497f94de/sarj_iac_lint-0.45.2.tar.gz", hash = "sha256:d510b44758a2d8e44500708f14dccbdee0d569f85e13c340132bd36a708cb22d", size = 80265, upload-time = "2026-11-16T04:12:46.749Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ad/09/41ff732d872ad77319cdf916478464da30558b3e153688c07d7bb77ed981/sarj_iac_lint-0.45.2-py3-none-any.whl", hash = "sha256:b7f40187f843a48b6b81a4bbb88d8f23dcfda50787cda758622d788cfeeb93d2", size = 109421, upload-time = "2026-11-16T04:12:45.459Z" },
+]
+
+[[package]]
+name = "sarj-rule-contracts"
+version = "0.8.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/d5/eb99842dc9b689ec0bc2b9c910db94108a86dbbdc3cdb4d19d68584fe350/sarj_rule_contracts-0.8.1.tar.gz", hash = "sha256:dbcdbcebce351dec4044853fdbab942cb362346b73a342a6b0a564176a6ef78d", size = 11094, upload-time = "2026-11-15T19:41:48.588Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b5/8a/a7324e1fc6e844c50a4b3f9699cd20de1d5db73a517bd1c14085809e2aed/sarj_rule_contracts-0.8.1-py3-none-any.whl", hash = "sha256:b3849bbb6c623c64270aeb6c8a5a7c33644cf6d873cc3560727e843544a52256", size = 13698, upload-time = "2026-11-15T19:41:47.327Z" },
 ]
 
 [[package]]

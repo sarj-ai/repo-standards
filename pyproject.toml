@@ -1,6 +1,6 @@
 [project]
 name = "repo-standards"
-version = "8.0.0"
+version = "8.1.0"
 description = "Deterministic pull-request sizing and reviewed repository policy"
 authors = [{ name = "sarj-ai" }]
 license = "MIT"
@@ -16,6 +16,7 @@ classifiers = [
 ]
 requires-python = ">=3.14,<3.16"
 dependencies = [
+  "sarj-iac-lint==0.45.2",
   "conventional-pre-commit==4.4.0",
   "markdown-it-py==4.2.0",
   "PyYAML>=6.0.3,<7",

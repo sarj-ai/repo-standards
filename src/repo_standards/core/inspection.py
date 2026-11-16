@@ -41,6 +41,7 @@ from .models import (
     PullRequestTemplate,
     RepositoryInspection,
     RepositorySnapshot,
+    TerraformSource,
     TrackedFileEvidence,
     WorkspaceEvidence,
 )
@@ -237,6 +238,36 @@ def inspect_repository(root: Path, *, identity: GitIdentity | None = None) -> Re
     return _inspection_from_blobs(resolved, identity, blobs)
 
 
+def with_terraform_sources(root: Path, snapshot: RepositorySnapshot) -> RepositorySnapshot:
+    mode = snapshot.provenance.mode
+    if mode == "worktree":
+        ConfigurationError.fail("Terraform sources require immutable Git tree or index evidence")
+    identity = GitIdentity(
+        snapshot.provenance.source_revision,
+        snapshot.provenance.tree_digest,
+        mode,
+    )
+    blobs = tuple(
+        blob
+        for blob in _blobs_for_identity(root, identity)
+        if blob.path.endswith((".tf", ".tf.json"))
+    )
+    contents = _read_bounded_blob_batch(
+        root,
+        blobs,
+        max_file_bytes=_MAX_SELECTED_BLOB_BYTES,
+        max_total_bytes=_MAX_TOTAL_METADATA_BYTES,
+    )
+    try:
+        sources = tuple(
+            TerraformSource(blob.path, _required_content(contents, blob).decode("utf-8"))
+            for blob in blobs
+        )
+    except UnicodeError:
+        ConfigurationError.fail("Terraform source is not valid UTF-8 in the selected Git tree")
+    return replace(snapshot, terraform_sources=sources)
+
+
 def load_repository_snapshot(
     root: Path,
     *,
@@ -328,7 +359,7 @@ def load_calibration_snapshot(
     inspection = _inspection_from_blobs(resolved, identity, blobs)
     if inspection.completion != "complete":
         ConfigurationError.fail("repository inspection is incomplete")
-    return RepositorySnapshot(
+    snapshot = RepositorySnapshot(
         manifest=manifest,
         baseline=None,
         inspection=inspection,
@@ -342,6 +373,10 @@ def load_calibration_snapshot(
             manifest_digest=_content_digest(manifest_content),
         ),
     )
+
+    if "repository/terraform/unused-module-outputs" in manifest.enabled_rules:
+        snapshot = with_terraform_sources(resolved, snapshot)
+    return snapshot
 
 
 def _pull_request_templates(

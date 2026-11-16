@@ -41,6 +41,7 @@ from .models import (
     PullRequestReviewPolicyConfig,
     RepositoryId,
     RuleId,
+    TerraformOutputContract,
 )
 from .pull_request_body import MERGE_RISK_SECTION
 
@@ -208,6 +209,10 @@ def parse_exception(value: ParsedValue, index: int) -> ExceptionRecord:
     _strict_keys(data, fields, fields, context)
     if data["rule_id"] == "repository/artifacts/makefile-growth":
         ConfigurationError.fail("Makefile growth requires a capped makefiles.exceptions record")
+    if data["rule_id"] == "repository/terraform/unused-module-outputs":
+        ConfigurationError.fail(
+            "Unused Terraform outputs require consumer evidence, not exceptions"
+        )
     created_on = _string(data, "created_on", context)
     expires_on = _string(data, "expires_on", context)
     fingerprint = _string(data, "fingerprint", context)
@@ -646,6 +651,7 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         "makefiles",
         "javascript",
         "images",
+        "terraform",
     }
     required = {"repository_id", "components"}
     _strict_keys(data, fields, required, "manifest")
@@ -681,6 +687,39 @@ def parse_manifest_bytes(content: bytes) -> Manifest:
         if "javascript" in data
         else (),
         image_artifacts=_image_artifacts(data["images"]) if "images" in data else (),
+        terraform_output_contracts=_terraform_contracts(data["terraform"])
+        if "terraform" in data
+        else (),
+    )
+
+
+def _terraform_contracts(value: ParsedValue) -> tuple[TerraformOutputContract, ...]:
+    data = _mapping(value, "terraform")
+    _strict_keys(data, {"external_outputs"}, set(), "terraform")
+    records = _list(data.get("external_outputs", []), "terraform.external_outputs")
+    if len(records) > _MAX_EXCEPTIONS:
+        ConfigurationError.fail("too many external Terraform output contracts")
+    contracts = tuple(_terraform_contract(item, index) for index, item in enumerate(records))
+    keys = tuple((item.module, item.output) for item in contracts)
+    if len(keys) != len(set(keys)):
+        ConfigurationError.fail("terraform.external_outputs contains duplicate outputs")
+    return contracts
+
+
+def _terraform_contract(value: ParsedValue, index: int) -> TerraformOutputContract:
+    context = f"terraform.external_outputs[{index}]"
+    data = _mapping(value, context)
+    fields = {"module", "output", "reason", "evidence"}
+    _strict_keys(data, fields, fields, context)
+    output = _string(data, "output", context)
+    reason = _string(data, "reason", context).strip()
+    if not reason:
+        ConfigurationError.fail(f"{context}.reason must contain text")
+    return TerraformOutputContract(
+        module=_exact_artifact_path(_string(data, "module", context), f"{context}.module"),
+        output=output,
+        reason=reason,
+        evidence=_exact_artifact_path(_string(data, "evidence", context), f"{context}.evidence"),
     )
 
 

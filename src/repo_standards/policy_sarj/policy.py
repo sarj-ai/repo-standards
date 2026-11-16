@@ -52,6 +52,7 @@ from .spec import (
     RuleGovernance,
     RuleMaturity,
 )
+from .terraform import UNUSED_MODULE_OUTPUTS_RULE_ID, terraform_output_diagnostics
 
 
 if TYPE_CHECKING:
@@ -204,6 +205,54 @@ def _tracked_files_example(*paths: str, manifest: str | None = None) -> str:
 
 
 RULES = (
+    Rule(
+        rule_id=UNUSED_MODULE_OUTPUTS_RULE_ID,
+        version=1,
+        default_severity="error",
+        title="Remove module outputs proven to have no consumer",
+        description=(
+            "Trace all tracked Terraform roots, nested calls, receiving inputs and reachable "
+            "values before reporting an unused child export."
+        ),
+        why=(
+            "Unconsumed exports duplicate interfaces and conceal the authoritative resource "
+            "contract."
+        ),
+        fix=(
+            "Remove the unused output after reviewing external users; retain uncertain "
+            "external contracts with exact tracked evidence. Root outputs and dynamic "
+            "consumers remain protected. Baselines and general exceptions cannot hide "
+            "known-unused exports."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-terraform-unused-output",
+                title="Remove an unused child export and retain its resource",
+                language="json",
+                before=canonical_json(
+                    {
+                        "sources": {
+                            "root/main.tf": 'module "child" { source = "./child" }',
+                            "root/child/main.tf": (
+                                'resource "example" "owned" {}\n'
+                                'output "unused" { value = example.owned.id }'
+                            ),
+                        }
+                    }
+                ),
+                after=canonical_json(
+                    {
+                        "sources": {
+                            "root/main.tf": 'module "child" { source = "./child" }',
+                            "root/child/main.tf": 'resource "example" "owned" {}',
+                        }
+                    }
+                ),
+                expected_severity="error",
+            ),
+        ),
+    ),
     Rule(
         rule_id=MIGRATION_CONSOLIDATION_RULE_ID,
         version=1,
@@ -756,6 +805,7 @@ RULES = (
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
     {
+        UNUSED_MODULE_OUTPUTS_RULE_ID: RuleClassification.OBJECTIVE,
         MIGRATION_CONSOLIDATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
         UNTYPED_JAVASCRIPT_RULE_ID: RuleClassification.JUDGMENT,
@@ -773,6 +823,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
     {
+        UNUSED_MODULE_OUTPUTS_RULE_ID: 56,
         MIGRATION_CONSOLIDATION_RULE_ID: 53,
         LOCAL_RESIDUE_RULE_ID: 51,
         UNTYPED_JAVASCRIPT_RULE_ID: 49,
@@ -825,7 +876,9 @@ RULE_GOVERNANCE = tuple(
         classification=_RULE_CLASSIFICATION[rule.rule_id],
         evidence=_RULE_EVIDENCE[rule.rule_id],
         upstream=(
-            ("Git tracked-tree inventory", "repository image declarations")
+            ("sarj-iac-lint consumer analysis", "Git tracked-tree inventory")
+            if rule.rule_id == UNUSED_MODULE_OUTPUTS_RULE_ID
+            else ("Git tracked-tree inventory", "repository image declarations")
             if rule.rule_id == UNDECLARED_IMAGES_RULE_ID
             else _UPSTREAM_BY_CLASSIFICATION[_RULE_CLASSIFICATION[rule.rule_id]]
         ),
@@ -837,7 +890,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=36,
+    policy_version=37,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1558,7 +1611,14 @@ class SarjPolicy:
             if enabled_rule_ids is None
             else enabled_rule_ids
         )
+        if (
+            enabled_rule_ids is None
+            and snapshot.terraform_sources is None
+            and UNUSED_MODULE_OUTPUTS_RULE_ID not in snapshot.manifest.enabled_rules
+        ):
+            enabled = enabled.difference({UNUSED_MODULE_OUTPUTS_RULE_ID})
         separate_rules = {
+            UNUSED_MODULE_OUTPUTS_RULE_ID,
             MIGRATION_CONSOLIDATION_RULE_ID,
             PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
             UNTYPED_JAVASCRIPT_RULE_ID,
@@ -1569,6 +1629,7 @@ class SarjPolicy:
         }
         diagnostics = _repository_artifact_diagnostics(snapshot) if enabled - separate_rules else ()
         for rule_id, evaluate in (
+            (UNUSED_MODULE_OUTPUTS_RULE_ID, terraform_output_diagnostics),
             (MIGRATION_CONSOLIDATION_RULE_ID, migration_diagnostics),
             (PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID, pull_request_template_diagnostics),
             (UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics),

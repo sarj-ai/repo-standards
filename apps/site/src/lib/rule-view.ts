@@ -39,6 +39,8 @@ const DESCRIPTIONS = {
   "repository/documentation/placement": "Keep Markdown in owned locations.",
   "repository/documentation/pull-request-template-sections":
     "Include required PR template headings.",
+  "repository/terraform/unused-module-outputs":
+    "Remove module exports proven unused.",
 } as const satisfies Record<Rule["rule_id"], string>;
 
 export function ruleDescription(rule: Rule): string {

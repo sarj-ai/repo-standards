@@ -145,6 +145,20 @@ class ImageArtifact:
 
 
 @dataclass(frozen=True, slots=True)
+class TerraformOutputContract:
+    module: str
+    output: str
+    reason: str
+    evidence: str
+
+
+@dataclass(frozen=True, slots=True)
+class TerraformSource:
+    path: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
 class DocumentationConfig:
     entrypoints: tuple[str, ...]
     maximum_added_pages: int = 0
@@ -176,7 +190,7 @@ class MigrationCouplingException:
 
 DEFAULT_MAXIMUM_BODY_CHARACTERS = 2000
 DEFAULT_MAXIMUM_PROSE_CHARACTERS = 500
-MAXIMUM_BODY_CHARACTERS = 10000
+MAXIMUM_BODY_CHARACTERS = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +243,7 @@ class Manifest:
     makefile_exceptions: tuple[MakefileException, ...] = ()
     javascript_artifacts: tuple[JavaScriptArtifact, ...] = ()
     image_artifacts: tuple[ImageArtifact, ...] = ()
+    terraform_output_contracts: tuple[TerraformOutputContract, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,7 +297,7 @@ class SourceLocation:
     path: str
     line: int | None = None
     column: int | None = None
-    end_line: int | None = None
+    end_line: int | None = None  # sarj-noqa: SARJ541 -- Flat public coordinates remain independent.
     end_column: int | None = None
     pointer: str | None = None
 
@@ -542,6 +557,7 @@ class RepositorySnapshot:
     makefile_comparison: MakefileComparison | None = None
     pull_request_templates: tuple[PullRequestTemplate, ...] = ()
     migration_comparison: MigrationComparison | None = None
+    terraform_sources: tuple[TerraformSource, ...] | None = None
 
 
 @runtime_checkable

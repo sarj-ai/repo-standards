@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -11,11 +12,14 @@ import sys
 import time
 from typing import Annotated, NoReturn
 
+from pydantic import BaseModel, ConfigDict, JsonValue, RootModel
 import typer
 
-from repo_standards.core.inspection import load_calibration_snapshot
+from repo_standards.core.inspection import load_calibration_snapshot, with_terraform_sources
+from repo_standards.core.models import RuleId
 from repo_standards.core.rule_reviews import RuleVersion
 from repo_standards.policy_sarj.policy import SarjPolicy
+from repo_standards.policy_sarj.terraform import UNUSED_MODULE_OUTPUTS_RULE_ID
 from repo_standards.repository.comparison import with_makefile_comparison, with_migration_comparison
 
 
@@ -24,6 +28,31 @@ _SOURCE_TIMEOUT_SECONDS = 120
 _FULL_SHA_LENGTH = 40
 _GIT = shutil.which("git")
 app = typer.Typer(add_completion=False, help="Evaluate pending rules against pinned local corpora.")
+
+
+class _Finding(BaseModel):
+    model_config = ConfigDict(extra="allow", frozen=True, strict=True)
+    finding_id: str
+    rule_id: RuleId
+    path: str
+    anchor: str
+    message: str
+
+
+class _WorkerReport(BaseModel):
+    model_config = ConfigDict(extra="allow", frozen=True, strict=True)
+    tracked_files: int
+    findings: list[_Finding]
+
+
+@dataclass(frozen=True)
+class _SourceEvaluation:
+    report: _WorkerReport
+    elapsed_ms: float
+
+
+class _JsonDocument(RootModel[JsonValue]):
+    pass
 
 
 def _fail(message: str) -> NoReturn:
@@ -38,18 +67,18 @@ def _private_file(path: Path, *, label: str) -> None:
         _fail(f"{label} must have mode 0600")
 
 
-def _object(path: Path) -> dict[str, object]:
+def _object(path: Path) -> dict[str, JsonValue]:
     _private_file(path, label="corpus overlay")
     try:
-        value: object = json.loads(path.read_bytes())
+        value = _JsonDocument.model_validate_json(path.read_bytes()).root
     except OSError, ValueError:
         _fail("corpus overlay must be valid JSON")
     if not isinstance(value, dict):
         _fail("corpus overlay must be a JSON object")
-    return {str(key): item for key, item in value.items()}
+    return value
 
 
-def _sources(corpus: dict[str, object]) -> list[dict[str, str]]:
+def _sources(corpus: dict[str, JsonValue]) -> list[dict[str, str]]:
     if corpus.get("schema_version") != 1:
         _fail("corpus schema_version must be 1")
     raw = corpus.get("sources")
@@ -57,29 +86,33 @@ def _sources(corpus: dict[str, object]) -> list[dict[str, str]]:
         _fail("corpus sources must be a non-empty array")
     sources: list[dict[str, str]] = []
     for index, item in enumerate(raw):
-        if not isinstance(item, dict):
-            _fail(f"corpus source {index} must be an object")
-        source = {str(key): value for key, value in item.items() if isinstance(value, str)}
-        required = {"report_name", "visibility", "path", "commit", "manifest_path"}
-        if set(source) != required:
-            _fail(f"corpus source {index} must contain exactly {sorted(required)}")
-        if source["visibility"] not in {"private", "public"}:
-            _fail(f"corpus source {index} visibility must be private or public")
-        if source["visibility"] == "private" and not source["report_name"].startswith(
-            "<private-corpus-"
-        ):
-            _fail(f"private corpus source {index} must use an opaque report name")
-        if len(source["commit"]) != _FULL_SHA_LENGTH or any(
-            char not in "0123456789abcdef" for char in source["commit"]
-        ):
-            _fail(f"corpus source {index} commit must be lowercase full SHA-1")
-        root = Path(source["path"])
-        manifest = Path(source["manifest_path"])
-        if not root.is_absolute() or not root.is_dir():
-            _fail(f"corpus source {index} path must be an absolute local directory")
-        _private_file(manifest, label=f"corpus source {index} manifest")
-        sources.append(source)
+        sources.append(_source(item, index))
     return sources
+
+
+def _source(item: JsonValue, index: int) -> dict[str, str]:
+    if not isinstance(item, dict):
+        _fail(f"corpus source {index} must be an object")
+    source = {str(key): value for key, value in item.items() if isinstance(value, str)}
+    required = {"report_name", "visibility", "path", "commit", "manifest_path"}
+    if set(source) != required:
+        _fail(f"corpus source {index} must contain exactly {sorted(required)}")
+    if source["visibility"] not in {"private", "public"}:
+        _fail(f"corpus source {index} visibility must be private or public")
+    if source["visibility"] == "private" and not source["report_name"].startswith(
+        "<private-corpus-"
+    ):
+        _fail(f"private corpus source {index} must use an opaque report name")
+    if len(source["commit"]) != _FULL_SHA_LENGTH or any(
+        char not in "0123456789abcdef" for char in source["commit"]
+    ):
+        _fail(f"corpus source {index} commit must be lowercase full SHA-1")
+    root = Path(source["path"])
+    manifest = Path(source["manifest_path"])
+    if not root.is_absolute() or not root.is_dir():
+        _fail(f"corpus source {index} path must be an absolute local directory")
+    _private_file(manifest, label=f"corpus source {index} manifest")
+    return source
 
 
 def _labels(path: Path | None) -> dict[str, str]:
@@ -95,6 +128,12 @@ def _labels(path: Path | None) -> dict[str, str]:
     if len(labels) != len(raw) or any(value not in {"tp", "fp"} for value in labels.values()):
         _fail("classification labels must be tp or fp")
     return labels
+
+
+def _verify(sources: list[dict[str, str]]) -> None:
+    for source in sources:
+        if _git_head(Path(source["path"])) != source["commit"]:
+            _fail(f"corpus pin mismatch: {source['report_name']}")
 
 
 def _git_head(root: Path) -> str:
@@ -118,23 +157,15 @@ def _git_head(root: Path) -> str:
     return result.stdout.strip()
 
 
-def _verify(sources: list[dict[str, str]]) -> None:
-    for source in sources:
-        if _git_head(Path(source["path"])) != source["commit"]:
-            _fail(f"corpus pin mismatch: {source['report_name']}")
-
-
-def _finding_id(rule_id: str, path: str, anchor: str, revision: str) -> str:
-    return hashlib.sha256(f"{revision}\0{rule_id}\0{path}\0{anchor}".encode()).hexdigest()
-
-
-def _worker(root: Path, manifest_path: Path, rule_id: str) -> int:
+def _worker(root: Path, manifest_path: Path, rule_id: RuleId) -> int:
     snapshot = load_calibration_snapshot(root, manifest_path.read_bytes())
     enabled_rules = frozenset(
         RuleVersion(rule.rule_id, rule.version)
         for rule in SarjPolicy.rules()
         if rule.rule_id == rule_id
     )
+    if rule_id == UNUSED_MODULE_OUTPUTS_RULE_ID:
+        snapshot = with_terraform_sources(root, snapshot)
     snapshot = with_makefile_comparison(
         root,
         snapshot,
@@ -145,14 +176,16 @@ def _worker(root: Path, manifest_path: Path, rule_id: str) -> int:
     snapshot = with_migration_comparison(
         root, snapshot, enabled_rules=enabled_rules, base_revision=None
     )
-    diagnostics = SarjPolicy.evaluate_repository(snapshot)
+    diagnostics = SarjPolicy.evaluate_repository(
+        snapshot, enabled_rule_ids=frozenset(rule.rule_id for rule in enabled_rules)
+    )
     selected = [item for item in diagnostics if item.rule_id == rule_id]
     payload = {
         "tracked_files": snapshot.inspection.tracked_file_count,
         "findings": [
             {
                 "finding_id": _finding_id(
-                    str(item.rule_id),
+                    item.rule_id,
                     item.path,
                     item.manifest_anchor,
                     snapshot.inspection.source_revision,
@@ -169,7 +202,80 @@ def _worker(root: Path, manifest_path: Path, rule_id: str) -> int:
     return 0
 
 
-def _run_source(source: dict[str, str], rule_id: str) -> dict[str, object]:
+def _finding_id(rule_id: RuleId, path: str, anchor: str, revision: str) -> str:
+    return hashlib.sha256(f"{revision}\0{rule_id}\0{path}\0{anchor}".encode()).hexdigest()
+
+
+def _evaluate(  # ruff: ignore[too-many-arguments] - explicit report boundaries are security inputs
+    *,
+    rule_id: RuleId,
+    fixtures_passed: bool,
+    private_output: Path,
+    public_output: Path,
+    sources: list[dict[str, str]],
+    labels: dict[str, str],
+) -> None:
+    results = [(source, _run_source(source, rule_id)) for source in sources]
+    findings = [finding for _source, result in results for finding in result.report.findings]
+    finding_ids = {finding.finding_id for finding in findings if finding.finding_id}
+    if set(labels) - finding_ids:
+        _fail("classification ledger contains findings outside this evaluation")
+    tp_count = sum(labels.get(finding_id) == "tp" for finding_id in finding_ids)
+    fp_count = sum(labels.get(finding_id) == "fp" for finding_id in finding_ids)
+    unclassified_count = len(finding_ids - set(labels))
+    private_payload = {
+        "schema_version": 1,
+        "rule_id": rule_id,
+        "sources": [
+            {
+                "report_name": source["report_name"],
+                **result.report.model_dump(mode="json"),
+                "elapsed_ms": result.elapsed_ms,
+                "findings": [
+                    {
+                        **finding.model_dump(mode="json"),
+                        "classification": labels.get(finding.finding_id),
+                    }
+                    for finding in result.report.findings
+                ],
+            }
+            for source, result in results
+        ],
+    }
+    public_sources = [
+        {
+            "report_name": source["report_name"],
+            "findings": len(result.report.findings),
+            "tracked_files": result.report.tracked_files,
+            "elapsed_ms": result.elapsed_ms,
+        }
+        for source, result in results
+        if source["visibility"] == "public"
+    ]
+    decision = (
+        "ship-warning"
+        if fixtures_passed and fp_count == 0 and unclassified_count == 0
+        else "revise"
+    )
+    public_payload = {
+        "schema_version": 1,
+        "rule_id": rule_id,
+        "decision": decision,
+        "private": {
+            "report_name": "<private-corpus>",
+            "findings": len(finding_ids),
+            "tp": tp_count,
+            "fp": fp_count,
+            "unclassified": unclassified_count,
+        },
+        "public_sources": public_sources,
+        "unclassified": unclassified_count,
+    }
+    _write_json(private_output, private_payload, private=True)
+    _write_json(public_output, public_payload, private=False)
+
+
+def _run_source(source: dict[str, str], rule_id: RuleId) -> _SourceEvaluation:
     if _GIT is None:
         _fail("Git executable is unavailable")
     started = time.perf_counter()
@@ -199,12 +305,10 @@ def _run_source(source: dict[str, str], rule_id: str) -> dict[str, object]:
     if result.returncode != 0:
         _fail(f"corpus evaluation failed: {source['report_name']}")
     try:
-        payload: object = json.loads(result.stdout)
+        payload = _WorkerReport.model_validate_json(result.stdout)
     except ValueError:
         _fail(f"corpus worker returned invalid JSON: {source['report_name']}")
-    if not isinstance(payload, dict):
-        _fail(f"corpus worker returned invalid payload: {source['report_name']}")
-    return {**payload, "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)}
+    return _SourceEvaluation(payload, round((time.perf_counter() - started) * 1000, 3))
 
 
 def _write_json(path: Path, payload: object, *, private: bool) -> None:
@@ -219,79 +323,6 @@ def _write_json(path: Path, payload: object, *, private: bool) -> None:
     finally:
         if private:
             path.chmod(_PRIVATE_MODE)
-
-
-def _evaluate(  # ruff: ignore[too-many-arguments] - explicit report boundaries are security inputs
-    *,
-    rule_id: str,
-    fixtures_passed: bool,
-    private_output: Path,
-    public_output: Path,
-    sources: list[dict[str, str]],
-    labels: dict[str, str],
-) -> None:
-    results = [(source, _run_source(source, rule_id)) for source in sources]
-    findings = [
-        finding
-        for _source, result in results
-        for finding in result.get("findings", [])
-        if isinstance(finding, dict)
-    ]
-    finding_ids = {
-        str(finding.get("finding_id")) for finding in findings if finding.get("finding_id")
-    }
-    if set(labels) - finding_ids:
-        _fail("classification ledger contains findings outside this evaluation")
-    tp_count = sum(labels.get(finding_id) == "tp" for finding_id in finding_ids)
-    fp_count = sum(labels.get(finding_id) == "fp" for finding_id in finding_ids)
-    unclassified_count = len(finding_ids - set(labels))
-    private_payload = {
-        "schema_version": 1,
-        "rule_id": rule_id,
-        "sources": [
-            {
-                "report_name": source["report_name"],
-                **result,
-                "findings": [
-                    {**finding, "classification": labels.get(str(finding["finding_id"]))}
-                    for finding in result.get("findings", [])
-                    if isinstance(finding, dict)
-                ],
-            }
-            for source, result in results
-        ],
-    }
-    public_sources = [
-        {
-            "report_name": source["report_name"],
-            "findings": len(result.get("findings", [])),
-            "tracked_files": result.get("tracked_files", 0),
-            "elapsed_ms": result.get("elapsed_ms", 0),
-        }
-        for source, result in results
-        if source["visibility"] == "public"
-    ]
-    decision = (
-        "ship-warning"
-        if fixtures_passed and fp_count == 0 and unclassified_count == 0
-        else "revise"
-    )
-    public_payload = {
-        "schema_version": 1,
-        "rule_id": rule_id,
-        "decision": decision,
-        "private": {
-            "report_name": "<private-corpus>",
-            "findings": len(finding_ids),
-            "tp": tp_count,
-            "fp": fp_count,
-            "unclassified": unclassified_count,
-        },
-        "public_sources": public_sources,
-        "unclassified": unclassified_count,
-    }
-    _write_json(private_output, private_payload, private=True)
-    _write_json(public_output, public_payload, private=False)
 
 
 @app.command()
@@ -315,7 +346,7 @@ def evaluate(  # ruff: ignore[too-many-arguments] - explicit CLI options are the
     sources = _sources(_object(corpus))
     _verify(sources)
     _evaluate(
-        rule_id=rule,
+        rule_id=RuleId(rule),
         fixtures_passed=fixtures_passed,
         private_output=private_output,
         public_output=public_output,
@@ -331,7 +362,7 @@ def worker(
     rule: Annotated[str, typer.Option()],
 ) -> None:
     """Run one internal isolated evaluation worker."""
-    raise typer.Exit(_worker(root, manifest, rule))
+    raise typer.Exit(_worker(root, manifest, RuleId(rule)))
 
 
 if __name__ == "__main__":
