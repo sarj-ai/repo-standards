@@ -6,6 +6,7 @@ from typing import Annotated, ClassVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from repo_standards.core.models import (
+    DocumentationComparison,
     FixtureId,
     GitObjectId,
     InputProvenance,
@@ -25,6 +26,7 @@ from repo_standards.core.models import (
 )
 from repo_standards.core.parser import parse_manifest_bytes
 
+from .documentation import ADDED_MARKDOWN_RULE_ID
 from .images import UNDECLARED_IMAGES_RULE_ID
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID
 from .local_residue import LOCAL_RESIDUE_RULE_ID
@@ -41,7 +43,7 @@ class _MakefileExampleSource(BaseModel):
     head: dict[str, Annotated[int, Field(ge=0)]]
 
 
-class _MigrationExampleSource(BaseModel):
+class _PathComparisonExampleSource(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", strict=True)
 
     base: tuple[str, ...]
@@ -85,13 +87,28 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
         raise ValueError(message)
     if case.rule_id == MAKEFILE_GROWTH_RULE_ID:
         return _run_makefile_comparison(source)
+    if case.rule_id == ADDED_MARKDOWN_RULE_ID:
+        context = _PathComparisonExampleSource.model_validate_json(source)
+        return _run_snapshot(
+            context.head,
+            comparison=DocumentationComparison(
+                maximum_added_pages=0,
+                added_pages=tuple(
+                    sorted(
+                        path
+                        for path in set(context.head) - set(context.base)
+                        if path.casefold().endswith((".md", ".mdx"))
+                    )
+                ),
+            ),
+        )
     if case.rule_id == MIGRATION_CONSOLIDATION_RULE_ID:
-        context = _MigrationExampleSource.model_validate_json(source)
+        context = _PathComparisonExampleSource.model_validate_json(source)
         manifest = Manifest(repository_id=RepositoryId("example-repository"), components=())
         return _run_snapshot(
             context.head,
             manifest=manifest,
-            migration_comparison=MigrationComparison(
+            comparison=MigrationComparison(
                 roots=migration_roots(manifest, (*context.base, *context.head)),
                 base_files=tuple(TrackedFileEvidence(path, "f" * 40) for path in context.base),
                 head_files=tuple(TrackedFileEvidence(path, "a" * 40) for path in context.head),
@@ -162,10 +179,9 @@ def _run_pull_request_template(source: str) -> tuple[RuleId, ...]:
 def _run_snapshot(
     paths: tuple[str, ...],
     *,
-    comparison: MakefileComparison | None = None,
+    comparison: MakefileComparison | MigrationComparison | DocumentationComparison | None = None,
     manifest: Manifest | None = None,
     templates: tuple[PullRequestTemplate, ...] = (),
-    migration_comparison: MigrationComparison | None = None,
 ) -> tuple[RuleId, ...]:
     snapshot = RepositorySnapshot(
         manifest=manifest
@@ -193,9 +209,12 @@ def _run_snapshot(
             manifest_object_id=GitObjectId("d" * 40),
             manifest_digest="e" * 64,
         ),
-        makefile_comparison=comparison,
+        makefile_comparison=comparison if isinstance(comparison, MakefileComparison) else None,
+        documentation_comparison=comparison
+        if isinstance(comparison, DocumentationComparison)
+        else None,
         pull_request_templates=templates,
-        migration_comparison=migration_comparison,
+        migration_comparison=comparison if isinstance(comparison, MigrationComparison) else None,
     )
     diagnostics = SarjPolicy.evaluate_repository(snapshot)
     return tuple(sorted((item.rule_id for item in diagnostics), key=str))

@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from repo_standards.core.canonical import nearest_component
+from repo_standards.core.models import ComponentId, Diagnostic, Remediation, RuleId, SourceLocation
+
+
+if TYPE_CHECKING:
+    from repo_standards.core.models import RepositorySnapshot, RuleDefinition
+
+
+ADDED_MARKDOWN_RULE_ID = RuleId("repository/documentation/added-markdown")
+
+
+def added_markdown_diagnostics(
+    snapshot: RepositorySnapshot, *, rule: RuleDefinition
+) -> tuple[Diagnostic, ...]:
+    comparison = snapshot.documentation_comparison
+    if comparison is None or len(comparison.added_pages) <= comparison.maximum_added_pages:
+        return ()
+    path = comparison.added_pages[0]
+    component = nearest_component(path, snapshot.manifest.components)
+    return (
+        Diagnostic(
+            rule_id=rule.rule_id,
+            rule_version=rule.version,
+            severity=rule.severity,
+            evidence_level="verified",
+            component_id=component.component_id if component else ComponentId("repository"),
+            subject_kind="documentation",
+            observed=str(len(comparison.added_pages)),
+            expected=str(comparison.maximum_added_pages),
+            observed_value=len(comparison.added_pages),
+            expected_value=comparison.maximum_added_pages,
+            message=(
+                f"Added {len(comparison.added_pages)} Markdown paths; the trusted base allows "
+                f"{comparison.maximum_added_pages}. Review whether another page is necessary."
+            ),
+            path=path,
+            manifest_anchor=f"tracked_files.{path}",
+            location=SourceLocation(path, line=1),
+            remediation=Remediation(
+                summary="Prefer updating an existing canonical document or native CLI help.",
+                steps=(
+                    "Keep audit reports, rehearsal notes and task logs outside application source.",
+                    "Retain required documentation; do not rename it merely to avoid review.",
+                    "Review necessary additions using the existing documentation page budget.",
+                ),
+                validation=("Rerun the same Git comparison after reviewing the added paths.",),
+            ),
+            baselineable=False,
+        ),
+    )

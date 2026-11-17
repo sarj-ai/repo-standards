@@ -36,6 +36,7 @@ const DESCRIPTIONS = {
     "Declare each tracked image’s purpose.",
   "repository/artifacts/untyped-javascript":
     "Use TypeScript or declare required JS.",
+  "repository/documentation/added-markdown": "Review new Markdown pages.",
   "repository/documentation/placement": "Keep Markdown in owned locations.",
   "repository/documentation/pull-request-template-sections":
     "Include required PR template headings.",

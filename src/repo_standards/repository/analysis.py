@@ -21,7 +21,11 @@ from repo_standards.core.outcome import ExecutionIssue
 from repo_standards.core.rule_reviews import RuleVersion, activated_rule_ids
 from repo_standards.policy_sarj import SarjPolicy
 
-from .comparison import with_makefile_comparison, with_migration_comparison
+from .comparison import (
+    with_documentation_comparison,
+    with_makefile_comparison,
+    with_migration_comparison,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +143,9 @@ def complete_repository_analysis(
         as_of=request.as_of,
     )
     snapshot = with_migration_comparison(
+        root, snapshot, enabled_rules=enabled_rules, base_revision=request.base_revision
+    )
+    snapshot = with_documentation_comparison(
         root, snapshot, enabled_rules=enabled_rules, base_revision=request.base_revision
     )
     repository_diagnostics = policy.evaluate_repository(
