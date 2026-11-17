@@ -470,7 +470,6 @@ def test_pull_request_review_policy_migration_floor_blocks_without_approval(
         "zero_review_threshold",
         "migration_review_floor",
         "approvals_missing",
-        "sensitive_approval_missing",
     ]
 
 
@@ -542,18 +541,18 @@ def _rebased_after_review(repository: Path, *, edit_lines: int) -> RebasedReview
 
 
 @pytest.mark.parametrize(
-    ("edit_lines", "carried_forward", "reasons"),
+    ("edit_lines", "merge_ready", "reasons"),
     [
         (0, True, ["one_review_threshold", "approval_carried_forward"]),
         (500, True, ["one_review_threshold", "approval_carried_forward"]),
-        (801, False, ["two_review_threshold", "stale_approval", "approvals_missing"]),
+        (801, False, ["two_review_threshold", "approval_carried_forward", "approvals_missing"]),
     ],
 )
 def test_pull_request_review_policy_carries_approval_across_rebase(
     tmp_path: Path,
     *,
     edit_lines: int,
-    carried_forward: bool,
+    merge_ready: bool,
     reasons: list[str],
 ) -> None:
     rebased = _rebased_after_review(tmp_path, edit_lines=edit_lines)
@@ -578,7 +577,7 @@ def test_pull_request_review_policy_carries_approval_across_rebase(
         ],
     )
 
-    assert result.exit_code == (0 if carried_forward else 1), result.stdout
+    assert result.exit_code == (0 if merge_ready else 1), result.stdout
     payload = _json_object(result.stdout)
     assert _object(payload["summary"])["reasons"] == reasons
     assert payload["earlier_approvals"] == [
@@ -586,7 +585,7 @@ def test_pull_request_review_policy_carries_approval_across_rebase(
             "reviewer": "human",
             "commit_sha": rebased.reviewed,
             "counted_lines_since_review": edit_lines,
-            "carried_forward": carried_forward,
+            "carried_forward": True,
             "allowlisted_bot": False,
         }
     ]

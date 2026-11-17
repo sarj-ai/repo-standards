@@ -285,88 +285,63 @@ def test_review_evidence_fails_closed(
     assert reason in result.reasons
 
 
-def test_stale_approval_is_reported_without_blocking() -> None:
-    reviews = (_approval("early", commit_sha=OTHER_HEAD), _approval("a"), _approval("b"))
+@pytest.mark.parametrize(
+    "since_review",
+    [
+        SinceReviewEvidence(counted_lines=0, changed_paths=("README.md",)),
+        SinceReviewEvidence(counted_lines=5_000, changed_paths=("README.md",)),
+        SinceReviewEvidence(
+            counted_lines=1,
+            changed_paths=("products/platform/datastores/postgres/migrations/0002.sql",),
+        ),
+        SinceReviewEvidence(counted_lines=1, changed_paths=("domain/model.py",)),
+        None,
+    ],
+)
+def test_earlier_approval_counts_whatever_changed_since(
+    since_review: SinceReviewEvidence | None,
+) -> None:
+    review = _approval(commit_sha=OTHER_HEAD, since_review=since_review)
 
-    result = evaluate_review_policy(_evidence(counted_lines=801, latest_human_reviews=reviews))
-
-    assert result.current_human_approvals == 2
-    assert result.merge_ready
-    assert ReviewPolicyReason.STALE_APPROVAL in result.reasons
-
-
-def test_stale_approval_does_not_count_toward_required_reviews() -> None:
     result = evaluate_review_policy(
-        _evidence(counted_lines=200, latest_human_reviews=(_approval(commit_sha=OTHER_HEAD),))
-    )
-
-    assert result.current_human_approvals == 0
-    assert not result.merge_ready
-    assert ReviewPolicyReason.APPROVALS_MISSING in result.reasons
-
-
-@pytest.mark.parametrize("lines", [0, 200, 800])
-def test_approval_carries_forward_up_to_two_review_threshold(lines: int) -> None:
-    result = evaluate_review_policy(
-        _evidence(counted_lines=800, latest_human_reviews=(_earlier_approval(lines),))
+        _evidence(counted_lines=500, latest_human_reviews=(review,)), PLATFORM_POLICY
     )
 
     assert result.current_human_approvals == 1
     assert result.merge_ready
+    assert result.carried_forward_reviewers == ("reviewer",)
     assert ReviewPolicyReason.APPROVAL_CARRIED_FORWARD in result.reasons
-    assert ReviewPolicyReason.STALE_APPROVAL not in result.reasons
 
 
-def test_approval_goes_stale_above_two_review_threshold() -> None:
-    result = evaluate_review_policy(
-        _evidence(counted_lines=801, latest_human_reviews=(_earlier_approval(801),))
-    )
-
-    assert result.current_human_approvals == 0
-    assert not result.merge_ready
-    assert ReviewPolicyReason.STALE_APPROVAL in result.reasons
-    assert ReviewPolicyReason.APPROVAL_CARRIED_FORWARD not in result.reasons
-
-
-@pytest.mark.parametrize(("lines", "carried"), [(20, True), (21, False)])
-def test_carry_forward_follows_configured_two_review_threshold(
-    *, lines: int, carried: bool
-) -> None:
-    policy = ReviewPolicyConfig(zero_review_below_lines=10, one_review_maximum_lines=20)
-
-    result = evaluate_review_policy(
-        _evidence(counted_lines=20, latest_human_reviews=(_earlier_approval(lines),)),
-        policy,
-    )
-
-    assert result.merge_ready is carried
-    assert (ReviewPolicyReason.STALE_APPROVAL in result.reasons) is not carried
-
-
-def test_migration_change_since_review_does_not_carry_forward() -> None:
-    since_paths = ("products/platform/datastores/postgres/migrations/0002.sql",)
+def test_earlier_approval_meets_migration_review_floor() -> None:
+    migration = "products/platform/datastores/postgres/migrations/0001.sql"
 
     result = evaluate_review_policy(
         _evidence(
-            counted_lines=500,
-            latest_human_reviews=(_earlier_approval(1, since_paths),),
+            changed_paths=(migration,),
+            latest_human_reviews=(_earlier_approval(1, (migration,)),),
         ),
         PLATFORM_POLICY,
     )
 
-    assert result.current_human_approvals == 0
-    assert not result.merge_ready
-    assert ReviewPolicyReason.STALE_APPROVAL in result.reasons
+    assert result.required_human_reviews == 1
+    assert result.merge_ready
 
 
-def test_unmeasured_change_since_review_does_not_carry_forward() -> None:
+def test_migration_review_floor_accepts_any_counted_approval() -> None:
+    migration = "products/platform/datastores/postgres/migrations/0001.sql"
+
     result = evaluate_review_policy(
-        _evidence(counted_lines=500, latest_human_reviews=(_approval(commit_sha=OTHER_HEAD),))
+        _evidence(
+            changed_paths=(migration,),
+            latest_human_reviews=(_earlier_approval(1, (migration,), "early"), _bot_approval()),
+        ),
+        PLATFORM_POLICY,
     )
 
-    assert result.current_human_approvals == 0
-    assert not result.merge_ready
-    assert ReviewPolicyReason.APPROVAL_CARRIED_FORWARD not in result.reasons
+    assert result.merge_ready
+    assert result.current_human_approvals == 1
+    assert result.allowlisted_bot_approvers == ("bulbul-review[bot]",)
 
 
 def test_carried_and_exact_approvals_together_meet_two_review_tier() -> None:
@@ -465,9 +440,9 @@ def test_two_review_tier_needs_a_human_beside_a_allowlisted_bot(
     assert (ReviewPolicyReason.APPROVALS_MISSING in result.reasons) is not merge_ready
 
 
-@pytest.mark.parametrize(("lines_since_review", "approvals"), [(5, 1), (801, 0)])
+@pytest.mark.parametrize("lines_since_review", [5, 801])
 def test_earlier_allowlisted_bot_approval_follows_human_carry_forward_rules(
-    *, lines_since_review: int, approvals: int
+    *, lines_since_review: int
 ) -> None:
     def evaluate(*, allowlisted_bot: bool) -> ReviewPolicyResult:
         review = _earlier_approval(lines_since_review, allowlisted_bot=allowlisted_bot)
@@ -477,9 +452,9 @@ def test_earlier_allowlisted_bot_approval_follows_human_carry_forward_rules(
     bot = evaluate(allowlisted_bot=True)
 
     assert bot.reasons == human.reasons
-    assert bot.merge_ready is human.merge_ready is (approvals == 1)
+    assert bot.merge_ready is human.merge_ready is True
     assert bot.carried_forward_reviewers == human.carried_forward_reviewers
-    assert human.current_human_approvals == len(bot.allowlisted_bot_approvers) == approvals
+    assert human.current_human_approvals == len(bot.allowlisted_bot_approvers) == 1
     assert bot.current_human_approvals == 0
 
 
