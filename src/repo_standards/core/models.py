@@ -546,9 +546,9 @@ class RepositorySnapshot:
     inspection: RepositoryInspection
     provenance: InputProvenance
     makefile_comparison: MakefileComparison | None = None
-    documentation_comparison: DocumentationComparison | None = None
     pull_request_templates: tuple[PullRequestTemplate, ...] = ()
     migration_comparison: MigrationComparison | None = None
+    documentation_comparison: DocumentationComparison | None = None
 
 
 @runtime_checkable

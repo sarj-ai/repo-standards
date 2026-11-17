@@ -6,9 +6,19 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from repo_standards.core.models import FindingsReport, FixtureId
+from repo_standards.core.models import (
+    FindingsReport,
+    FixtureId,
+    MigrationComparison,
+    PullRequestTemplate,
+)
 from repo_standards.policy_sarj.examples import run_rule_example
-from repo_standards.repository import RepositoryAnalysisRequest, analyze_repository
+from repo_standards.repository import (
+    RepositoryAnalysisRequest,
+    RepositorySnapshot,
+    analyze_repository,
+    load_repository_snapshot,
+)
 
 
 if TYPE_CHECKING:
@@ -159,3 +169,23 @@ def test_public_example_executes_the_warning_contract() -> None:
     fixture = FixtureId("sarj-documentation-added-markdown")
     assert run_rule_example(fixture, '{"base":[],"head":["docs/notes.md"]}') == (_RULE,)
     assert run_rule_example(fixture, '{"base":["README.md"],"head":["README.md"]}') == ()
+
+
+def test_snapshot_preserves_legacy_optional_positional_arguments(repository: Path) -> None:
+    snapshot = load_repository_snapshot(repository)
+    templates = (PullRequestTemplate(".github/pull_request_template.md", "Test evidence"),)
+    migration = MigrationComparison(roots=(), base_files=(), head_files=())
+
+    legacy = RepositorySnapshot(
+        snapshot.manifest,
+        snapshot.baseline,
+        snapshot.inspection,
+        snapshot.provenance,
+        None,
+        templates,
+        migration,
+    )
+
+    assert legacy.pull_request_templates is templates
+    assert legacy.migration_comparison is migration
+    assert legacy.documentation_comparison is None
