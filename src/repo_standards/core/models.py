@@ -500,6 +500,12 @@ class MakefileComparison:
 
 
 @dataclass(frozen=True, slots=True)
+class DocumentationComparison:
+    maximum_added_pages: int
+    added_pages: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class MigrationComparison:
     roots: tuple[str, ...]
     base_files: tuple[TrackedFileEvidence, ...]
@@ -540,6 +546,7 @@ class RepositorySnapshot:
     inspection: RepositoryInspection
     provenance: InputProvenance
     makefile_comparison: MakefileComparison | None = None
+    documentation_comparison: DocumentationComparison | None = None
     pull_request_templates: tuple[PullRequestTemplate, ...] = ()
     migration_comparison: MigrationComparison | None = None
 

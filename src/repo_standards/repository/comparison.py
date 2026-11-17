@@ -13,12 +13,14 @@ from repo_standards.core.inspection import (
 )
 from repo_standards.core.models import (
     ComparisonProvenance,
+    DocumentationComparison,
     MakefileComparison,
     MakefileMetric,
     MigrationComparison,
     TrackedFileEvidence,
 )
 from repo_standards.core.parser import parse_manifest_bytes
+from repo_standards.policy_sarj.documentation import ADDED_MARKDOWN_RULE_ID
 from repo_standards.policy_sarj.makefiles import (
     MAKEFILE_GROWTH_RULE_ID,
     is_makefile_path,
@@ -59,6 +61,59 @@ class _EmptyComparisonBase:
 
 
 type _ComparisonBase = _ExistingComparisonBase | _EmptyComparisonBase
+
+
+def with_documentation_comparison(
+    root: Path,
+    snapshot: RepositorySnapshot,
+    *,
+    enabled_rules: frozenset[RuleVersion],
+    base_revision: str | None,
+) -> RepositorySnapshot:
+    if not any(item.rule_id == ADDED_MARKDOWN_RULE_ID for item in enabled_rules):
+        return snapshot
+    provenance = snapshot.provenance
+    if provenance.mode == "worktree":
+        ConfigurationError.fail("Documentation comparison requires an exact Git tree or index")
+    head = GitIdentity(provenance.source_revision, provenance.tree_digest, provenance.mode)
+    if provenance.comparison_basis is not None:
+        base_revision = provenance.comparison_base_revision
+    comparison_base = _comparison_base(root, head, base_revision)
+    base = comparison_base.identity
+    base_paths = (
+        frozenset(item.path for item in tracked_files_for_identity(root, base))
+        if base
+        else frozenset[str]()
+    )
+    policy = None
+    if base is not None and provenance.manifest_path in base_paths:
+        blob = read_tracked_blob_contents(root, (provenance.manifest_path,), identity=base)[0]
+        policy = parse_manifest_bytes(blob.content).documentation
+    exemptions = frozenset(policy.addition_exemptions) if policy else frozenset[str]()
+    added_pages = tuple(
+        sorted(
+            item.path
+            for item in snapshot.inspection.tracked_files
+            if item.path not in base_paths
+            and item.path.casefold().endswith((".md", ".mdx"))
+            and item.path not in exemptions
+        )
+    )
+    return replace(
+        snapshot,
+        documentation_comparison=DocumentationComparison(
+            maximum_added_pages=policy.maximum_added_pages if policy else 0,
+            added_pages=added_pages,
+        ),
+        provenance=replace(
+            provenance,
+            comparison=ComparisonProvenance(
+                revision=base.source_revision if base else "0" * len(head.source_revision),
+                tree_digest=base.tree_digest if base else "0" * len(head.source_revision),
+                basis=provenance.comparison_basis or comparison_base.basis,
+            ),
+        ),
+    )
 
 
 def with_makefile_comparison(

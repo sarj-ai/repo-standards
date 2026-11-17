@@ -77,6 +77,7 @@ HttpsUrl = Annotated[str, Field(pattern=r"^https://")]
 
 _RULE_SLUGS = types.MappingProxyType(
     {
+        "repository/documentation/added-markdown": "added-markdown",
         "repository/artifacts/migration-consolidation": "migration-consolidation",
         "repository/artifacts/local-residue": "local-residue",
         "repository/artifacts/untyped-javascript": "untyped-javascript",

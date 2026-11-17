@@ -7,13 +7,12 @@ import shutil
 import stat
 import subprocess
 import sys
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 from pydantic import TypeAdapter  # ruff: ignore[banned-api] -- generic schema codecs preserve the tested wire representation without adding a model envelope.
+import pytest
 
-
-if TYPE_CHECKING:
-    import pytest
+from repo_standards.core.models import RuleId
 
 
 _SCRIPT = (
@@ -248,11 +247,24 @@ def test_makefile_calibration_keeps_distinct_source_findings(tmp_path: Path) -> 
     assert finding_ids[0] != finding_ids[1]
 
 
-def test_migration_calibration_uses_the_exact_commit_comparison(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("paths", "rule_id"),
+    [
+        (
+            ("migrations/001.sql", "migrations/002.sql"),
+            RuleId("repository/artifacts/migration-consolidation"),
+        ),
+        (("guide.md",), RuleId("repository/documentation/added-markdown")),
+    ],
+)
+def test_calibration_uses_the_exact_commit_comparison(
+    tmp_path: Path, paths: tuple[str, ...], rule_id: RuleId
+) -> None:
     repository, _corpus = _fixture(tmp_path)
-    (repository / "migrations").mkdir()
-    for name in ("001.sql", "002.sql"):
-        (repository / "migrations" / name).write_text("SELECT 1;\n")
+    for name in paths:
+        path = repository / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("Fixture content\n")
     _git(repository, "add", ".")
     _git(
         repository,
@@ -263,7 +275,7 @@ def test_migration_calibration_uses_the_exact_commit_comparison(tmp_path: Path) 
         "commit",
         "--quiet",
         "-m",
-        "new migrations",
+        "add comparison fixtures",
     )
     result = _run(
         "_worker",
@@ -272,9 +284,9 @@ def test_migration_calibration_uses_the_exact_commit_comparison(tmp_path: Path) 
         "--manifest",
         str(tmp_path / "sidecar.toml"),
         "--rule",
-        "repository/artifacts/migration-consolidation",
+        rule_id,
     )
     payload = _JSON_OBJECT.validate_json(result.stdout)
     findings = _JSON_OBJECTS.validate_python(payload["findings"])
     assert len(findings) == 1
-    assert findings[0]["path"] == "migrations/001.sql"
+    assert findings[0]["path"] == paths[0]

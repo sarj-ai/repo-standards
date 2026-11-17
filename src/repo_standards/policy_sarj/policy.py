@@ -34,6 +34,7 @@ from repo_standards.core.taxonomy import (
     taxonomy,
 )
 
+from .documentation import ADDED_MARKDOWN_RULE_ID, added_markdown_diagnostics
 from .images import UNDECLARED_IMAGES_RULE_ID, image_diagnostics
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics
 from .local_residue import LOCAL_RESIDUE_RULE_ID, local_residue_diagnostics
@@ -204,6 +205,41 @@ def _tracked_files_example(*paths: str, manifest: str | None = None) -> str:
 
 
 RULES = (
+    Rule(
+        rule_id=ADDED_MARKDOWN_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Review new Markdown pages against the trusted documentation budget",
+        description=(
+            "Compare exact Git paths with the base tree or HEAD for staged checks. New .md "
+            "and .mdx paths, case-insensitively, count toward documentation.maximum_added_pages "
+            "(default zero). Only exact addition_exemptions from the base manifest apply; "
+            "a candidate cannot authorize its own additions. Renamed and copied destinations "
+            "count as new paths. Existing-page edits, deletions and non-Markdown files pass."
+        ),
+        why=(
+            "New notes, reports and duplicated guides increase review and maintenance noise. "
+            "Required documentation can justify another page, so this policy preference warns "
+            "rather than declaring every addition incorrect."
+        ),
+        fix=(
+            "Prefer the existing canonical document or native CLI help. Keep private audit "
+            "artifacts outside source. Review necessary pages using the existing documentation "
+            "budget; do not rename files or delete required contracts to silence a warning. "
+            "Use --base for branch-wide comparison. No content rewrite or autofix is offered."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, DOCUMENTATION),
+        examples=(
+            _example(
+                example_id="sarj-documentation-added-markdown",
+                title="Update an existing guide instead of adding another page",
+                language="json",
+                before='{"base":["README.md"],"head":["README.md","docs/notes.md"]}',
+                after='{"base":["README.md"],"head":["README.md"]}',
+                expected_severity="warning",
+            ),
+        ),
+    ),
     Rule(
         rule_id=MIGRATION_CONSOLIDATION_RULE_ID,
         version=1,
@@ -756,6 +792,7 @@ RULES = (
 
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
     {
+        ADDED_MARKDOWN_RULE_ID: RuleClassification.JUDGMENT,
         MIGRATION_CONSOLIDATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
         UNTYPED_JAVASCRIPT_RULE_ID: RuleClassification.JUDGMENT,
@@ -773,6 +810,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
 )
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
     {
+        ADDED_MARKDOWN_RULE_ID: 56,
         MIGRATION_CONSOLIDATION_RULE_ID: 53,
         LOCAL_RESIDUE_RULE_ID: 51,
         UNTYPED_JAVASCRIPT_RULE_ID: 49,
@@ -837,7 +875,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=36,
+    policy_version=37,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1559,6 +1597,7 @@ class SarjPolicy:
             else enabled_rule_ids
         )
         separate_rules = {
+            ADDED_MARKDOWN_RULE_ID,
             MIGRATION_CONSOLIDATION_RULE_ID,
             PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
             UNTYPED_JAVASCRIPT_RULE_ID,
@@ -1569,6 +1608,7 @@ class SarjPolicy:
         }
         diagnostics = _repository_artifact_diagnostics(snapshot) if enabled - separate_rules else ()
         for rule_id, evaluate in (
+            (ADDED_MARKDOWN_RULE_ID, added_markdown_diagnostics),
             (MIGRATION_CONSOLIDATION_RULE_ID, migration_diagnostics),
             (PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID, pull_request_template_diagnostics),
             (UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics),
