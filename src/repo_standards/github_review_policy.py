@@ -1095,9 +1095,8 @@ def _earlier_approval_line(
         measured = "not measurable"
     else:
         measured = f"{lines} counted lines since"
-    outcome = "carried forward" if approval.get("carried_forward") is True else "needs re-approval"
     kind = "allowlisted bot approval" if approval.get("allowlisted_bot") is True else "approval"
-    return f"- Earlier {kind} by @{reviewer} on `{commit}`: {measured}, **{outcome}**\n"
+    return f"- Earlier {kind} by @{reviewer} on `{commit}`: {measured}\n"
 
 
 def _evaluated_head(receipt: Mapping[str, JSONValue]) -> JSONValue:

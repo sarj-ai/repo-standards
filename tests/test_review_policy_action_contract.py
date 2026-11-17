@@ -1108,7 +1108,7 @@ def test_comment_names_allowlisted_bot_approvals_apart_from_human_ones() -> None
                 "reviewer": "348999126:bulbul-review[bot]",
                 "commit_sha": "b" * 40,
                 "counted_lines_since_review": 900,
-                "carried_forward": False,
+                "carried_forward": True,
                 "allowlisted_bot": True,
             }
         ]
@@ -1135,7 +1135,7 @@ def test_comment_names_allowlisted_bot_approvals_apart_from_human_ones() -> None
     ) in comment
     assert (
         f"- Earlier allowlisted bot approval by @bulbul-review[bot] on `{'b' * 12}`: "
-        "900 counted lines since, **needs re-approval**\n"
+        "900 counted lines since\n"
     ) in comment
 
 
@@ -1198,22 +1198,22 @@ def test_comment_explains_each_earlier_approval() -> None:
         _receipt(
             [
                 {
-                    "reviewer": "20:carried",
+                    "reviewer": "20:measured",
                     "commit_sha": "b" * 40,
                     "counted_lines_since_review": 12,
                     "carried_forward": True,
                 },
                 {
-                    "reviewer": "21:stale",
+                    "reviewer": "21:unmeasured",
                     "commit_sha": "c" * 40,
                     "counted_lines_since_review": None,
-                    "carried_forward": False,
+                    "carried_forward": True,
                 },
                 {
                     "reviewer": "22:gone",
                     "commit_sha": "d" * 40,
                     "counted_lines_since_review": None,
-                    "carried_forward": False,
+                    "carried_forward": True,
                 },
             ]
         ),
@@ -1223,16 +1223,11 @@ def test_comment_explains_each_earlier_approval() -> None:
         unavailable={"d" * 40: "fatal: remote error: upload-pack: not our ref"},
     )
 
-    assert (
-        f"- Earlier approval by @carried on `{'b' * 12}`: 12 counted lines since, "
-        "**carried forward**\n"
-    ) in comment
-    assert (
-        f"- Earlier approval by @stale on `{'c' * 12}`: not measurable, **needs re-approval**\n"
-    ) in comment
+    assert f"- Earlier approval by @measured on `{'b' * 12}`: 12 counted lines since\n" in comment
+    assert f"- Earlier approval by @unmeasured on `{'c' * 12}`: not measurable\n" in comment
     assert (
         f"- Earlier approval by @gone on `{'d' * 12}`: approved commit unavailable "
-        "(`fatal: remote error: upload-pack: not our ref`), **needs re-approval**\n"
+        "(`fatal: remote error: upload-pack: not our ref`)\n"
     ) in comment
 
 

@@ -253,16 +253,18 @@ def test_exception_cannot_be_reused_for_a_different_path_set() -> None:
 
 
 @pytest.mark.parametrize("path", ["domains/billing.py", "domain/subscriptions.ts"])
-def test_domain_contracts_require_current_human_consensus(path: str) -> None:
+def test_domain_contracts_require_one_counted_approval(path: str) -> None:
     evidence = _evidence(path)
 
     assert not evaluate_review_policy(evidence).merge_ready
-    assert evaluate_review_policy(
-        replace(evidence, latest_human_reviews=(_approval("alice"),))
-    ).merge_ready
-    assert not evaluate_review_policy(
-        replace(evidence, latest_human_reviews=(_approval("bot", bot=True),))
-    ).merge_ready
+    for approval in (
+        _approval("alice"),
+        _approval("alice", commit=OLD),
+        _approval("bot", bot=True),
+    ):
+        assert evaluate_review_policy(
+            replace(evidence, latest_human_reviews=(approval,))
+        ).merge_ready
 
 
 def test_declared_domain_roots_do_not_match_adjacent_names() -> None:

@@ -860,13 +860,14 @@ def pull_request_review_policy_command(  # ruff: ignore[too-many-arguments,too-m
         typer.Option(help="Git attribute that marks repository-specific excluded artifacts."),
     ] = "pr-size-excluded",
 ) -> None:
-    """Require short prose, well-formed examples, isolated migrations and human consensus.
+    """Require short prose, well-formed examples, isolated migrations and approvals.
 
     Defaults: 2,000 total characters and 500 prose characters. Use closed,
     language-tagged code fences when examples help explain the change.
 
     The total includes Markdown and comments.
-    Migration-only PRs and declared domain roots need current human approval.
+    Migration-only PRs and declared domain roots need one approval; an approval of
+    an earlier commit still counts.
     Coupling other files requires a tracked migration_exception with reason,
     alternatives, and every coupled path, plus two human approvals on this head.
     Trusted promotion exemptions preserve their existing scope behavior.

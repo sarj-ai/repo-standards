@@ -418,7 +418,6 @@ def test_authenticated_multifile_activation_waives_only_review_floors():
     config = ReviewPolicyConfig(author_review_floor=1, verified_activation=proof)
     result = evaluate_review_policy(evidence, config)
     assert result.required_human_reviews == 0
-    assert "sensitive_approval_missing" not in result.reasons
     for policy_passed in (True, False):
         decision = final_policy_decision(
             policy_passed=policy_passed,
@@ -435,7 +434,6 @@ def test_authenticated_multifile_activation_waives_only_review_floors():
             assert isinstance(decision, PolicyRejected)
     ordinary = evaluate_review_policy(evidence, ReviewPolicyConfig(author_review_floor=1))
     assert ordinary.required_human_reviews == 1
-    assert "sensitive_approval_missing" in ordinary.reasons
 
 
 @pytest.mark.parametrize(
@@ -617,7 +615,6 @@ def test_authenticated_activation_keeps_technical_and_body_policy(failure: str) 
     )
     assert (result.merge_ready and not missing_sections) == (failure == "none")
     assert result.required_human_reviews == 0
-    assert "sensitive_approval_missing" not in result.reasons
 
 
 def _activation_evidence() -> ReviewPolicyEvidence:

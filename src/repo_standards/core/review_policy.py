@@ -86,7 +86,6 @@ class ReviewPolicyReason(StrEnum):
     REQUIRED_CHECK_FAILED = "required_check_failed"
     REVIEW_EVIDENCE_MISSING = "review_evidence_missing"
     REVIEW_EVIDENCE_AMBIGUOUS = "review_evidence_ambiguous"
-    STALE_APPROVAL = "stale_approval"
     APPROVAL_CARRIED_FORWARD = "approval_carried_forward"
     ALLOWLISTED_BOT_APPROVAL_NOT_COUNTED = "allowlisted_bot_approval_not_counted"
     CHANGES_REQUESTED = "changes_requested"
@@ -97,7 +96,6 @@ class ReviewPolicyReason(StrEnum):
     BODY_PROSE_TOO_LONG = "body_prose_too_long"
     BODY_CODE_EXAMPLE_INVALID = "body_code_example_invalid"
     DOMAIN_REVIEW_FLOOR = "domain_review_floor"
-    SENSITIVE_APPROVAL_MISSING = "sensitive_approval_missing"
     MIGRATION_CHANGES_MIXED = "migration_changes_mixed"
     MIGRATION_EXCEPTION_ACCEPTED = "migration_exception_accepted"
 
@@ -108,7 +106,6 @@ _BLOCKING_REASONS = frozenset(ReviewPolicyReason) - {
     ReviewPolicyReason.TWO_REVIEW_THRESHOLD,
     ReviewPolicyReason.MIGRATION_REVIEW_FLOOR,
     ReviewPolicyReason.AUTHOR_REVIEW_FLOOR,
-    ReviewPolicyReason.STALE_APPROVAL,
     ReviewPolicyReason.APPROVAL_CARRIED_FORWARD,
     ReviewPolicyReason.ALLOWLISTED_BOT_APPROVAL_NOT_COUNTED,
     ReviewPolicyReason.DOMAIN_REVIEW_FLOOR,
@@ -322,7 +319,6 @@ def evaluate_review_policy(
         evidence,
         required_reviews=required_reviews,
         head_matches=head_matches,
-        config=config,
     )
     reasons.extend(review_assessment.reasons)
     reasons.extend(_focus_reasons(evidence, config))
@@ -388,16 +384,6 @@ def _focus_reasons(
         and review.commit_sha == evidence.evaluated_head_sha
         and not review.allowlisted_bot
     )
-    sensitive_floor = max(
-        config.migration_review_floor
-        if _touches_migration(
-            changed_paths=evidence.changed_paths, migration_roots=config.migration_roots
-        )
-        else 0,
-        int(any(_under_roots(path, config.domain_roots) for path in evidence.changed_paths)),
-    )
-    if len(exact_humans) < sensitive_floor and not _verified_activation(evidence, config):
-        reasons.append(ReviewPolicyReason.SENSITIVE_APPROVAL_MISSING)
     coupled_paths = migration_coupled_paths(evidence.changed_paths, config.migration_roots)
     exception = evidence.migration_exception
     exception_accepted = bool(
@@ -519,7 +505,6 @@ def _review_reasons(
     *,
     required_reviews: RequiredReviewCount,
     head_matches: bool,
-    config: ReviewPolicyConfig,
 ) -> _ReviewAssessment:
     reviews = evidence.latest_human_reviews
     if reviews is None:
@@ -532,7 +517,6 @@ def _review_reasons(
         reviews,
         expected_head=evidence.evaluated_head_sha,
         head_matches=head_matches,
-        config=config,
     )
     bot_approvals = sum(review.allowlisted_bot for review in approvals.current)
     human_approvals = len(approvals.current) - bot_approvals
@@ -540,8 +524,6 @@ def _review_reasons(
         approvals.current, author_is_bot=evidence.author_is_bot
     )
     reasons: list[ReviewPolicyReason] = []
-    if approvals.stale:
-        reasons.append(ReviewPolicyReason.STALE_APPROVAL)
     if approvals.carried:
         reasons.append(ReviewPolicyReason.APPROVAL_CARRIED_FORWARD)
     if len(counted_bot_approvers) < bot_approvals:
@@ -562,7 +544,6 @@ def _review_reasons(
 class _CurrentApprovals:
     current: tuple[HumanReviewEvidence, ...]
     carried: tuple[HumanReviewEvidence, ...]
-    stale: bool
 
 
 def _current_approvals(
@@ -570,19 +551,12 @@ def _current_approvals(
     *,
     expected_head: GitObjectId,
     head_matches: bool,
-    config: ReviewPolicyConfig,
 ) -> _CurrentApprovals:
+    if not head_matches:
+        return _CurrentApprovals((), ())
     approved = tuple(review for review in reviews if review.state is ReviewState.APPROVED)
-    exact = tuple(
-        review for review in approved if head_matches and review.commit_sha == expected_head
-    )
-    earlier = tuple(review for review in approved if review.commit_sha != expected_head)
-    carried = tuple(
-        review
-        for review in earlier
-        if head_matches and _carries_forward(review.since_review, config=config)
-    )
-    return _CurrentApprovals(exact + carried, carried, stale=len(carried) < len(earlier))
+    carried = tuple(review for review in approved if review.commit_sha != expected_head)
+    return _CurrentApprovals(approved, carried)
 
 
 def _counted_allowlisted_bot_approvers(
@@ -594,19 +568,3 @@ def _counted_allowlisted_bot_approvers(
         return ()
     approvers = tuple(review.reviewer for review in current if review.allowlisted_bot)
     return approvers[:ALLOWLISTED_BOT_APPROVAL_LIMIT]
-
-
-def _carries_forward(
-    since_review: SinceReviewEvidence | None,
-    *,
-    config: ReviewPolicyConfig,
-) -> bool:
-    return (
-        since_review is not None
-        and since_review.counted_lines <= config.one_review_maximum_lines
-        and not _touches_migration(
-            changed_paths=since_review.changed_paths,
-            migration_roots=config.migration_roots,
-        )
-        and not any(_under_roots(path, config.domain_roots) for path in since_review.changed_paths)
-    )
