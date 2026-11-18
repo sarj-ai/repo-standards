@@ -182,7 +182,7 @@ jobs:
           retention-days: 14
 
   safety:
-    name: Require successful exact main validation
+    name: Require successful exact main package validation
     if: needs.detect.outputs.prepare_artifacts == 'true'
     needs: detect
     runs-on: ubuntu-24.04
@@ -196,7 +196,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Require successful latest own-repository push checks
+      - name: Require successful latest package and standards checks
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ needs.detect.outputs.source_sha }}

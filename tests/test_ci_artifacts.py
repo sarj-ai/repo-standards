@@ -65,6 +65,8 @@ class Gateway:
 
     def get(self, endpoint: str) -> JsonValue:
         assert endpoint.startswith("repos/owner/repo/actions/")
+        if "/jobs?" in endpoint:
+            assert endpoint.endswith("/attempts/1/jobs?per_page=100")
         return self.responses.pop(0)
 
     def download(self, endpoint: str, destination: Path) -> None:
@@ -72,19 +74,20 @@ class Gateway:
         destination.write_bytes(self.archive.read_bytes())
 
 
+def _successful_jobs() -> dict[str, JsonValue]:
+    return {
+        "total_count": 2,
+        "jobs": [
+            {"name": name, "status": "completed", "conclusion": "success"}
+            for name in ("Build and install artifacts", "CI / packages")
+        ],
+    }
+
+
 def _responses(digest: str, *, latest_attempt: int = 1) -> list[JsonValue]:
     return [
         {"total_count": 1, "workflow_runs": [_run()]},
-        {
-            "total_count": 1,
-            "jobs": [
-                {
-                    "name": "Build and install artifacts",
-                    "status": "completed",
-                    "conclusion": "success",
-                }
-            ],
-        },
+        _successful_jobs(),
         {
             "total_count": 1,
             "artifacts": [
@@ -103,6 +106,7 @@ def _responses(digest: str, *, latest_attempt: int = 1) -> list[JsonValue]:
                 }
             ],
         },
+        _successful_jobs(),
         _run(run_attempt=latest_attempt),
     ]
 
@@ -160,6 +164,11 @@ def test_wrong_failed_or_incomplete_main_runs_do_not_reuse(tmp_path: Path, case:
     elif case == "pending":
         run.update(status="in_progress", conclusion=None)
     responses = _responses(digest)
+    if case in {"failure", "newer-failure"}:
+        responses[1] = {
+            "total_count": 1,
+            "jobs": [{"name": "CI / packages", "status": "completed", "conclusion": "failure"}],
+        }
     rows: list[JsonValue] = (
         [run, _run(id=8, conclusion="failure")] if case == "newer-failure" else [run]
     )
@@ -296,13 +305,13 @@ def test_main_can_complete_successfully_during_download(tmp_path: Path) -> None:
     assert isinstance(result, VerifiedArtifact)
 
 
-@pytest.mark.parametrize("case", ["failure", "changed-source", "malformed"])
+@pytest.mark.parametrize("case", ["cancelled", "changed-source", "malformed"])
 def test_failed_or_changed_main_cannot_supply_artifacts(tmp_path: Path, case: str) -> None:
     bundle = _archive(tmp_path)
     archive, digest = bundle.path, bundle.digest
     responses = _responses(digest)
-    responses[-1] = {
-        "failure": _run(conclusion="failure"),
+    responses[4] = {
+        "cancelled": _run(conclusion="cancelled"),
         "changed-source": _run(head_sha=OTHER),
         "malformed": _run(conclusion={"unexpected": True}),
     }[case]
@@ -311,6 +320,98 @@ def test_failed_or_changed_main_cannot_supply_artifacts(tmp_path: Path, case: st
         "owner/repo", SHA, "packages", destination, transport=Gateway(responses, archive)
     )
     assert isinstance(result, FreshValidationRequired)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("conclusion", [None, "failure"])
+def test_packages_remain_qualified_when_only_docs_fail_or_are_pending(
+    tmp_path: Path, conclusion: str | None
+) -> None:
+    bundle = _archive(tmp_path)
+    responses = _responses(bundle.digest)
+    run = _run(conclusion=conclusion, status="in_progress" if conclusion is None else "completed")
+    responses[0] = {"total_count": 1, "workflow_runs": [run]}
+    responses[4] = run
+    gateway = Gateway(responses, bundle.path)
+    assert isinstance(
+        reuse("owner/repo", SHA, "packages", tmp_path / "out", transport=gateway),
+        VerifiedArtifact,
+    )
+    assert not gateway.responses
+
+
+@pytest.mark.parametrize("final_conclusion", ["success", "failure"])
+def test_legacy_artifacts_require_successful_full_ci_through_final_snapshot(
+    tmp_path: Path, final_conclusion: str
+) -> None:
+    bundle = _archive(tmp_path)
+    responses = _responses(bundle.digest)
+    legacy: dict[str, JsonValue] = {
+        "total_count": 2,
+        "jobs": [
+            {"name": name, "status": "completed", "conclusion": "success"}
+            for name in ("Build and install artifacts", "CI / gate")
+        ],
+    }
+    responses[1] = legacy
+    responses[3] = legacy
+    responses[4] = _run(conclusion=final_conclusion)
+    destination = tmp_path / "out"
+    result = reuse(
+        "owner/repo", SHA, "packages", destination, transport=Gateway(responses, bundle.path)
+    )
+    expected = VerifiedArtifact if final_conclusion == "success" else FreshValidationRequired
+    assert isinstance(result, expected)
+    assert destination.exists() == (final_conclusion == "success")
+
+
+@pytest.mark.parametrize("index", [1, 3])
+@pytest.mark.parametrize(
+    "state", ["failure", "skipped", "cancelled", "pending", "missing", "duplicate"]
+)
+def test_package_gate_must_succeed_before_and_after_download(
+    tmp_path: Path, index: int, state: str
+) -> None:
+    bundle = _archive(tmp_path)
+    responses = _responses(bundle.digest)
+    jobs: list[JsonValue] = [
+        {"name": "Build and install artifacts", "status": "completed", "conclusion": "success"}
+    ]
+    gate: dict[str, JsonValue] = {
+        "name": "CI / packages",
+        "status": "in_progress" if state == "pending" else "completed",
+        "conclusion": None if state == "pending" else state,
+    }
+    if state != "missing":
+        jobs.append(gate)
+    if state == "duplicate":
+        gate["conclusion"] = "success"
+        jobs.append(gate)
+    responses[index] = {"total_count": len(jobs), "jobs": jobs}
+    destination = tmp_path / "out"
+    assert isinstance(
+        reuse(
+            "owner/repo", SHA, "packages", destination, transport=Gateway(responses, bundle.path)
+        ),
+        FreshValidationRequired,
+    )
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("conclusion", [None, "failure"])
+def test_site_requires_successful_whole_ci(tmp_path: Path, conclusion: str | None) -> None:
+    bundle = _archive(tmp_path)
+    run = _run(conclusion=conclusion, status="in_progress" if conclusion is None else "completed")
+    destination = tmp_path / "site"
+    result = reuse(
+        "owner/repo",
+        SHA,
+        "site",
+        destination,
+        transport=Gateway([{"total_count": 1, "workflow_runs": [run]}], bundle.path),
+    )
+    expected = AwaitingArtifact if conclusion is None else FreshValidationRequired
+    assert isinstance(result, expected)
     assert not destination.exists()
 
 
