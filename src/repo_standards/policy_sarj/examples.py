@@ -26,7 +26,7 @@ from repo_standards.core.models import (
 )
 from repo_standards.core.parser import parse_manifest_bytes
 
-from .documentation import ADDED_MARKDOWN_RULE_ID
+from .documentation import ADDED_MARKDOWN_RULE_ID, MARKDOWN_ONLY_RULE_ID
 from .images import UNDECLARED_IMAGES_RULE_ID
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID
 from .local_residue import LOCAL_RESIDUE_RULE_ID
@@ -48,6 +48,12 @@ class _PathComparisonExampleSource(BaseModel):
 
     base: tuple[str, ...]
     head: tuple[str, ...]
+
+
+class _MarkdownOnlyExampleSource(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", strict=True)
+
+    changed: tuple[str, ...]
 
 
 class _PullRequestTemplateExampleSource(BaseModel):
@@ -87,21 +93,8 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
         raise ValueError(message)
     if case.rule_id == MAKEFILE_GROWTH_RULE_ID:
         return _run_makefile_comparison(source)
-    if case.rule_id == ADDED_MARKDOWN_RULE_ID:
-        context = _PathComparisonExampleSource.model_validate_json(source)
-        return _run_snapshot(
-            context.head,
-            comparison=DocumentationComparison(
-                maximum_added_pages=0,
-                added_pages=tuple(
-                    sorted(
-                        path
-                        for path in set(context.head) - set(context.base)
-                        if path.casefold().endswith((".md", ".mdx"))
-                    )
-                ),
-            ),
-        )
+    if case.rule_id in {MARKDOWN_ONLY_RULE_ID, ADDED_MARKDOWN_RULE_ID}:
+        return _run_documentation_example(case.rule_id, source)
     if case.rule_id == MIGRATION_CONSOLIDATION_RULE_ID:
         context = _PathComparisonExampleSource.model_validate_json(source)
         manifest = Manifest(repository_id=RepositoryId("example-repository"), components=())
@@ -126,6 +119,34 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
             context.tracked, manifest=parse_manifest_bytes(context.manifest.encode())
         )
     return _run_repository_path(source)
+
+
+def _run_documentation_example(rule_id: RuleId, source: str) -> tuple[RuleId, ...]:
+    if rule_id == MARKDOWN_ONLY_RULE_ID:
+        changed = _MarkdownOnlyExampleSource.model_validate_json(source).changed
+        paths = (
+            changed if all(path.casefold().endswith((".md", ".mdx")) for path in changed) else ()
+        )
+        return _run_snapshot(
+            changed,
+            comparison=DocumentationComparison(
+                maximum_added_pages=0, added_pages=(), markdown_only_paths=paths
+            ),
+        )
+    context = _PathComparisonExampleSource.model_validate_json(source)
+    return _run_snapshot(
+        context.head,
+        comparison=DocumentationComparison(
+            maximum_added_pages=0,
+            added_pages=tuple(
+                sorted(
+                    path
+                    for path in set(context.head) - set(context.base)
+                    if path.casefold().endswith((".md", ".mdx"))
+                )
+            ),
+        ),
+    )
 
 
 def _run_repository_path(source: str) -> tuple[RuleId, ...]:

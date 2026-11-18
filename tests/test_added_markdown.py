@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
@@ -12,6 +12,7 @@ from repo_standards.core.models import (
     MigrationComparison,
     PullRequestTemplate,
 )
+from repo_standards.core.pull_request_documentation import markdown_only_paths_for_revisions
 from repo_standards.policy_sarj.examples import run_rule_example
 from repo_standards.repository import (
     RepositoryAnalysisRequest,
@@ -189,3 +190,124 @@ def test_snapshot_preserves_legacy_optional_positional_arguments(repository: Pat
     assert legacy.pull_request_templates is templates
     assert legacy.migration_comparison is migration
     assert legacy.documentation_comparison is None
+
+
+@pytest.mark.parametrize(
+    ("change", "expected"),
+    [
+        ("edit", True),
+        ("delete", True),
+        ("rename", True),
+        ("uppercase-mdx", True),
+        ("source-edit", False),
+        ("source-mode", False),
+        ("source-rename", False),
+        ("empty", False),
+        ("untracked", False),
+    ],
+)
+def test_markdown_only_review_uses_the_complete_git_change(
+    repository: Path,
+    change: Literal[
+        "edit",
+        "delete",
+        "rename",
+        "uppercase-mdx",
+        "source-edit",
+        "source-mode",
+        "source-rename",
+        "empty",
+        "untracked",
+    ],
+    *,
+    expected: bool,
+) -> None:
+    rule = "repository/documentation/markdown-only-change"
+    (repository / ".repo-standards/repository.toml").write_text(
+        f'repository_id = "example"\ncomponents = []\nenabled_rules = ["{rule}"]\n'
+    )
+    source = repository / "module.py"
+    source.write_text("print('native source')\n")
+    base = _commit(repository)
+    readme = repository / "README.md"
+    readme.write_text("A necessary documentation correction\n")
+    match change:
+        case "edit":
+            pass
+        case "delete":
+            readme.unlink()
+        case "rename":
+            readme.rename(repository / "guide.md")
+        case "uppercase-mdx":
+            readme.rename(repository / "GUIDE.MDX")
+        case "source-edit":
+            source.write_text("print('changed source')\n")
+        case "source-mode":
+            source.chmod(0o755)
+        case "source-rename":
+            source.rename(repository / "module.md")
+        case "empty" | "untracked":
+            _git(repository, "checkout", "--", "README.md")
+            if change == "untracked":
+                (repository / "notes.md").write_text("Untracked task notes\n")
+    if change not in {"empty", "untracked"}:
+        _commit(repository)
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert report.completion == "complete"
+    assert [item.rule_id for item in report.diagnostics] == ([rule] if expected else [])
+    if expected:
+        assert report.diagnostics[0].severity == "warning"
+        assert not report.diagnostics[0].baselineable
+
+
+@pytest.mark.parametrize("both_rules", [False, True])
+def test_added_page_budget_takes_precedence_only_when_enabled(
+    repository: Path, *, both_rules: bool
+) -> None:
+    rule = "repository/documentation/markdown-only-change"
+    rules = [rule, _RULE] if both_rules else [rule]
+    (repository / ".repo-standards/repository.toml").write_text(
+        'repository_id = "example"\ncomponents = []\nenabled_rules = ['
+        + ",".join(f'"{item}"' for item in rules)
+        + "]\n"
+    )
+    base = _commit(repository)
+    (repository / "guide.md").write_text("A new page\n")
+    _commit(repository)
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert [item.rule_id for item in report.diagnostics] == ([_RULE] if both_rules else [rule])
+
+
+def test_markdown_only_rule_does_not_guess_a_pr_from_its_last_commit(repository: Path) -> None:
+    rule = "repository/documentation/markdown-only-change"
+    (repository / ".repo-standards/repository.toml").write_text(
+        f'repository_id = "example"\ncomponents = []\nenabled_rules = ["{rule}"]\n'
+    )
+    _commit(repository)
+    (repository / "README.md").write_text("A documentation followup to an earlier source commit\n")
+    _commit(repository)
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository))
+    assert report.completion == "complete"
+    assert report.diagnostics == ()
+
+
+def test_markdown_classifier_retains_the_existing_symlink_rejection(repository: Path) -> None:
+    rule = "repository/documentation/markdown-only-change"
+    (repository / ".repo-standards/repository.toml").write_text(
+        f'repository_id = "example"\ncomponents = []\nenabled_rules = ["{rule}"]\n'
+    )
+    (repository / "module.py").write_text("print('native source')\n")
+    base = _commit(repository)
+    readme = repository / "README.md"
+    readme.unlink()
+    readme.symlink_to("module.py")
+    head = _commit(repository)
+
+    assert markdown_only_paths_for_revisions(repository, base=base, head=head) == ()
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert report.completion == "incomplete"
+    assert [issue.message for issue in report.execution_issues] == [
+        "tracked path is a symlink: README.md"
+    ]
+    assert report.input_provenance is None
+    assert report.diagnostics == ()

@@ -503,6 +503,7 @@ class MakefileComparison:
 class DocumentationComparison:
     maximum_added_pages: int
     added_pages: tuple[str, ...]
+    markdown_only_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

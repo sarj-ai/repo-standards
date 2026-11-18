@@ -34,7 +34,12 @@ from repo_standards.core.taxonomy import (
     taxonomy,
 )
 
-from .documentation import ADDED_MARKDOWN_RULE_ID, added_markdown_diagnostics
+from .documentation import (
+    ADDED_MARKDOWN_RULE_ID,
+    MARKDOWN_ONLY_RULE_ID,
+    added_markdown_diagnostics,
+    markdown_only_diagnostics,
+)
 from .images import UNDECLARED_IMAGES_RULE_ID, image_diagnostics
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics
 from .local_residue import LOCAL_RESIDUE_RULE_ID, local_residue_diagnostics
@@ -205,6 +210,37 @@ def _tracked_files_example(*paths: str, manifest: str | None = None) -> str:
 
 
 RULES = (
+    Rule(
+        rule_id=MARKDOWN_ONLY_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Review standalone Markdown-only changes",
+        description=(
+            "With an explicit Git base, warn once when every changed old and new path is a "
+            "regular .md or .mdx file, case-insensitively. Existing-page edits and deletions "
+            "count; empty comparisons, mixed source changes and nonregular paths do not warn. "
+            "Native repository inspection retains its separate symlink restrictions. "
+            "An added-page budget finding takes precedence when both rules are enabled."
+        ),
+        why="Standalone task notes and prose-only changes can create review and maintenance noise.",
+        fix=(
+            "Keep necessary documentation with its implementation when practical. Retain "
+            "required guides and useful correction-only PRs after review. Do not delete or "
+            "rename content to silence this advisory. Requires --base; staged, last-commit "
+            "and worktree-only scans do not establish the full PR boundary. No autofix."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, DOCUMENTATION),
+        examples=(
+            _example(
+                example_id="sarj-documentation-markdown-only-change",
+                title="Review an existing-page-only change",
+                language="json",
+                before='{"changed":["README.md"]}',
+                after='{"changed":["README.md","src/app.py"]}',
+                expected_severity="warning",
+            ),
+        ),
+    ),
     Rule(
         rule_id=ADDED_MARKDOWN_RULE_ID,
         version=1,
@@ -793,6 +829,7 @@ RULES = (
 _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
     {
         ADDED_MARKDOWN_RULE_ID: RuleClassification.JUDGMENT,
+        MARKDOWN_ONLY_RULE_ID: RuleClassification.JUDGMENT,
         MIGRATION_CONSOLIDATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
         UNTYPED_JAVASCRIPT_RULE_ID: RuleClassification.JUDGMENT,
@@ -811,6 +848,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
 _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
     {
         ADDED_MARKDOWN_RULE_ID: 56,
+        MARKDOWN_ONLY_RULE_ID: 57,
         MIGRATION_CONSOLIDATION_RULE_ID: 53,
         LOCAL_RESIDUE_RULE_ID: 51,
         UNTYPED_JAVASCRIPT_RULE_ID: 49,
@@ -875,7 +913,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=37,
+    policy_version=38,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1570,6 +1608,19 @@ def _repository_diagnostic(  # ruff: ignore[too-many-arguments] - fields are exp
     )
 
 
+def _documentation_diagnostics(
+    snapshot: RepositorySnapshot, enabled: frozenset[RuleId]
+) -> tuple[Diagnostic, ...]:
+    diagnostics = (
+        added_markdown_diagnostics(snapshot, rule=_rule(ADDED_MARKDOWN_RULE_ID))
+        if ADDED_MARKDOWN_RULE_ID in enabled
+        else ()
+    )
+    if MARKDOWN_ONLY_RULE_ID in enabled and not diagnostics:
+        diagnostics += markdown_only_diagnostics(snapshot, rule=_rule(MARKDOWN_ONLY_RULE_ID))
+    return diagnostics
+
+
 class SarjPolicy:
     policy_id: ClassVar[PolicyId] = PolicyId("sarj")
     policy_version: ClassVar[int] = POLICY_SPEC.policy_version
@@ -1598,6 +1649,7 @@ class SarjPolicy:
         )
         separate_rules = {
             ADDED_MARKDOWN_RULE_ID,
+            MARKDOWN_ONLY_RULE_ID,
             MIGRATION_CONSOLIDATION_RULE_ID,
             PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
             UNTYPED_JAVASCRIPT_RULE_ID,
@@ -1607,8 +1659,8 @@ class SarjPolicy:
             _SCRIPT_TEST_DIRECTORIES_RULE_ID,
         }
         diagnostics = _repository_artifact_diagnostics(snapshot) if enabled - separate_rules else ()
+        diagnostics += _documentation_diagnostics(snapshot, enabled)
         for rule_id, evaluate in (
-            (ADDED_MARKDOWN_RULE_ID, added_markdown_diagnostics),
             (MIGRATION_CONSOLIDATION_RULE_ID, migration_diagnostics),
             (PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID, pull_request_template_diagnostics),
             (UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics),
