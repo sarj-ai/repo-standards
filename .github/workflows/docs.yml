@@ -63,6 +63,9 @@ jobs:
       - name: Install locked toolchains
         if: steps.reuse.outputs.reused != 'true'
         run: bash .github/scripts/ci-workflow.sh dependencies
+      - name: Audit documentation dependency graph
+        if: steps.reuse.outputs.reused != 'true'
+        run: npm --prefix apps/site audit --audit-level=high
       - name: Install the pinned native tool bootstrap
         if: steps.reuse.outputs.reused != 'true'
         env:

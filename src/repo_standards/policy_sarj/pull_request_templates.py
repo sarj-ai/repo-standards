@@ -78,7 +78,8 @@ def _missing_section_diagnostic(path: str, section: str, *, rule: RuleDefinition
                 f"Add '## {section}' to {path}.",
                 "Do not put it inside a comment or a code block.",
                 (
-                    "Merge Risk is always required by Review Policy."
+                    "Set require_merge_risk = false and omit it from "
+                    "required_body_sections to make Merge Risk optional."
                     if section == MERGE_RISK_SECTION
                     else "Remove optional headings from required_body_sections if no longer needed."
                 ),

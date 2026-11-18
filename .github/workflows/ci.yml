@@ -247,6 +247,23 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  packages_gate:
+    name: CI / packages
+    if: always()
+    needs: [validate, compatibility, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require all runtime and package checks
+        env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          COMPATIBILITY_RESULT: ${{ needs.compatibility.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        run: |
+          test "$VALIDATE_RESULT" = success
+          test "$COMPATIBILITY_RESULT" = success
+          test "$PACKAGE_RESULT" = success
+
   gate:
     name: CI / gate
     if: always()

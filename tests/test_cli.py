@@ -1918,12 +1918,18 @@ def test_capabilities_are_machine_discoverable() -> None:
     assert isinstance(commands, list)
     assert "catalog" in commands
     assert "pull-request commits" in commands
+    assert "pull-request prepare" in commands
     safety = _object(capabilities["safety"])
-    assert safety["repository_code_execution"] is False
-    assert safety["mutation"] == "commit-message --fix-safe only"
-    assert safety["network"] is False
+    assert safety["repository_code_execution"] is True
+    assert safety["repository_code_execution_default"] is False
+    assert (
+        safety["mutation"]
+        == "commit-message --fix-safe; pull-request prepare --trust-repository-code"
+    )
+    assert safety["network"] is True
     assert safety["network_default"] is False
-    assert safety["network_mode"] == "disabled"
+    assert safety["network_mode"] == "disabled except explicitly trusted preparation hooks"
+    assert _object(safety["trusted_preparation"])["platform"] == "POSIX"
     assert _object(capabilities["tool"])["version"]
     assert capabilities["execution_issues"] == []
 

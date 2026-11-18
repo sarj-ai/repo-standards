@@ -120,6 +120,7 @@ from repo_standards.pull_request._inputs import (
     resolve_github_pull_request_inputs,
     resolve_local_pull_request_inputs,
 )
+from repo_standards.pull_request._prepare import prepare_pull_request
 from repo_standards.pull_request._trusted_manifest import load_trusted_base_manifest
 from repo_standards.repository.analysis import (
     RepositoryAnalysisRequest,
@@ -1376,6 +1377,34 @@ def _review_policy_receipt_reasons(
     if any(check.head_sha != provider.evaluated_head_sha for check in provider.required_checks):
         reasons.append("check_head_mismatch")
     return reasons
+
+
+@pull_request_app.command("prepare")
+def pull_request_prepare_command(
+    root: Annotated[Path, typer.Argument()] = Path(),
+    *,
+    base: Annotated[str, typer.Option(help="Fetched PR target branch.")],
+    message: Annotated[str, typer.Option(help="Conventional message for the single commit.")],
+    trust_repository_code: Annotated[
+        bool, typer.Option(help="Authorize native commit hooks, signing and local configuration.")
+    ] = False,
+) -> None:
+    """Squash a clean feature branch before opening its first PR (POSIX only)."""
+    try:
+        result = prepare_pull_request(
+            root, base=base, message=message, trust_repository_code=trust_repository_code
+        )
+    except (ConfigurationError, OSError) as error:
+        _emit_command_error(
+            "pull-request prepare",
+            "preparation.incomplete",
+            str(error),
+            phase="preparation",
+            remediation=(
+                "Review preserved Git state, resolve the error and retry before opening the PR."
+            ),
+        )
+    typer.echo(f"Prepared {result.branch}: {result.original_head} -> {result.head}")
 
 
 @pull_request_app.command("commits")

@@ -374,6 +374,7 @@ def parse_pull_request_review_policy(
         "migration_roots",
         "required_checks",
         "required_body_sections",
+        "require_merge_risk",
         "transition_exemptions",
         "transition_actors",
         "trusted_bot_authors",
@@ -445,7 +446,9 @@ def parse_pull_request_review_policy(
     if not required_checks:
         ConfigurationError.fail(f"{context}.required_checks must not be empty")
     required_body_sections = tuple(
-        dict.fromkeys((*policy_strings("required_body_sections"), MERGE_RISK_SECTION))
+        dict.fromkeys(
+            (*policy_strings("required_body_sections"), *_merge_risk_sections(data, context))
+        )
     )
     transition_exemptions = policy_strings("transition_exemptions")
     known_transition_ids = {transition.transition_id for transition in transitions}
@@ -519,6 +522,12 @@ def _domain_roots(paths: tuple[str, ...]) -> tuple[str, ...]:
     if len(roots) != len(set(roots)):
         ConfigurationError.fail("pull_request.review_policy.domain_roots must be unique")
     return roots
+
+
+def _merge_risk_sections(data: Mapping[str, ParsedValue], context: str) -> tuple[str, ...]:
+    if _boolean(data, "require_merge_risk", context, default=True):
+        return (MERGE_RISK_SECTION,)
+    return ()
 
 
 def _boolean(data: Mapping[str, ParsedValue], key: str, context: str, *, default: bool) -> bool:

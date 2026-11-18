@@ -1,16 +1,38 @@
 ---
 name: create-pr
-description: Prepare, create or update a pull request with the required merge-risk verdicts.
+description: Open feature PRs with one commit and follow the repository's configured description policy.
 ---
 
 1. Read the full diff, relevant callers, repository guidance, linked requirements,
-   PR discussion and test/CI evidence. Treat unavailable evidence as a gap. Run
-   [merge-risk](../merge-risk/SKILL.md) with that context, keeping the original
-   skill's analysis and weighted calculation.
-2. Follow the repository's PR template. Under `## Merge Risk`, copy only the
-   skill's overall risk line and its five category verdict lines, preserving the
-   verdict words and emojis. Keep explanations, gaps and calculations out of this
-   section; the skill's analysis remains in the working context.
-3. Create or update the PR with that body. Refresh the assessment when the change
-   or its evidence changes. The existing Review Policy check requires all six
-   ratings and validates their format; it does not assess their truth.
+   PR discussion and test/CI evidence. Treat unavailable evidence as a gap.
+2. Before opening a feature PR, confirm no open or closed PR already uses the
+   branch. Fetch its exact target and current remote head. On a clean trusted
+   checkout, run the installed, pinned owner command (inside the repository's
+   normal check supervisor when required):
+
+   ```bash
+   repo-standards pull-request prepare . --base origin/<target> --message "type: concrete outcome" --trust-repository-code
+   ```
+
+   This is the PR-opening standard: publish one commit before creating the PR,
+   including drafts. Do not bypass native hooks. Stop on incomplete preparation
+   or changed hook output, review preserved edits, and rerun applicable checks.
+   The command requires POSIX, complete history and a feature branch; it never
+   pushes. Keep promotion, release, sync and existing-PR histories intact.
+   Do not squash during pre-push hooks or after the PR exists.
+3. Verify the prepared tree equals the reviewed tree and the PR range has exactly
+   one commit. If the branch was already pushed, ensure the fetched remote head
+   is an ancestor of the recorded original local head; otherwise stop and
+   reconcile other work. Push with an explicit lease on that exact remote SHA
+   (`--force-with-lease=refs/heads/<branch>:<remote-sha>`). For a new remote branch,
+   use an empty expected lease to avoid overwriting a concurrent creation.
+   Preserve pre-push hooks. Verify the remote SHA matches the prepared head.
+4. Follow the repository's current template and trusted base review policy.
+   Run [merge-risk](../merge-risk/SKILL.md) when `Merge Risk` is required (the
+   default). Under that heading, copy only the skill's overall rating and five
+   category verdicts, preserving their words and emojis. If the repository sets
+   `require_merge_risk = false` and omits that heading from its required sections,
+   omit it. Keep material caveats in the repository's remaining sections.
+5. Create the PR only after preparation and push succeed. For an existing PR,
+   update its description and evidence without repeating the opening squash.
+   Refresh any required assessment when scope or evidence changes.

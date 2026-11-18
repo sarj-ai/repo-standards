@@ -25,6 +25,7 @@ _JOBS: Final[dict[ArtifactKind, str]] = {
     "packages": "Build and install artifacts",
     "site": "Build documentation",
 }
+_PACKAGE_GATE = "CI / packages"
 _MAX_BYTES = 100_000_000
 _MAX_FILES = 10_000
 _MAX_WAIT = 300
@@ -213,15 +214,7 @@ def lookup(
         ),
         "workflow_runs",
     )
-    owned = [
-        run
-        for run in runs
-        if run.get("head_sha") == sha
-        and run.get("head_branch") == "main"
-        and run.get("event") == "push"
-        and run.get("path") == ".github/workflows/ci.yml"
-        and json_object(run.get("head_repository")).get("full_name") == repository
-    ]
+    owned = [run for run in runs if _owned_main(run, repository, sha)]
     if not owned:
         return AwaitingArtifact("waiting for exact main CI")
     run = max(owned, key=lambda row: positive_integer(row.get("id")))
@@ -236,17 +229,33 @@ def lookup(
         )
         staged = Path(temporary) / "verified"
         extract(archive, staged, digest=artifact.digest, sha=sha, kind=kind)
+        if _qualification(run, repository, kind, transport) is not None:
+            return FreshValidationRequired("artifact qualification changed during download")
         latest = json_object(
             transport.get(f"repos/{repository}/actions/runs/{identity.identifier}")
         )
         if (
             _identity(latest) != identity
-            or latest.get("head_sha") != sha
-            or (latest.get("conclusion") is not None and latest.get("conclusion") != "success")
+            or not _owned_main(latest, repository, sha)
+            or not _eligible_run(latest, kind)
+            or (
+                run.get("conclusion") == "success"
+                and (latest.get("status"), latest.get("conclusion")) != ("completed", "success")
+            )
         ):
             return FreshValidationRequired("CI changed while verifying its artifact")
         shutil.copytree(staged, destination, dirs_exist_ok=True)
     return VerifiedArtifact(SourceCommit(sha), identity, artifact)
+
+
+def _owned_main(run: dict[str, JsonValue], repository: str, sha: str) -> bool:
+    return (
+        run.get("head_sha") == sha
+        and run.get("head_branch") == "main"
+        and run.get("event") == "push"
+        and run.get("path") == ".github/workflows/ci.yml"
+        and json_object(run.get("head_repository")).get("full_name") == repository
+    )
 
 
 @dataclass(frozen=True)
@@ -269,26 +278,69 @@ def _identity(run: dict[str, JsonValue]) -> RunIdentity:
     )
 
 
-def _find_artifact(
-    run: dict[str, JsonValue], repository: str, sha: str, kind: ArtifactKind, transport: Transport
-) -> Artifact | AwaitingArtifact | FreshValidationRequired:
+def _qualification(
+    run: dict[str, JsonValue], repository: str, kind: ArtifactKind, transport: Transport
+) -> AwaitingArtifact | FreshValidationRequired | None:
     identity = _identity(run)
     run_id, attempt = identity.identifier, identity.attempt
     conclusion = run.get("conclusion")
-    if conclusion is not None and conclusion != "success":
+    if kind == "site" and conclusion is None and run.get("status") != "completed":
+        return AwaitingArtifact("waiting for all documentation CI checks")
+    if not _eligible_run(run, kind):
         return FreshValidationRequired("exact main CI failed; fresh validation required")
     jobs = collection_rows(
-        transport.get(f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=100"), "jobs"
+        transport.get(
+            f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"
+        ),
+        "jobs",
     )
-    selected = [job for job in jobs if job.get("name") == _JOBS[kind]]
-    if len(selected) != 1 or selected[0].get("status") != "completed":
+    required = _required_jobs(run, jobs, kind)
+    selected = [job for job in jobs if job.get("name") in required]
+    if (
+        any(not any(job.get("name") == name for job in selected) for name in required)
+        or len(selected) != len(required)
+        or any(job.get("status") != "completed" for job in selected)
+    ):
         return (
             AwaitingArtifact("waiting for successful artifact job")
             if conclusion is None
             else FreshValidationRequired("waiting for successful artifact job")
         )
-    if selected[0].get("conclusion") != "success":
-        return FreshValidationRequired("artifact job did not succeed")
+    if any(job.get("conclusion") != "success" for job in selected):
+        return FreshValidationRequired("artifact qualification did not succeed")
+    return None
+
+
+def _required_jobs(
+    run: dict[str, JsonValue], jobs: list[dict[str, JsonValue]], kind: ArtifactKind
+) -> tuple[str, ...]:
+    if kind == "site":
+        return (_JOBS[kind],)
+    if any(job.get("name") == _PACKAGE_GATE for job in jobs):
+        return (_JOBS[kind], _PACKAGE_GATE)
+    # Older immutable releases have only the stronger, documentation-inclusive gate.
+    if run.get("status") == "completed" and run.get("conclusion") == "success":
+        return (_JOBS[kind], "CI / gate")
+    return (_JOBS[kind], _PACKAGE_GATE)
+
+
+def _eligible_run(run: dict[str, JsonValue], kind: ArtifactKind) -> bool:
+    allowed = (None, "success", "failure") if kind == "packages" else ("success",)
+    return (
+        "conclusion" in run
+        and run.get("conclusion") in allowed
+        and (kind == "packages" or run.get("status") == "completed")
+    )
+
+
+def _find_artifact(
+    run: dict[str, JsonValue], repository: str, sha: str, kind: ArtifactKind, transport: Transport
+) -> Artifact | AwaitingArtifact | FreshValidationRequired:
+    qualification = _qualification(run, repository, kind, transport)
+    if qualification is not None:
+        return qualification
+    identity = _identity(run)
+    run_id, attempt = identity.identifier, identity.attempt
     artifacts = collection_rows(
         transport.get(f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100"),
         "artifacts",

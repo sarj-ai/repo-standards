@@ -42,7 +42,6 @@ the GitHub Action's full commit SHA.
 - Workflow YAML and API descriptions are parsed as inert data.
 - Missing required evidence produces an inconclusive result rather than a false pass.
 - Advisory commit-history analysis reports incomplete evidence without blocking local commits.
-- The linter has no autofix or repository mutation mode.
 
 ## Development
 

@@ -8,6 +8,7 @@ import pytest
 
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import load_repository_snapshot
+from repo_standards.core.pull_request_body import missing_required_body_sections
 from repo_standards.policy_sarj import SarjPolicy
 from repo_standards.policy_sarj.pull_request_templates import (
     PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
@@ -174,6 +175,57 @@ def test_repository_without_review_policy_skips_the_template(tmp_path: Path) -> 
 
     assert snapshot.pull_request_templates == ()
     assert _template_diagnostics(repository) == ()
+
+
+def test_merge_risk_can_be_disabled_without_removing_other_requirements(tmp_path: Path) -> None:
+    manifest = _REVIEW_POLICY + "require_merge_risk = false\n"
+    template = _COMPLETE_TEMPLATE.removesuffix("## Merge Risk\n")
+    repository = _repository(tmp_path, manifest, {".github/pull_request_template.md": template})
+    snapshot = load_repository_snapshot(repository)
+    assert snapshot.manifest.pull_request is not None
+    configured = snapshot.manifest.pull_request.review_policy
+    assert configured is not None
+    assert configured.required_body_sections == (
+        "What & why",
+        "One-way or two-way door",
+        "Test evidence",
+    )
+    assert _template_diagnostics(repository) == ()
+    body = (
+        "## What & why\nA correction.\n## One-way or two-way door\nRevert.\n"
+        "## Test evidence\nPassed.\n"
+    )
+    assert missing_required_body_sections(body, configured.required_body_sections) == ()
+    assert missing_required_body_sections(
+        body.replace("## Test evidence\nPassed.\n", ""), configured.required_body_sections
+    ) == ("Test evidence",)
+
+
+@pytest.mark.parametrize("value", ['"false"', "0", "[]"])
+def test_merge_risk_option_requires_a_boolean(tmp_path: Path, value: str) -> None:
+    repository = _repository(
+        tmp_path,
+        _REVIEW_POLICY + f"require_merge_risk = {value}\n",
+        {".github/pull_request_template.md": _COMPLETE_TEMPLATE},
+    )
+    with pytest.raises(ConfigurationError, match=r"require_merge_risk.*boolean"):
+        load_repository_snapshot(repository)
+
+
+def test_explicit_merge_risk_section_stays_required_when_default_is_disabled(
+    tmp_path: Path,
+) -> None:
+    manifest = _REVIEW_POLICY.replace('"Test evidence"]', '"Test evidence", "Merge Risk"]')
+    repository = _repository(
+        tmp_path,
+        manifest + "require_merge_risk = false\n",
+        {".github/pull_request_template.md": _COMPLETE_TEMPLATE.removesuffix("## Merge Risk\n")},
+    )
+
+    diagnostics = _template_diagnostics(repository)
+
+    assert len(diagnostics) == 1
+    assert diagnostics[0].message == "the PR template has no 'Merge Risk' heading"
 
 
 def test_oversized_template_is_a_configuration_error(tmp_path: Path) -> None:
