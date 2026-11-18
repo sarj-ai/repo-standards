@@ -42,11 +42,6 @@ the GitHub Action's full commit SHA.
 - Workflow YAML and API descriptions are parsed as inert data.
 - Missing required evidence produces an inconclusive result rather than a false pass.
 - Advisory commit-history analysis reports incomplete evidence without blocking local commits.
-- Repository checks remain read-only. `commit-message --fix-safe` changes only the
-  supplied message file. The separate POSIX `pull-request prepare` operation
-  requires `--trust-repository-code`, rewrites only a clean feature branch before
-  its first PR, and runs native commit hooks and signing. Hooks may access the
-  network; preparation itself never pushes or creates a PR.
 
 ## Development
 
