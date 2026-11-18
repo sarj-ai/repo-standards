@@ -37,6 +37,8 @@ const DESCRIPTIONS = {
   "repository/artifacts/untyped-javascript":
     "Use TypeScript or declare required JS.",
   "repository/documentation/added-markdown": "Review new Markdown pages.",
+  "repository/documentation/markdown-only-change":
+    "Review standalone documentation changes.",
   "repository/documentation/placement": "Keep Markdown in owned locations.",
   "repository/documentation/pull-request-template-sections":
     "Include required PR template headings.",

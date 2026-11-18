@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from repo_standards.core.models import RepositorySnapshot, RuleDefinition
 
 
+MARKDOWN_ONLY_RULE_ID = RuleId("repository/documentation/markdown-only-change")
 ADDED_MARKDOWN_RULE_ID = RuleId("repository/documentation/added-markdown")
 
 
@@ -48,6 +49,44 @@ def added_markdown_diagnostics(
                     "Review necessary additions using the existing documentation page budget.",
                 ),
                 validation=("Rerun the same Git comparison after reviewing the added paths.",),
+            ),
+            baselineable=False,
+        ),
+    )
+
+
+def markdown_only_diagnostics(
+    snapshot: RepositorySnapshot, *, rule: RuleDefinition
+) -> tuple[Diagnostic, ...]:
+    comparison = snapshot.documentation_comparison
+    if comparison is None or not comparison.markdown_only_paths:
+        return ()
+    path = comparison.markdown_only_paths[0]
+    component = nearest_component(path, snapshot.manifest.components)
+    return (
+        Diagnostic(
+            rule_id=rule.rule_id,
+            rule_version=rule.version,
+            severity=rule.severity,
+            evidence_level="verified",
+            component_id=component.component_id if component else ComponentId("repository"),
+            subject_kind="documentation",
+            observed="Markdown-only change",
+            expected="Review whether this needs a standalone pull request",
+            message=(
+                "This Git comparison changes only Markdown files. "
+                "Review the value of a standalone documentation PR."
+            ),
+            path=path,
+            manifest_anchor=f"tracked_files.{path}",
+            location=SourceLocation(path, line=1),
+            remediation=Remediation(
+                summary="Keep necessary documentation with the change it explains when practical.",
+                steps=(
+                    "Retain required guides, operational contracts and useful corrections.",
+                    "Keep task logs outside source; do not rename files to bypass review.",
+                ),
+                validation=("Compare the full pull request with its explicit base using --base.",),
             ),
             baselineable=False,
         ),

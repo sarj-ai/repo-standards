@@ -20,7 +20,8 @@ from repo_standards.core.models import (
     TrackedFileEvidence,
 )
 from repo_standards.core.parser import parse_manifest_bytes
-from repo_standards.policy_sarj.documentation import ADDED_MARKDOWN_RULE_ID
+from repo_standards.core.pull_request_documentation import markdown_only_paths_for_revisions
+from repo_standards.policy_sarj.documentation import ADDED_MARKDOWN_RULE_ID, MARKDOWN_ONLY_RULE_ID
 from repo_standards.policy_sarj.makefiles import (
     MAKEFILE_GROWTH_RULE_ID,
     is_makefile_path,
@@ -70,7 +71,9 @@ def with_documentation_comparison(
     enabled_rules: frozenset[RuleVersion],
     base_revision: str | None,
 ) -> RepositorySnapshot:
-    if not any(item.rule_id == ADDED_MARKDOWN_RULE_ID for item in enabled_rules):
+    if not any(
+        item.rule_id in {ADDED_MARKDOWN_RULE_ID, MARKDOWN_ONLY_RULE_ID} for item in enabled_rules
+    ):
         return snapshot
     provenance = snapshot.provenance
     if provenance.mode == "worktree":
@@ -99,11 +102,13 @@ def with_documentation_comparison(
             and item.path not in exemptions
         )
     )
+    markdown_only_paths = _markdown_only_paths(root, snapshot, comparison_base, enabled_rules)
     return replace(
         snapshot,
         documentation_comparison=DocumentationComparison(
             maximum_added_pages=policy.maximum_added_pages if policy else 0,
             added_pages=added_pages,
+            markdown_only_paths=markdown_only_paths,
         ),
         provenance=replace(
             provenance,
@@ -113,6 +118,26 @@ def with_documentation_comparison(
                 basis=provenance.comparison_basis or comparison_base.basis,
             ),
         ),
+    )
+
+
+def _markdown_only_paths(
+    root: Path,
+    snapshot: RepositorySnapshot,
+    comparison_base: _ComparisonBase,
+    enabled_rules: frozenset[RuleVersion],
+) -> tuple[str, ...]:
+    base = comparison_base.identity
+    provenance = snapshot.provenance
+    if (
+        base is None
+        or provenance.mode != "git-tree"
+        or (provenance.comparison_basis or comparison_base.basis) != "explicit"
+        or not any(item.rule_id == MARKDOWN_ONLY_RULE_ID for item in enabled_rules)
+    ):
+        return ()
+    return markdown_only_paths_for_revisions(
+        root, base=base.source_revision, head=provenance.source_revision
     )
 
 

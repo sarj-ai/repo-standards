@@ -82,6 +82,21 @@ def analyze_pull_request_documentation(
     )
 
 
+def markdown_only_paths_for_revisions(root: Path, *, base: str, head: str) -> tuple[str, ...]:
+    if any(_OBJECT_ID.fullmatch(revision) is None for revision in (base, head)):
+        ConfigurationError.fail("Markdown comparison requires exact commit object IDs")
+    changes = _changed_files(root, base=base, head=head)
+    if not changes or any(
+        not change.old_path.casefold().endswith((".md", ".mdx"))
+        or not change.path.casefold().endswith((".md", ".mdx"))
+        or change.old_mode not in {"000000", "100644", "100755"}
+        or change.new_mode not in {"000000", "100644", "100755"}
+        for change in changes
+    ):
+        return ()
+    return tuple(sorted({path for change in changes for path in (change.old_path, change.path)}))
+
+
 def _resolve_revision(root: Path, revision: str) -> GitObjectId:
     if not revision:
         ConfigurationError.fail("an exact pull-request base revision is required")
