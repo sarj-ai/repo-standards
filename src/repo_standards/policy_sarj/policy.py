@@ -778,13 +778,13 @@ RULES = (
     ),
     Rule(
         rule_id=PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
-        version=3,
+        version=4,
         default_severity="warning",
         title="Keep the PR template in sync with required sections",
         description=(
             "Each required PR section needs a heading in the PR template. "
-            "Merge Risk is always required by Review Policy; "
-            "required_body_sections adds other required headings."
+            "Merge Risk is required by default. Set require_merge_risk = false "
+            "and omit it from required_body_sections to make it optional."
         ),
         why=(
             "People write PRs from the template. "
@@ -913,7 +913,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=38,
+    policy_version=39,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),

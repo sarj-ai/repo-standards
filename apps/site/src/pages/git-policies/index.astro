@@ -102,14 +102,18 @@ steps:
       <p>Use the verdicts from your assessment. Keep explanations and numerical scores outside this section.</p>
       <details class="disclosure">
         <summary>What Review Policy validates</summary>
-        <p>This section is required even when no other headings are configured. Missing, duplicate, malformed, or incomplete verdicts fail. CI validates format and runs no model.</p>
+        <p>This section is required by default, even when no other headings are configured. A repository can set <code>require_merge_risk = false</code> under <code>pull_request.review_policy</code> and omit <code>Merge Risk</code> from <code>required_body_sections</code> to make it optional. Other required headings, review and check requirements still apply. When required, missing, duplicate, malformed, or incomplete verdicts fail. CI validates format and runs no model.</p>
         <p>The original Warp merge-risk instructions are vendored byte for byte with their license and pinned source checksum. Install a release containing this policy through the pinned Review Policy Action. Existing verified transition exemptions remain supported.</p>
       </details>
     </section>
 
     <section aria-labelledby="reviewable-pr-history">
       <h2 id="reviewable-pr-history">Keep history reviewable</h2>
-      <p>Count only non-merge commits.</p>
+      <p>The <code>create-pr</code> skill opens feature PRs, including drafts, with one commit. Before the first push and PR creation, it runs the pinned owner command on a clean trusted checkout:</p>
+      <Code code={'repo-standards pull-request prepare . --base origin/main --message "feat: describe the complete change" --trust-repository-code'} lang="bash" frame="terminal" wrap />
+      <p>Preparation is a separate POSIX operation. It preserves the original file tree and uses the unique merge base as the new parent, so an advanced target does not become an accidental deletion. Native commit hooks and signing still run; a hook failure restores the old ref while preserving edits. A hook that changes content stops publication for review. Original commits remain in the branch reflog. The command never pushes or opens a PR.</p>
+      <p>Keep existing-PR, promotion, release and sync histories intact. Rewriting an already-pushed feature branch requires a lease on the exact fetched remote SHA. PRs opened directly in GitHub are not rewritten; the existing CI history policy below continues to apply to subsequent review commits.</p>
+      <p>The read-only history check counts only non-merge commits.</p>
       <ol class="process-flow history-flow">
         <li><strong>Up to 5 commits</strong><span>No series numbering required by default.</span></li>
         <li><strong>More than 5</strong><span>Number every subject <code>(1/N)</code> through <code>(N/N)</code>.</span></li>
