@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+import json
+import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
+import sys
+from typing import ClassVar, Protocol
 
+from pydantic import BaseModel, ConfigDict, Field
 import pytest
 from typer.testing import CliRunner
 
@@ -53,6 +60,331 @@ def _hook(root: Path, name: str, body: str) -> None:
     path = Path(_git(root, "rev-parse", "--absolute-git-dir")) / "hooks" / name
     path.write_text(f"#!/bin/sh\nset -eu\n{body}\n", encoding="utf-8")
     path.chmod(0o700)
+
+
+@dataclass
+class _Publication:
+    root: Path
+    remote: Path
+    url: str = "git@github.com:example/project.git"
+    mode: str = "ok"
+    queries: list[str] = field(default_factory=list)
+
+
+@pytest.fixture
+def publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Publication:
+    root = tmp_path / "checkout"
+    remote = tmp_path / "remote.git"
+    root.mkdir()
+    remote.mkdir()
+    _repository(root)
+    _git(remote, "init", "--bare", "--quiet", "--initial-branch=main")
+    _git(root, "remote", "add", "origin", str(remote))
+    _git(root, "push", "--quiet", "origin", "main")
+    _git(root, "fetch", "--quiet", "origin")
+    other = tmp_path / "other.git"
+    _git(root, "clone", "--bare", "--quiet", str(remote), str(other))
+    state = _Publication(root, remote)
+    native_git = shutil.which("git")
+    assert native_git is not None
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    state_file = tmp_path / "publication-state.json"
+    ssh = commands / "fixture-ssh"
+    ssh.write_text(
+        f"#!{sys.executable}\n"
+        "import os, shlex, sys\n"
+        "verb, repository = shlex.split(sys.argv[-1])\n"
+        f"destinations = {{'example/project.git': {str(remote)!r},\n"
+        f"                'example/other.git': {str(other)!r}}}\n"
+        "assert verb in {'git-upload-pack', 'git-receive-pack'}\n"
+        f"os.execv({native_git!r}, [{native_git!r},\n"
+        "                         verb.removeprefix('git-'), destinations[repository]])\n"
+    )
+    ssh.chmod(0o700)
+    gh = commands / "gh"
+    gh.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, subprocess, sys\n"
+        f"state = json.loads(pathlib.Path({str(state_file)!r}).read_text())\n"
+        "assert sys.argv[1:6] == ['api', '--hostname', 'github.com', '--method', 'GET']\n"
+        "path = sys.argv[-1]\n"
+        "assert path.startswith('repos/example/project')\n"
+        "log = pathlib.Path(state['root']) / '.git/publication-queries.jsonl'\n"
+        "with log.open('a') as stream: stream.write(json.dumps(path) + '\\n')\n"
+        "mode = state['mode']\n"
+        "if mode == 'unavailable': sys.exit(1)\n"
+        "if mode == 'malformed': print('invalid json'); sys.exit(0)\n"
+        "if '/pulls?' not in path:\n"
+        "    print(json.dumps({'fork': mode == 'fork', 'full_name': 'example/project',\n"
+        "                      'default_branch': 'trunk' if mode == 'default-branch'\n"
+        "                                        else 'main'})); sys.exit(0)\n"
+        "requests = sum('/pulls?' in json.loads(line) for line in log.read_text().splitlines())\n"
+        f"git = {native_git!r}\n"
+        "if requests == 1 and mode == 'local-race':\n"
+        "    subprocess.run([git, '-C', state['root'], 'commit', '--quiet', '--allow-empty',\n"
+        "                    '-m', 'chore: concurrent edit'], check=True)\n"
+        "if requests == 2 and mode == 'remote-race':\n"
+        "    base = subprocess.check_output([git, '-C', state['root'], 'rev-parse', 'main'],\n"
+        "                                   text=True).strip()\n"
+        "    subprocess.run([git, '-C', state['remote'], 'update-ref',\n"
+        "                    'refs/heads/feature', base], check=True)\n"
+        "print(json.dumps([{'number': 1}] if mode == 'existing-pr' else []))\n"
+    )
+    gh.chmod(0o700)
+    monkeypatch.setenv("PATH", str(commands), prepend=os.pathsep)
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(ssh))
+    monkeypatch.setenv("GIT_SSH_VARIANT", "ssh")
+    return state
+
+
+class _PublicationResult(Protocol):
+    @property
+    def exit_code(self) -> int: ...
+
+    @property
+    def output(self) -> str: ...
+
+
+def _publish(state: _Publication) -> _PublicationResult:
+    (state.root.parent / "publication-state.json").write_text(
+        json.dumps(
+            {
+                "root": str(state.root),
+                "remote": str(state.remote),
+                "mode": state.mode,
+            }
+        )
+    )
+    _git(state.root, "remote", "set-url", "origin", state.url)
+    result = CliRunner().invoke(
+        app,
+        [
+            "pull-request",
+            "push",
+            str(state.root),
+            "--base",
+            "origin/main",
+            "--message",
+            "feat: prepare feature",
+            "--trust-repository-code",
+        ],
+    )
+    log = state.root / ".git/publication-queries.jsonl"
+    if log.exists():
+        state.queries[:] = [json.loads(line) for line in log.read_text().splitlines()]
+    return result
+
+
+def test_first_publication_prepares_one_commit_preserves_tree_and_runs_both_hooks(
+    publication: _Publication,
+) -> None:
+    before = _git(publication.root, "rev-parse", "HEAD")
+    tree = _git(publication.root, "log", "-1", "--format=%T")
+    _hook(publication.root, "pre-commit", "echo commit >> .git/publication-hooks")
+    _hook(publication.root, "pre-push", "echo push >> .git/publication-hooks")
+    result = _publish(publication)
+    assert result.exit_code == 0, result.output
+    head = _git(publication.root, "rev-parse", "HEAD")
+    assert head != before
+    assert _git(publication.root, "rev-list", "--count", "origin/main..HEAD") == "1"
+    assert _git(publication.root, "log", "-1", "--format=%T") == tree
+    assert _git(publication.remote, "rev-parse", "refs/heads/feature") == head
+    assert (publication.root / ".git/publication-hooks").read_text().splitlines() == [
+        "commit",
+        "push",
+    ]
+    assert all("state=all" in path for path in publication.queries if "/pulls?" in path)
+
+
+@pytest.mark.parametrize("mode", ["existing-pr", "fork", "unavailable", "malformed"])
+def test_publication_evidence_refuses_before_rewriting_history(
+    publication: _Publication, mode: str
+) -> None:
+    publication.mode = mode
+    before = _git(publication.root, "rev-parse", "HEAD")
+    result = _publish(publication)
+    assert result.exit_code != 0
+    assert _git(publication.root, "rev-parse", "HEAD") == before
+    assert not _git(publication.root, "ls-remote", "origin", "refs/heads/feature")
+
+
+def test_remote_creation_during_commit_cannot_be_overwritten(publication: _Publication) -> None:
+    publication.mode = "remote-race"
+    result = _publish(publication)
+    assert result.exit_code != 0
+    assert _git(publication.remote, "rev-parse", "refs/heads/feature") == _git(
+        publication.root, "rev-parse", "main"
+    )
+    assert _git(publication.root, "rev-list", "--count", "origin/main..HEAD") == "1"
+
+
+def test_local_change_during_evidence_read_is_preserved(publication: _Publication) -> None:
+    publication.mode = "local-race"
+    result = _publish(publication)
+    assert result.exit_code != 0
+    assert _git(publication.root, "log", "-1", "--format=%s") == "chore: concurrent edit"
+    assert _git(publication.root, "rev-list", "--count", "origin/main..HEAD") == "3"
+
+
+def test_failed_native_push_hook_preserves_prepared_commit(publication: _Publication) -> None:
+    _hook(publication.root, "pre-push", "echo ran > .git/failed-push-hook\nexit 1")
+    result = _publish(publication)
+    assert result.exit_code != 0
+    assert (publication.root / ".git/failed-push-hook").read_text().strip() == "ran"
+    assert _git(publication.root, "rev-list", "--count", "origin/main..HEAD") == "1"
+    assert not _git(publication.root, "ls-remote", "origin", "refs/heads/feature")
+
+
+def test_publication_does_not_follow_tags_or_mirror_other_refs(publication: _Publication) -> None:
+    _git(publication.root, "tag", "-am", "retain local tag", "local-only")
+    _git(publication.root, "config", "push.followTags", "true")
+    _git(publication.root, "config", "remote.origin.mirror", "true")
+    base = _git(publication.remote, "rev-parse", "main")
+    result = _publish(publication)
+    assert result.exit_code == 0, result.output
+    assert not _git(publication.root, "ls-remote", "origin", "refs/tags/local-only")
+    assert _git(publication.remote, "rev-parse", "main") == base
+
+
+def test_unpublished_remote_ancestor_is_replaced_using_its_exact_lease(
+    publication: _Publication,
+) -> None:
+    _git(publication.root, "push", "--quiet", "origin", "HEAD~1:refs/heads/feature")
+    tree = _git(publication.root, "log", "-1", "--format=%T")
+    result = _publish(publication)
+    assert result.exit_code == 0, result.output
+    head = _git(publication.root, "rev-parse", "HEAD")
+    assert _git(publication.remote, "rev-parse", "feature") == head
+    assert _git(publication.root, "log", "-1", "--format=%T") == tree
+    assert _git(publication.root, "rev-list", "--count", "origin/main..HEAD") == "1"
+
+
+def test_stale_fetched_target_refuses_before_preparation(publication: _Publication) -> None:
+    before = _git(publication.root, "rev-parse", "HEAD")
+    base = _git(publication.root, "rev-parse", "origin/main")
+    _git(publication.root, "push", "--quiet", "origin", "HEAD:refs/heads/main")
+    _git(publication.root, "update-ref", "refs/remotes/origin/main", base)
+    result = _publish(publication)
+    assert result.exit_code != 0
+    assert "fetch the current PR target" in result.output
+    assert _git(publication.root, "rev-parse", "HEAD") == before
+    assert not _git(publication.remote, "for-each-ref", "refs/heads/feature")
+
+
+def test_split_origin_repositories_refuse_before_rewriting_or_publishing(
+    publication: _Publication,
+) -> None:
+    _git(publication.root, "remote", "set-url", "--push", "origin", publication.url)
+    publication.url = "git@github.com:example/other.git"
+    before = _git(publication.root, "rev-parse", "HEAD")
+    result = _publish(publication)
+    assert result.exit_code != 0
+    assert "fetch and push URLs must name the same" in result.output
+    assert _git(publication.root, "rev-parse", "HEAD") == before
+    for remote in (publication.remote, publication.root.parent / "other.git"):
+        assert not _git(remote, "for-each-ref", "refs/heads/feature")
+
+
+def test_commit_hook_cannot_redirect_publication_to_another_repository(
+    publication: _Publication,
+) -> None:
+    _hook(
+        publication.root,
+        "pre-commit",
+        "git remote set-url --push origin git@github.com:example/other.git",
+    )
+    result = _publish(publication)
+    assert result.exit_code != 0
+    assert _git(publication.root, "rev-list", "--count", "origin/main..HEAD") == "1"
+    for remote in (publication.remote, publication.root.parent / "other.git"):
+        assert not _git(remote, "for-each-ref", "refs/heads/feature")
+
+
+def test_fresh_github_default_is_protected_without_cached_origin_head(
+    publication: _Publication,
+) -> None:
+    _git(publication.root, "branch", "-m", "trunk")
+    _git(publication.root, "update-ref", "--no-deref", "-d", "refs/remotes/origin/HEAD")
+    publication.mode = "default-branch"
+    before = _git(publication.root, "rev-parse", "HEAD")
+    result = _publish(publication)
+    assert result.exit_code != 0
+    assert "current GitHub default branch" in result.output
+    assert _git(publication.root, "rev-parse", "HEAD") == before
+    assert not _git(publication.remote, "for-each-ref", "refs/heads/trunk")
+
+
+class _ChildIdentity(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(strict=True, frozen=True)
+    pid: int = Field(gt=0)
+    birth: int = Field(ge=0)
+
+
+@dataclass(frozen=True)
+class _ForkingRead:
+    command: tuple[str, ...]
+    receipt: Path
+
+
+@pytest.fixture
+def forking_read(tmp_path: Path) -> _ForkingRead:
+    receipt = tmp_path / "owned-child.json"
+    script = tmp_path / "forking-read.py"
+    script.write_text(
+        "import json, os, pathlib, signal\n"
+        "child = os.fork()\n"
+        "if child == 0: signal.pause(); os._exit(0)\n"
+        "stat = pathlib.Path(f'/proc/{child}/stat').read_text().rsplit(')', 1)[1].split()\n"
+        f"pathlib.Path({str(receipt)!r}).write_text(json.dumps(\n"
+        "    {'pid': child, 'birth': int(stat[19])}))\n"
+        "signal.pause()\n"
+    )
+    return _ForkingRead((sys.executable, str(script)), receipt)
+
+
+def _original_child_exited(identity: _ChildIdentity) -> bool:
+    try:
+        fields = (Path("/proc") / str(identity.pid) / "stat").read_text().rsplit(")", 1)[1].split()
+    except FileNotFoundError:
+        return True
+    return int(fields[19]) != identity.birth or fields[0] == "Z"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux PID birth and pidfd lifetime witness")
+def test_native_read_timeout_terminates_its_owned_descendants(forking_read: _ForkingRead) -> None:
+    with pytest.raises(ConfigurationError, match="command could not complete"):
+        preparation.read_native_command(forking_read.command)
+    identity = _ChildIdentity.model_validate_json(forking_read.receipt.read_text())
+    descriptor = os.pidfd_open(identity.pid) if not _original_child_exited(identity) else None
+    try:
+        assert _original_child_exited(identity), "Timed-out native read left its child running"
+    finally:
+        if descriptor is not None:
+            try:
+                if not _original_child_exited(identity):
+                    signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            finally:
+                os.close(descriptor)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://token@github.com/example/project.git",
+        "git@example.invalid:example/project.git",
+    ],
+)
+def test_noncanonical_publication_target_refuses_without_network(
+    publication: _Publication, url: str
+) -> None:
+    publication.url = url
+    before = _git(publication.root, "rev-parse", "HEAD")
+    result = _publish(publication)
+    assert result.exit_code != 0
+    assert "canonical github.com" in result.output
+    assert _git(publication.root, "rev-parse", "HEAD") == before
+    assert not publication.queries
 
 
 def test_squashes_to_one_commit_preserving_tree_and_native_hooks(tmp_path: Path) -> None:

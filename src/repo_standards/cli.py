@@ -120,7 +120,7 @@ from repo_standards.pull_request._inputs import (
     resolve_github_pull_request_inputs,
     resolve_local_pull_request_inputs,
 )
-from repo_standards.pull_request._prepare import prepare_pull_request
+from repo_standards.pull_request._prepare import prepare_pull_request, push_pull_request
 from repo_standards.pull_request._trusted_manifest import load_trusted_base_manifest
 from repo_standards.repository.analysis import (
     RepositoryAnalysisRequest,
@@ -149,7 +149,7 @@ rest_app = typer.Typer(
 )
 pull_request_app = typer.Typer(
     name="pull-request",
-    help="Analyze pull-request changes without mutating repository or GitHub state.",
+    help="Analyze pull-request changes and prepare trusted first-PR branches.",
     no_args_is_help=True,
     pretty_exceptions_enable=False,
 )
@@ -1405,6 +1405,32 @@ def pull_request_prepare_command(
             ),
         )
     typer.echo(f"Prepared {result.branch}: {result.original_head} -> {result.head}")
+
+
+@pull_request_app.command("push")
+def pull_request_push_command(
+    root: Annotated[Path, typer.Argument()] = Path(),
+    *,
+    base: Annotated[str, typer.Option(help="Current fetched origin/<target> branch.")],
+    message: Annotated[str, typer.Option(help="Conventional message for the single commit.")],
+    trust_repository_code: Annotated[
+        bool, typer.Option(help="Authorize native commit/push hooks and local Git configuration.")
+    ] = False,
+) -> None:
+    """Prepare one commit and lease-push a same-repository branch before its first PR."""
+    try:
+        result = push_pull_request(
+            root, base=base, message=message, trust_repository_code=trust_repository_code
+        )
+    except (ConfigurationError, OSError) as error:
+        _emit_command_error(
+            "pull-request push",
+            "publication.incomplete",
+            str(error),
+            phase="publication",
+            remediation="Preserve local and remote refs; resolve the error before retrying.",
+        )
+    typer.echo(f"Published {result.branch}: {result.original_head} -> {result.head}")
 
 
 @pull_request_app.command("commits")

@@ -1,6 +1,6 @@
 # repo-standards
 
-`repo-standards` measures pull-request review size without executing repository code.
+`repo-standards` checks tracked trees and pull-request delivery policy.
 
 ## Where rules belong
 
@@ -32,6 +32,18 @@ For a persistent user installation:
 uv tool install repo-standards
 repo-standards pull-request size . --base origin/main
 ```
+
+Before opening a feature branch's first PR, prepare and push one commit with native hooks:
+
+```bash
+repo-standards pull-request push . --base origin/main --message "feat: describe the change" --trust-repository-code
+```
+
+This POSIX command requires a clean, complete checkout, a current fetched target and canonical
+GitHub origin URLs naming one repository. Fresh metadata protects its default branch and rejects
+forks or any prior open or closed PR. The captured destination owns the reads, lease, push and
+confirmation; native hooks still run. Existing PRs and forks retain their normal workflow.
+Local preparation remains available as `pull-request prepare`.
 
 Upgrade with `uv tool upgrade repo-standards`. Automation should pin the package version or
 the GitHub Action's full commit SHA.
