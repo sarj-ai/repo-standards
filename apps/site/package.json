@@ -56,7 +56,8 @@
     },
     "@sarj/design": {
       "@astrojs/starlight": "$@astrojs/starlight"
-    }
+    },
+    "minimatch@>=7.0.0 <11.0.1": "11.0.8"
   },
   "packageManager": "npm@12.2.1",
   "homepage": "https://engineering.sarj.ai/projects/repo-standards/"
