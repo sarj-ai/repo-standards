@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+import select
 import shutil
 import signal
 import subprocess
@@ -377,18 +378,28 @@ def forking_read(tmp_path: Path) -> _ForkingRead:
 def _original_child_exited(identity: _ChildIdentity) -> bool:
     try:
         fields = (Path("/proc") / str(identity.pid) / "stat").read_text().rsplit(")", 1)[1].split()
-    except FileNotFoundError:
+    except FileNotFoundError, ProcessLookupError:
         return True
     return int(fields[19]) != identity.birth or fields[0] == "Z"
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux PID birth and pidfd lifetime witness")
-def test_native_read_timeout_terminates_its_owned_descendants(forking_read: _ForkingRead) -> None:
+def test_native_read_timeout_terminates_its_owned_descendants(
+    forking_read: _ForkingRead, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- Bound the real native read timeout.
+        preparation, "_READ_TIMEOUT_SECONDS", 2
+    )
     with pytest.raises(ConfigurationError, match="command could not complete"):
         preparation.read_native_command(forking_read.command)
     identity = _ChildIdentity.model_validate_json(forking_read.receipt.read_text())
-    descriptor = os.pidfd_open(identity.pid) if not _original_child_exited(identity) else None
     try:
+        descriptor = os.pidfd_open(identity.pid)
+    except ProcessLookupError:
+        descriptor = None
+    try:
+        if descriptor is not None and not _original_child_exited(identity):
+            select.select([descriptor], [], [], 1)
         assert _original_child_exited(identity), "Timed-out native read left its child running"
     finally:
         if descriptor is not None:
