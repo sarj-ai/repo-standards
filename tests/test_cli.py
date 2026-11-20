@@ -1919,16 +1919,20 @@ def test_capabilities_are_machine_discoverable() -> None:
     assert "catalog" in commands
     assert "pull-request commits" in commands
     assert "pull-request prepare" in commands
+    assert "pull-request push" in commands
     safety = _object(capabilities["safety"])
     assert safety["repository_code_execution"] is True
     assert safety["repository_code_execution_default"] is False
     assert (
         safety["mutation"]
-        == "commit-message --fix-safe; pull-request prepare --trust-repository-code"
+        == "commit-message --fix-safe; pull-request prepare/push --trust-repository-code"
     )
     assert safety["network"] is True
     assert safety["network_default"] is False
-    assert safety["network_mode"] == "disabled except explicitly trusted preparation hooks"
+    assert (
+        safety["network_mode"]
+        == "disabled except explicitly trusted Git hooks and first-PR publication"
+    )
     assert _object(safety["trusted_preparation"])["platform"] == "POSIX"
     assert _object(capabilities["tool"])["version"]
     assert capabilities["execution_issues"] == []

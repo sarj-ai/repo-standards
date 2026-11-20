@@ -59,6 +59,7 @@ def capabilities_payload() -> CapabilitiesPayload:
             "inspect",
             "pull-request commits",
             "pull-request prepare",
+            "pull-request push",
             "pull-request review-policy",
             "pull-request size",
             "pull-request text",
@@ -74,14 +75,16 @@ def capabilities_payload() -> CapabilitiesPayload:
         "safety": {
             "network": True,
             "network_default": False,
-            "network_mode": "disabled except explicitly trusted preparation hooks",
+            "network_mode": "disabled except explicitly trusted Git hooks and first-PR publication",
             "repository_code_execution": True,
             "repository_code_execution_default": False,
-            "mutation": "commit-message --fix-safe; pull-request prepare --trust-repository-code",
+            "mutation": (
+                "commit-message --fix-safe; pull-request prepare/push --trust-repository-code"
+            ),
             "trusted_preparation": {
                 "platform": "POSIX",
                 "repository_code_execution": "native Git hooks and local Git configuration",
-                "network": "native hooks may access the network",
+                "network": "GitHub metadata and native Git push; hooks may access the network",
             },
             "autofix": "bounded mechanical commit-header normalization only",
             "inspection_input": "exact-git-head-tree",
