@@ -8,7 +8,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from typing import TYPE_CHECKING, ClassVar, Protocol
+from typing import ClassVar, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 import pytest
@@ -16,13 +16,8 @@ from typer.testing import CliRunner
 
 from repo_standards.cli import app
 from repo_standards.core.errors import ConfigurationError
-from repo_standards.core.pull_request_commits import analyze_pull_request_commits
 from repo_standards.pull_request import _prepare as preparation  # ruff: ignore[import-private-name] - exercise the operation's cancellation boundary
 from repo_standards.pull_request._prepare import prepare_pull_request  # ruff: ignore[import-private-name] - exercise the operation at its owned boundary
-
-
-if TYPE_CHECKING:
-    from repo_standards.core.pull_request_commits import PullRequestCommits
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -137,6 +132,22 @@ def publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Publication
         "print(json.dumps([{'number': 1}] if mode == 'existing-pr' else []))\n"
     )
     gh.chmod(0o700)
+    history_git = commands / "history-git"
+    history_git.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib, subprocess, sys\n"
+        f"root = pathlib.Path({str(root)!r})\n"
+        "marker = root / '.git/history-race-injected'\n"
+        "arguments = sys.argv[1:]\n"
+        "if (arguments and 'rev-parse' in arguments\n"
+        "    and '--is-shallow-repository' in arguments\n"
+        "    and arguments[-1] == 'HEAD^{commit}' and not marker.exists()):\n"
+        "    marker.touch()\n"
+        f"    subprocess.run([{native_git!r}, '-C', str(root), 'commit', '--quiet',\n"
+        "                    '--allow-empty', '-m', 'chore: concurrent edit'], check=True)\n"
+        f"os.execv({native_git!r}, [{native_git!r}, *arguments])\n"
+    )
+    history_git.chmod(0o700)
     monkeypatch.setenv("PATH", str(commands), prepend=os.pathsep)
     monkeypatch.setenv("GIT_SSH_COMMAND", str(ssh))
     monkeypatch.setenv("GIT_SSH_VARIANT", "ssh")
@@ -152,6 +163,8 @@ class _PublicationResult(Protocol):
 
 
 def _publish(state: _Publication) -> _PublicationResult:
+    if state.mode == "history-race":
+        (state.root.parent / "commands/git").symlink_to("history-git")
     (state.root.parent / "publication-state.json").write_text(
         json.dumps(
             {
@@ -233,16 +246,11 @@ def test_local_change_during_evidence_read_is_preserved(publication: _Publicatio
 
 
 def test_local_change_between_snapshot_check_and_history_read_is_preserved(
-    publication: _Publication, monkeypatch: pytest.MonkeyPatch
+    publication: _Publication,
 ) -> None:
-    def concurrent_history(root: Path, *, base: str) -> PullRequestCommits:
-        _git(root, "commit", "--quiet", "--allow-empty", "-m", "chore: concurrent edit")
-        return analyze_pull_request_commits(root, base=base)
-
-    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- another injection point misses this race
-        preparation, "analyze_pull_request_commits", concurrent_history
-    )
+    publication.mode = "history-race"
     result = _publish(publication)
+    assert (publication.root / ".git/history-race-injected").is_file()
     assert result.exit_code != 0, result.output
     assert "branch changed after publication preflight" in result.output
     assert _git(publication.root, "log", "-1", "--format=%s") == "chore: concurrent edit"
