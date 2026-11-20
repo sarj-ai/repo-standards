@@ -42,6 +42,7 @@ jobs:
           version: '0.13.5'
           enable-cache: true
           cache-dependency-glob: uv.lock
+          cache-suffix: ci-timeout-cold-20261120-v1
       - name: Verify full validation of identical reviewed tree
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: reviewed
@@ -91,6 +92,7 @@ jobs:
           version: '0.13.5'
           enable-cache: true
           cache-dependency-glob: uv.lock
+          cache-suffix: ci-timeout-cold-20261120-v1
       - name: Verify minimum supported runtime
         env:
           STANDARDS_PYTHON: '3.14'
