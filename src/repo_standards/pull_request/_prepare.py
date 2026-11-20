@@ -191,16 +191,14 @@ def prepare_pull_request(  # ruff: ignore[too-many-branches,too-many-statements]
     if not branch_ref.startswith("refs/heads/"):
         ConfigurationError.fail("preparation requires a checked-out feature branch")
     branch = branch_ref.removeprefix("refs/heads/")
-    if expected is not None and (
-        branch != expected.branch or git.read("rev-parse", "HEAD") != expected.head
-    ):
-        ConfigurationError.fail(
-            "the branch changed after publication preflight; preparation stopped"
-        )
     _require_feature_branch(root, git, branch, base)
     _require_exclusive_branch(git, branch_ref)
     history = analyze_pull_request_commits(root, base=base)
     before = str(history.head_object_id)
+    if expected is not None and (branch != expected.branch or before != expected.head):
+        ConfigurationError.fail(
+            "the branch changed after publication preflight; preparation stopped"
+        )
     base_id = str(history.base_object_id)
     count = int(git.read("rev-list", "--count", f"{base_id}..{before}"))
     if count == 0:

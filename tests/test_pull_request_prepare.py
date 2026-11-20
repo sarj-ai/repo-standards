@@ -8,7 +8,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from typing import ClassVar, Protocol
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 import pytest
@@ -16,8 +16,13 @@ from typer.testing import CliRunner
 
 from repo_standards.cli import app
 from repo_standards.core.errors import ConfigurationError
+from repo_standards.core.pull_request_commits import analyze_pull_request_commits
 from repo_standards.pull_request import _prepare as preparation  # ruff: ignore[import-private-name] - exercise the operation's cancellation boundary
 from repo_standards.pull_request._prepare import prepare_pull_request  # ruff: ignore[import-private-name] - exercise the operation at its owned boundary
+
+
+if TYPE_CHECKING:
+    from repo_standards.core.pull_request_commits import PullRequestCommits
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -225,6 +230,24 @@ def test_local_change_during_evidence_read_is_preserved(publication: _Publicatio
     assert result.exit_code != 0
     assert _git(publication.root, "log", "-1", "--format=%s") == "chore: concurrent edit"
     assert _git(publication.root, "rev-list", "--count", "origin/main..HEAD") == "3"
+
+
+def test_local_change_between_snapshot_check_and_history_read_is_preserved(
+    publication: _Publication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def concurrent_history(root: Path, *, base: str) -> PullRequestCommits:
+        _git(root, "commit", "--quiet", "--allow-empty", "-m", "chore: concurrent edit")
+        return analyze_pull_request_commits(root, base=base)
+
+    monkeypatch.setattr(  # sarj-noqa: SARJ445 -- another injection point misses this race
+        preparation, "analyze_pull_request_commits", concurrent_history
+    )
+    result = _publish(publication)
+    assert result.exit_code != 0, result.output
+    assert "branch changed after publication preflight" in result.output
+    assert _git(publication.root, "log", "-1", "--format=%s") == "chore: concurrent edit"
+    assert _git(publication.root, "rev-list", "--count", "origin/main..HEAD") == "3"
+    assert not _git(publication.remote, "for-each-ref", "refs/heads/feature")
 
 
 def test_failed_native_push_hook_preserves_prepared_commit(publication: _Publication) -> None:
