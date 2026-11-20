@@ -383,7 +383,9 @@ def _original_child_exited(identity: _ChildIdentity) -> bool:
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux PID birth and pidfd lifetime witness")
-def test_native_read_timeout_terminates_its_owned_descendants(forking_read: _ForkingRead) -> None:
+def test_native_read_timeout_terminates_its_owned_descendants(
+    forking_read: _ForkingRead,
+) -> None:
     with pytest.raises(ConfigurationError, match="command could not complete"):
         preparation.read_native_command(forking_read.command)
     identity = _ChildIdentity.model_validate_json(forking_read.receipt.read_text())
