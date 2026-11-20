@@ -17,6 +17,9 @@ permissions:
   contents: read
   actions: read
 
+env:
+  TEST_JOBS: ${{ github.event_name == 'pull_request' && 4 || 2 }}
+
 defaults:
   run:
     shell: bash
@@ -94,7 +97,7 @@ jobs:
       - name: Verify minimum supported runtime
         env:
           STANDARDS_PYTHON: '3.14'
-        run: bash .github/scripts/verify-python.sh
+        run: bash .github/scripts/verify-python.sh --jobs "$TEST_JOBS"
 
   package:
     name: Build and install artifacts

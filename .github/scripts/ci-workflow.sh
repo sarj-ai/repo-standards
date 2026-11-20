@@ -16,7 +16,7 @@ case "${1:-}" in
     lint_pid=$!
     run_check Typecheck uv run --no-sync basedpyright &
     types_pid=$!
-    run_check Tests uv run --no-sync python test_selection.py --run --base "$TEST_BASE" --report "$RUNNER_TEMP/test-plan.json" --summary "$GITHUB_STEP_SUMMARY" &
+    run_check Tests uv run --no-sync python test_selection.py --run --base "$TEST_BASE" --jobs "${TEST_JOBS:-2}" --report "$RUNNER_TEMP/test-plan.json" --summary "$GITHUB_STEP_SUMMARY" &
     tests_pid=$!
     result=0
     wait "$lint_pid" || result=1

@@ -415,9 +415,10 @@ def test_site_requires_successful_whole_ci(tmp_path: Path, conclusion: str | Non
     assert not destination.exists()
 
 
+@pytest.mark.parametrize("test_jobs", ["2", "4"])
 @pytest.mark.parametrize("failed_check", ["none", "ruff", "basedpyright", "pytest"])
 def test_parallel_ci_waits_for_all_checks_and_propagates_failure(
-    tmp_path: Path, failed_check: str
+    tmp_path: Path, failed_check: str, test_jobs: str
 ) -> None:
     object_map = TypeAdapter(dict[str, JsonValue])
     objects = TypeAdapter(list[dict[str, JsonValue]])
@@ -440,7 +441,7 @@ def test_parallel_ci_waits_for_all_checks_and_propagates_failure(
     stub = tmp_path / "uv"
     stub.write_text(
         '#!/bin/sh\ncase "$*" in *ruff*) name=ruff;; *basedpyright*) name=basedpyright;; '
-        "*) name=pytest;; esac\n"
+        '*) name=pytest; printf "%s\\n" "$@" > "$ARGUMENTS";; esac\n'
         'printf "%s\\n" "$name" >> "$RESULTS"\n'
         '[ "$name" != "$FAIL_CHECK" ]\n'
     )
@@ -456,9 +457,11 @@ def test_parallel_ci_waits_for_all_checks_and_propagates_failure(
             "PATH": str(tmp_path) + os.pathsep + str(Path(shutil.which("sh") or "/bin/sh").parent),
             "FAIL_CHECK": failed_check,
             "RESULTS": str(tmp_path / "results"),
+            "ARGUMENTS": str(tmp_path / "arguments"),
             "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
             "RUNNER_TEMP": str(tmp_path),
             "TEST_BASE": "",
+            "TEST_JOBS": test_jobs,
         },
     )
     assert (process.returncode == 0) == (failed_check == "none"), process.stderr
@@ -468,6 +471,9 @@ def test_parallel_ci_waits_for_all_checks_and_propagates_failure(
         "ruff",
     ]
     assert len((tmp_path / "summary").read_text().splitlines()) == 3
+    arguments = (tmp_path / "arguments").read_text().splitlines()
+    assert arguments.count("--jobs") == 1
+    assert arguments[arguments.index("--jobs") + 1] == test_jobs
 
 
 @pytest.mark.parametrize("index", [0, 1, 2])
