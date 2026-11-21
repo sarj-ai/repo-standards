@@ -58,6 +58,12 @@ from .spec import (
     RuleGovernance,
     RuleMaturity,
 )
+from .terraform import (
+    MODULE_CLUSTER_RULE_ID,
+    MODULE_LAYOUT_RULE_ID,
+    module_cluster_diagnostics,
+    module_layout_diagnostics,
+)
 
 
 if TYPE_CHECKING:
@@ -210,6 +216,77 @@ def _tracked_files_example(*paths: str, manifest: str | None = None) -> str:
 
 
 RULES = (
+    Rule(
+        rule_id=MODULE_CLUSTER_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Review Terraform filename clusters for cohesive modules",
+        description=(
+            "Warn for at least three tracked Terraform files sharing a meaningful prefix or "
+            "suffix in one module folder. Conventional names and vendor/generated/example/fixture "
+            "trees are excluded. One advisory covers overlapping clusters. "
+            "Names cannot prove cohesion."
+        ),
+        why="Repeated capability names can expose an interface boundary worth reviewing.",
+        references=(
+            "https://developer.hashicorp.com/terraform/language/modules/develop/composition",
+            "https://developer.hashicorp.com/terraform/language/modules/develop/structure",
+        ),
+        fix=(
+            "Review cohesion, coupling and meaningful duplication with semantic analysis. Preserve "
+            "flat composition. Never extract from names alone; address changes require reviewed "
+            "state migration and fixture plans. No autofix."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-terraform-module-cluster",
+                title="Review a named capability cluster",
+                language="json",
+                before=_tracked_files_example(
+                    "infra/query-dns.tf", "infra/query-service.tf", "infra/query-access.tf"
+                ),
+                after=_tracked_files_example(
+                    "infra/query/main.tf", "infra/query/variables.tf", "infra/query/outputs.tf"
+                ),
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=MODULE_LAYOUT_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Keep Terraform interfaces inside their owning component module",
+        description=(
+            "Find Terraform sources in variables/ or outputs/ immediately below another module. "
+            "These folders do not load into their parent. Separately declared terraform-root "
+            "components remain valid; semantic declaration placement belongs in Code Standards."
+        ),
+        why="Declaration-kind subdirectories can silently stop the parent evaluating declarations.",
+        references=(
+            "https://developer.hashicorp.com/terraform/language/files",
+            "https://developer.hashicorp.com/terraform/language/modules/develop/structure",
+        ),
+        fix=(
+            "Use a cohesive component module with canonical interface files, or declare a real "
+            "separately invoked component in the existing repository contract. Do not require "
+            "empty files or relocate tfvars, entrypoints, providers or backends. No automatic "
+            "module movement. Starts as a warning; default blocking needs "
+            "separate reviewed promotion."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-terraform-module-layout",
+                title="Keep declarations in the owning module folder",
+                language="json",
+                before=_tracked_files_example("infra/main.tf", "infra/variables/region.tf"),
+                after=_tracked_files_example("infra/main.tf", "infra/variables.tf"),
+                expected_severity="warning",
+            ),
+        ),
+    ),
     Rule(
         rule_id=MARKDOWN_ONLY_RULE_ID,
         version=1,
@@ -832,6 +909,8 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         MARKDOWN_ONLY_RULE_ID: RuleClassification.JUDGMENT,
         MIGRATION_CONSOLIDATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
+        MODULE_CLUSTER_RULE_ID: RuleClassification.JUDGMENT,
+        MODULE_LAYOUT_RULE_ID: RuleClassification.OBJECTIVE,
         UNTYPED_JAVASCRIPT_RULE_ID: RuleClassification.JUDGMENT,
         UNDECLARED_IMAGES_RULE_ID: RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
@@ -851,6 +930,8 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         MARKDOWN_ONLY_RULE_ID: 57,
         MIGRATION_CONSOLIDATION_RULE_ID: 53,
         LOCAL_RESIDUE_RULE_ID: 51,
+        MODULE_CLUSTER_RULE_ID: 58,
+        MODULE_LAYOUT_RULE_ID: 59,
         UNTYPED_JAVASCRIPT_RULE_ID: 49,
         UNDECLARED_IMAGES_RULE_ID: 54,
         RuleId("repository/artifacts/terraform-examples"): 40,
@@ -892,6 +973,20 @@ _RULE_EVIDENCE: Mapping[RuleId, Literal["declared", "verified", "external"]] = M
     }
 )
 
+_RULE_UPSTREAM: Mapping[RuleId, tuple[str, ...]] = MappingProxyType(
+    {
+        UNDECLARED_IMAGES_RULE_ID: ("Git tracked-tree inventory", "repository image declarations"),
+        MODULE_CLUSTER_RULE_ID: (
+            "Git tracked-tree inventory",
+            "Terraform module composition guidance",
+        ),
+        MODULE_LAYOUT_RULE_ID: (
+            "Terraform module directory loading",
+            "Code Standards declaration ownership",
+        ),
+    }
+)
+
 RULE_GOVERNANCE = tuple(
     RuleGovernance(
         rule_id=rule.rule_id,
@@ -900,10 +995,8 @@ RULE_GOVERNANCE = tuple(
         ),
         classification=_RULE_CLASSIFICATION[rule.rule_id],
         evidence=_RULE_EVIDENCE[rule.rule_id],
-        upstream=(
-            ("Git tracked-tree inventory", "repository image declarations")
-            if rule.rule_id == UNDECLARED_IMAGES_RULE_ID
-            else _UPSTREAM_BY_CLASSIFICATION[_RULE_CLASSIFICATION[rule.rule_id]]
+        upstream=_RULE_UPSTREAM.get(
+            rule.rule_id, _UPSTREAM_BY_CLASSIFICATION[_RULE_CLASSIFICATION[rule.rule_id]]
         ),
         precedence=_RULE_PRECEDENCE[rule.rule_id],
     )
@@ -913,7 +1006,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=39,
+    policy_version=40,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1655,6 +1748,8 @@ class SarjPolicy:
             UNTYPED_JAVASCRIPT_RULE_ID,
             UNDECLARED_IMAGES_RULE_ID,
             LOCAL_RESIDUE_RULE_ID,
+            MODULE_CLUSTER_RULE_ID,
+            MODULE_LAYOUT_RULE_ID,
             MAKEFILE_GROWTH_RULE_ID,
             _SCRIPT_TEST_DIRECTORIES_RULE_ID,
         }
@@ -1666,6 +1761,8 @@ class SarjPolicy:
             (UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics),
             (UNDECLARED_IMAGES_RULE_ID, image_diagnostics),
             (LOCAL_RESIDUE_RULE_ID, local_residue_diagnostics),
+            (MODULE_CLUSTER_RULE_ID, module_cluster_diagnostics),
+            (MODULE_LAYOUT_RULE_ID, module_layout_diagnostics),
             (_SCRIPT_TEST_DIRECTORIES_RULE_ID, _script_test_directory_diagnostics),
         ):
             if rule_id in enabled:
