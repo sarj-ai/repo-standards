@@ -1,11 +1,88 @@
 {
   "schemaVersion": 2,
   "provenance": {
-    "bundleVersion": "9.11.0",
-    "consumerBaseSha": "beba1c7fbc7793c5a6d2d0b774b2e0e30eebe69a",
-    "catalogDigest": "51cdea9fa9fc73628c281c2f93fa4bcbcaa39cb07478c2ba057b09919288cae2"
+    "bundleVersion": "9.75.0",
+    "consumerBaseSha": "83cd0556513cf5b1787b0c8fb23999c2168430f5",
+    "catalogDigest": "ed64614f526f9b90eea29a6bdae88b2153fdfacba51fe71ba72dc8aff3ca4bb8"
   },
   "diagnostics": [
+    {
+      "fingerprint": "f36704f46e56a1131f0492e8ef5ec309ee76732036f9847019914c2db4f22aa1",
+      "source": "oxlint",
+      "ruleId": "@sarj/no-raw-env",
+      "path": "apps/site/src/lib/source-revision.ts",
+      "count": 2
+    },
+    {
+      "fingerprint": "3e42edc3f10106768a84db042bf03eb48900462af783d28ba4e9fba8cc4c9315",
+      "source": "oxlint",
+      "ruleId": "import/no-anonymous-default-export",
+      "path": "apps/site/src/worker.ts",
+      "count": 1
+    },
+    {
+      "fingerprint": "f32a085093d4268014068a6605d809d33314d830d2b6d0c61da6ca01bf469c19",
+      "source": "oxlint",
+      "ruleId": "no-promise-executor-return",
+      "path": "apps/site/scripts/verify-deployment.ts",
+      "count": 1
+    },
+    {
+      "fingerprint": "0d2a1ef729e7a0883239997662773e5e5a86a92db23686f5d2a8881167463be1",
+      "source": "oxlint",
+      "ruleId": "regexp/no-contradiction-with-assertion",
+      "path": "apps/site/scripts/finalize-cloudflare-artifacts.ts",
+      "count": 1
+    },
+    {
+      "fingerprint": "13ab0c40e4d8c167ab18ef2a76e2e7414408dd22736999ce9638e00f33a50c3e",
+      "source": "oxlint",
+      "ruleId": "typescript/promise-function-async",
+      "path": "apps/site/astro.config.ts",
+      "count": 1
+    },
+    {
+      "fingerprint": "73817cad8abba3966421b4be18e3f01ea0c8934346e8dbe5eb351fec18ed8e30",
+      "source": "oxlint",
+      "ruleId": "typescript/promise-function-async",
+      "path": "apps/site/scripts/finalize-cloudflare-artifacts.ts",
+      "count": 1
+    },
+    {
+      "fingerprint": "0fd4f60822c7b6e0c0dc4a06cf43abfa62a0a9dfa2cf88ea85e450742cc740f5",
+      "source": "oxlint",
+      "ruleId": "typescript/promise-function-async",
+      "path": "apps/site/scripts/rule-introductions.test.ts",
+      "count": 1
+    },
+    {
+      "fingerprint": "4c59c4417731d3193633953079c96d5313e74f2dab593c4903dc76debd6a8cd9",
+      "source": "oxlint",
+      "ruleId": "typescript/promise-function-async",
+      "path": "apps/site/scripts/site-routing.test.ts",
+      "count": 1
+    },
+    {
+      "fingerprint": "1ea87439858118fcf87ec889cfbc6a0060a169dbb6f1ddcb3c858729164e67bf",
+      "source": "oxlint",
+      "ruleId": "typescript/promise-function-async",
+      "path": "apps/site/scripts/verify-deployment.ts",
+      "count": 1
+    },
+    {
+      "fingerprint": "5a9ce58660064bca376bf3bf7392178aeeb886fe36742a74a1f2023df539b9e4",
+      "source": "oxlint",
+      "ruleId": "typescript/strict-void-return",
+      "path": "apps/site/scripts/verify-deployment.ts",
+      "count": 1
+    },
+    {
+      "fingerprint": "642e1de46526db0e8e2a01bdb209ca66743056e776744fd4acf627f6ce2d0a70",
+      "source": "oxlint",
+      "ruleId": "typescript/strict-void-return",
+      "path": "apps/site/src/lib/rule-introductions.ts",
+      "count": 1
+    },
     {
       "fingerprint": "0df69625305029b30875748b141b9c9e648b89401e9d57fa8a56952bed2f4396",
       "source": "sarj-python-lint",
@@ -14,66 +91,150 @@
       "count": 1
     },
     {
-      "fingerprint": "0cd327de08039ada22fa3e62d4a74090fa0cee56033a4d3c3b947ac5279f8887",
+      "fingerprint": "d2f9202c5b46d52cea9dc5260112c43b19cd125ca4acba7c64678d2c8081a914",
       "source": "sarj-python-lint",
-      "ruleId": "no-any-mapping-types",
-      "path": "src/repo_standards/github_review_policy.py",
-      "count": 14
-    },
-    {
-      "fingerprint": "eb3958e8bf74d6b752c8d0317f11755366ad93fa7cff2d22188a4a939a2e01d5",
-      "source": "sarj-python-lint",
-      "ruleId": "no-any-mapping-types",
-      "path": "src/repo_standards/github_review_policy.py",
+      "ruleId": "no-custom-control-flow-exception",
+      "path": "src/repo_standards/activation_verification.py",
       "count": 1
     },
     {
-      "fingerprint": "a41e281cdc93915584b7f02938a32b17d9bdd12e1ed6fb6f2912a9a31c45b2a9",
+      "fingerprint": "1f9b576c4c4a4a1874fee3b62db9bba718f812606cf035afa3dc2ac9341aa2db",
       "source": "sarj-python-lint",
-      "ruleId": "no-broad-keyword-capture",
-      "path": "tests/test_ci_artifacts.py",
+      "ruleId": "no-custom-control-flow-exception",
+      "path": "src/repo_standards/github_checkout.py",
       "count": 1
     },
     {
-      "fingerprint": "0b38534fba7b90d792a7b9b6d06e731ef2bff21b670cb2c2fed8115777e43047",
+      "fingerprint": "f294d0ecbcedbb984f6dc0b7677ffd818ea76bc52631cd94a2f526c34c46d7ba",
       "source": "sarj-python-lint",
-      "ruleId": "no-broad-keyword-capture",
-      "path": "tests/test_review_policy_action_contract.py",
+      "ruleId": "no-generic-json-parser",
+      "path": "src/repo_standards/catalog.py",
       "count": 1
     },
     {
-      "fingerprint": "5a4a564b36edf24c776b8ea67567524a5777482a63129eec746db33ea403bcb4",
+      "fingerprint": "b8a67591755a03276fe7ddd31c9e53edc126335435aead23cf4cfec6ffaf8d0e",
       "source": "sarj-python-lint",
-      "ruleId": "no-broad-keyword-capture",
-      "path": "tests/test_review_policy_action_contract.py",
-      "count": 7
+      "ruleId": "no-generic-json-parser",
+      "path": "tests/skills/test_rule_calibration.py",
+      "count": 2
     },
     {
-      "fingerprint": "586453350dd31c6139e12427cc83822e248531b0bb5145d43ae2dcb8a640bd46",
+      "fingerprint": "ed8a78176b778e2f5a05e100ba3fdc05c3f38df7876defc5b378d99397f1c72d",
       "source": "sarj-python-lint",
-      "ruleId": "no-broad-keyword-capture",
-      "path": "tests/test_review_policy_stacked_merge_group.py",
+      "ruleId": "no-generic-json-parser",
+      "path": "tests/test_commit_message_cli.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "15da29e861ea09549eb7616e4fdf7a01c6215e152253f74f2f1465dc80089b56",
+      "source": "sarj-python-lint",
+      "ruleId": "no-generic-json-parser",
+      "path": "tests/test_documentation_action_contract.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "d07f43ace69423059ba083862aa6a498bcaad5b0ee2f3f446bc90a1feb382a86",
+      "source": "sarj-python-lint",
+      "ruleId": "no-generic-json-parser",
+      "path": "tests/test_makefile_growth.py",
+      "count": 6
+    },
+    {
+      "fingerprint": "967922bec4e6c8e70e1c1e22266dbf93d69b2cfed9d3066a6914a6b40f140719",
+      "source": "sarj-python-lint",
+      "ruleId": "no-generic-json-parser",
+      "path": "tests/test_pull_request_commits_context_cli.py",
       "count": 1
     },
     {
-      "fingerprint": "9b08a42e7c254015360963f98ba8be7ee77308126cd05d3f89f05c8a07262c4d",
+      "fingerprint": "e7f6d69e2f227940a6f87e2774a31956fecbd190bf4858014df18b663cea78a1",
       "source": "sarj-python-lint",
-      "ruleId": "no-broad-keyword-capture",
-      "path": "tests/test_review_policy_stacked_merge_group.py",
-      "count": 1
+      "ruleId": "no-generic-json-parser",
+      "path": "tests/test_pull_request_commits_packaging_contract.py",
+      "count": 2
     },
     {
-      "fingerprint": "21c7be8325f3e4ccae03db0312f9d00b1671040d490bb8f6537f3a61b7b2ab9b",
+      "fingerprint": "45fa4ae2006cf65c3100d23a1bb22686b2d309421c6f428aa47728d9aa802fc8",
       "source": "sarj-python-lint",
-      "ruleId": "no-broad-keyword-capture",
-      "path": "tests/test_test_selection.py",
-      "count": 1
+      "ruleId": "no-generic-json-parser",
+      "path": "tests/test_pull_request_documentation.py",
+      "count": 3
+    },
+    {
+      "fingerprint": "eee705b9b1fc71f100dab198c4e65dc1bff0fbecd9815b852bd39019b808041d",
+      "source": "sarj-python-lint",
+      "ruleId": "no-generic-json-parser",
+      "path": "tests/test_pull_request_text_cli.py",
+      "count": 2
     },
     {
       "fingerprint": "ccba24f720ee8e7d29b4aff69485f1383459f84c790ba0613adf86e8a40856e2",
       "source": "sarj-python-lint",
       "ruleId": "no-input-model-mutation",
       "path": "src/repo_standards/catalog.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "ca90a1e4d9474d471d00e04dfbbfa3fa97367a063d6c1b9e4897b00642e8b357",
+      "source": "sarj-python-lint",
+      "ruleId": "no-magic-arithmetic",
+      "path": "src/repo_standards/activation_verification.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "a83f3f9f1c6701bb15f739eaf85bd028bd00efcbdaddcf691b85cb1b582ae20b",
+      "source": "sarj-python-lint",
+      "ruleId": "no-magic-arithmetic",
+      "path": "src/repo_standards/cli.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "f44f31e58fa612196d030ccd4c7dab7cd32533dbb7496a566c9af19004da4c9f",
+      "source": "sarj-python-lint",
+      "ruleId": "no-magic-arithmetic",
+      "path": "src/repo_standards/core/subject.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "67fb4827a02a0a57d7f19e4e3032c71df04e9c45a44098c3dd00ad4dfe0327d6",
+      "source": "sarj-python-lint",
+      "ruleId": "no-magic-arithmetic",
+      "path": "src/repo_standards/github_review_policy.py",
+      "count": 5
+    },
+    {
+      "fingerprint": "0135a35029c2608d1a1b482052b73783a598623151ff64613c9df919f21212f7",
+      "source": "sarj-python-lint",
+      "ruleId": "no-magic-arithmetic",
+      "path": "src/repo_standards/policy_sarj/examples.py",
+      "count": 13
+    },
+    {
+      "fingerprint": "2188d2f649208cbda26e38dea6c5fe60623d78a6f58c872e47d3b6ab1d03b4c1",
+      "source": "sarj-python-lint",
+      "ruleId": "no-magic-arithmetic",
+      "path": "src/repo_standards/repository/analysis.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "d56dbb25d1de949ae2fa73a4662c622a21a8b15acbe310533b5e0542a2a04e3b",
+      "source": "sarj-python-lint",
+      "ruleId": "no-magic-arithmetic",
+      "path": "src/repo_standards/rest/instrumentation.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "a805c8c98d26056aede3f823dbce51c6b86a3b760b457a2c4baef4d332612fe0",
+      "source": "sarj-python-lint",
+      "ruleId": "no-magic-arithmetic",
+      "path": "src/repo_standards/verify_release_artifacts.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "05101056efa449cb8e9aecf70391184d63d3cf48ea4d56a0402126e153787fda",
+      "source": "sarj-python-lint",
+      "ruleId": "no-raw-source-text-test-oracle",
+      "path": "tests/test_public_api.py",
       "count": 1
     },
     {
@@ -88,14 +249,70 @@
       "source": "sarj-python-lint",
       "ruleId": "no-raw-source-text-test-oracle",
       "path": "tests/test_review_policy_action_contract.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "624fef190f42306930c7de551e0a155de525cc6fa353b82c72970b09c7297940",
+      "source": "sarj-python-lint",
+      "ruleId": "no-redundant-attribute-unpacking",
+      "path": "tests/test_ci_reviewed_validation.py",
+      "count": 4
+    },
+    {
+      "fingerprint": "f0db34cefa61b93dca64987552fb54b91673a76f5cc2e898d9f62684b1246141",
+      "source": "sarj-python-lint",
+      "ruleId": "no-test-comments",
+      "path": "tests/skills/test_merge_risk_source.py",
       "count": 1
+    },
+    {
+      "fingerprint": "5740f6e39e3ca7a5aa57515f464437eb15c7fd212b056978860f9302257d94e7",
+      "source": "sarj-python-lint",
+      "ruleId": "no-test-comments",
+      "path": "tests/test_cli.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "7b031f1a83152ad3d59af13f1a4b881a35ca6b3d2e43691e88297dce3e327879",
+      "source": "sarj-python-lint",
+      "ruleId": "no-test-comments",
+      "path": "tests/test_makefile_growth.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "dd470c12bf55b3dd251413a46eab203fec9fd3e6cfba229dc91046dccc68e3f1",
+      "source": "sarj-python-lint",
+      "ruleId": "no-test-comments",
+      "path": "tests/test_pull_request_commits_context_cli.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "58ea387718892608de7f469ae8d642a71ab3b9f448570ee18730ebf8639e47a9",
+      "source": "sarj-python-lint",
+      "ruleId": "no-test-comments",
+      "path": "tests/test_pull_request_commits_packaging_contract.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "af94f9235007b91e84b0deb892ce1f7a4e611e49d6d53c5c39c07c8b134ec0e0",
+      "source": "sarj-python-lint",
+      "ruleId": "no-test-comments",
+      "path": "tests/test_review_policy_action_contract.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "ffd1d6476861384b72de727b9268cf5ebf3857e6abf4567bbbf101eec188ee43",
+      "source": "sarj-python-lint",
+      "ruleId": "no-test-comments",
+      "path": "tests/test_review_policy_stacked_merge_group.py",
+      "count": 2
     },
     {
       "fingerprint": "1b5af9d741538746d4134cf7829fc4ff8ba03d673c25f5ee7f390ac49f8f6a72",
       "source": "sarj-python-lint",
       "ruleId": "no-test-method-grafting",
       "path": "tests/test_review_policy_action_contract.py",
-      "count": 6
+      "count": 1
     },
     {
       "fingerprint": "229ee6557ea3043733c13ac33c5505c1eefeef4cf3821204bf3078c210f17906",
@@ -110,6 +327,83 @@
       "ruleId": "no-test-method-grafting",
       "path": "tests/test_review_policy_action_contract.py",
       "count": 2
+    },
+    {
+      "fingerprint": "caadc42b106ed6ffc5226ab0b529d03331bb4a6b231da510bfe36309a1b42ff6",
+      "source": "sarj-python-lint",
+      "ruleId": "no-unnecessary-docstring",
+      "path": "src/repo_standards/core/errors.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "e8df608cbcc822e0c3ca4ff3ea13d7b449c043c0a4f99bf435f89ef335d1b973",
+      "source": "sarj-python-lint",
+      "ruleId": "no-unnecessary-docstring",
+      "path": "src/repo_standards/policy_sarj/spec.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "41e9f8dccce3894f01ac1dfd0b18aa5e82ca0ac3340cac3738e25af9e01a845d",
+      "source": "sarj-python-lint",
+      "ruleId": "numeric-literal-separators",
+      "path": "src/repo_standards/core/activation_policy.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "11983e1f1ed9ea1c50387c69ae3ecd39709a17c085d08da5c24e9d9c34647bc0",
+      "source": "sarj-python-lint",
+      "ruleId": "numeric-literal-separators",
+      "path": "src/repo_standards/core/models.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "61bc6c336f4e35380bb52ee336a2d93eb27052e332f160f678d5cc255374cbd8",
+      "source": "sarj-python-lint",
+      "ruleId": "numeric-literal-separators",
+      "path": "src/repo_standards/github_review_policy.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "74531190f1a7b729c82fecbca86faf034b4acada63a842424640cdeb269a1556",
+      "source": "sarj-python-lint",
+      "ruleId": "numeric-literal-separators",
+      "path": "tests/core/test_review_focus.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "d3389217910287c2b1530edddd5e5a833fafe6af966d7163de926376aabd26e7",
+      "source": "sarj-python-lint",
+      "ruleId": "numeric-literal-separators",
+      "path": "tests/test_activation_verification.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "809b2cfcfcd5a73fd69de175eb6c662419667432ab6be2311bffc3acd7792d0f",
+      "source": "sarj-python-lint",
+      "ruleId": "numeric-literal-separators",
+      "path": "tests/test_review_policy_action_contract.py",
+      "count": 8
+    },
+    {
+      "fingerprint": "f2a141aff3a1a9d638a27d6038a7befbf16c67a13fcdd5114b6f4d7162ac60ef",
+      "source": "sarj-python-lint",
+      "ruleId": "numeric-literal-separators",
+      "path": "tests/test_review_policy_action_contract.py",
+      "count": 6
+    },
+    {
+      "fingerprint": "2fad608e9b1a07b9f74b84fe8c1efc7c1b94b94512c94906050b7cac9334c565",
+      "source": "sarj-python-lint",
+      "ruleId": "opaque-parametrize-case-needs-id",
+      "path": "tests/core/test_review_policy.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "b15edf7cf76044c66c603b0dd0690199fd1bbb25a3b24c57b3f84c24c54c2560",
+      "source": "sarj-python-lint",
+      "ruleId": "opaque-parametrize-case-needs-id",
+      "path": "tests/skills/test_rule_calibration.py",
+      "count": 1
     },
     {
       "fingerprint": "0e9573e6b5285c038c7a18b6ba2ef780a0c793b5f6a3dab32287e995c580c58d",
@@ -130,21 +424,63 @@
       "source": "sarj-python-lint",
       "ruleId": "opaque-parametrize-case-needs-id",
       "path": "tests/test_review_policy_action_contract.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "1c38f275c862cd9a44872691d6b151f2d9feea24fafe7140063cca7eecf45309",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-discriminated-model-union",
+      "path": "src/repo_standards/policy_sarj/spec.py",
       "count": 1
     },
     {
-      "fingerprint": "d8e543b44c0b4eaab8349eafc281b861bd277101d37eba3666aeca55e0fd15fc",
+      "fingerprint": "c6aefcfe2b60924bc49a86c98a9456a26affb3da52cfba863796b270c1da880e",
       "source": "sarj-python-lint",
-      "ruleId": "prefer-fstring-over-concat",
-      "path": "tests/test_test_selection.py",
+      "ruleId": "prefer-explicit-value-model-construction",
+      "path": "src/repo_standards/core/models.py",
+      "count": 4
+    },
+    {
+      "fingerprint": "16afe7fe61662604a382421524e58b2c6290bc70176503f72fa70553f6dea8f1",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-explicit-value-model-construction",
+      "path": "src/repo_standards/core/outcome.py",
       "count": 1
     },
     {
-      "fingerprint": "bf13e66452496a5ecb6d6cb31cf360830adb6b667cfa43c229a3e0db00665992",
+      "fingerprint": "dbc1424b27ca0d333714b6100cd47f934f26fdc70567530372a20ffd6a4e635d",
       "source": "sarj-python-lint",
-      "ruleId": "prefer-immutable-module-constant",
-      "path": "ci_artifacts.py",
+      "ruleId": "prefer-explicit-value-model-construction",
+      "path": "src/repo_standards/core/pull_request_commits.py",
       "count": 1
+    },
+    {
+      "fingerprint": "afc64613206fe7dfb5c2a8fd04091ca35e554b1d367d5be0f6a69454204f36c5",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-explicit-value-model-construction",
+      "path": "src/repo_standards/core/review_policy.py",
+      "count": 5
+    },
+    {
+      "fingerprint": "109acbb32a1a38f02fd1659615eda4bcf12772075f503136203639b6ce45b4a5",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-explicit-value-model-construction",
+      "path": "src/repo_standards/core/rule_reviews.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "2a935d5890fdd3ae35562854f4efea966b2c0025a3bea4b7636c2da2a30e511b",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-explicit-value-model-construction",
+      "path": "src/repo_standards/pull_request/_context.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "9dc0177620b6c5ac5ca00936542ac83ead305b3fa3a5841eca523cf2411ab9bf",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-explicit-value-model-construction",
+      "path": "src/repo_standards/repository/analysis.py",
+      "count": 2
     },
     {
       "fingerprint": "a8e4c2fca1db2e4bd9d1f7224443dd8ffbccd3421b56f781e8bc0cbd07370258",
@@ -154,10 +490,290 @@
       "count": 1
     },
     {
-      "fingerprint": "f625ca64237577db18c60f4b45b8beb82d5f51c6b3867b01fdfd5b30cf95e6db",
+      "fingerprint": "e529c0fc1a67a4a0a59292e6b8c2f61b4ec9269cbc677e1ba13a2c6819e07fe8",
       "source": "sarj-python-lint",
       "ruleId": "prefer-nominal-id-types",
+      "path": "src/repo_standards/activation_verification.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "2b67f8b5d4de1fb087de20083c9d4bf625ab90e30d7788faed6682cc335bd048",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-nominal-id-types",
+      "path": "src/repo_standards/core/activation_policy.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "41aa4b35b763aefccfb1f632b9d89e518c1d431a7bb0950488d5b75be5a5286e",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-nominal-id-types",
+      "path": "tests/pull_request/test_context_adapters.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "d5a62e47b68a561449e0c268ebc2f566085410afaf7ac6a1852bffd55f45f320",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-nominal-mapping-keys",
+      "path": "ci_reviewed_validation.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "ddb3f9f3601887d026bd20a115a3e0863508dd24e0b1805684948b842c43327a",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-nominal-mapping-keys",
+      "path": "src/repo_standards/_machine.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "fb4697b7910f04f8b060efe09b4407549d3b74298f830bc741b5c8492bf6b3df",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-nominal-mapping-keys",
+      "path": "src/repo_standards/core/pull_request_size.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "c0760ebebad51f17576324c7d24953bd2152c9a5d1a4e8a0a9c0286202ec523b",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-nominal-mapping-keys",
+      "path": "src/repo_standards/github_review_policy.py",
+      "count": 7
+    },
+    {
+      "fingerprint": "add3ddb7a934f686b14b2b4355037b46c9a16f1d431e9374cc7b479c7e824eee",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-nominal-mapping-keys",
+      "path": "src/repo_standards/verify_release_artifacts.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "92f07c0a68814ce50b690891f608b03fd9d5f6c53edc62b2723a85a5c81856be",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-optional-composite",
+      "path": "src/repo_standards/core/models.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "c617bbff396a7947ef7cc75b2763b47b24cba232bdacad55b9049335e40aaa59",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-precise-object-contract",
+      "path": "src/repo_standards/core/activation_receipt.py",
+      "count": 4
+    },
+    {
+      "fingerprint": "59f3981f8d7cbd0cf78d9894232b29dc82a223dac9ae1c2124a39386ce7668a5",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-precise-object-contract",
+      "path": "tests/pull_request/test_context_adapters.py",
+      "count": 4
+    },
+    {
+      "fingerprint": "dbf9581225414116f72e15e9542555d4f52d07cca65e1182c5b89e18f601c9c5",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-precise-object-contract",
+      "path": "tests/test_release_network.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "ca24bc493f757efe03d3e1fde1486593ecfc08630e623405bbf84ee52a7d17df",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-pydantic-json-value",
+      "path": "ci_artifacts.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "20cbeb50eba2b834ec4fbb1103006d5758c170e7c78f8a3303acbfd7c22d4c3f",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-pydantic-json-value",
+      "path": "release_reconciliation.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "c23efaeb2598d7edb2cd28def80f129b16f157c66bfd4f995e77ebd778d97dc8",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-runtime-validation",
+      "path": "ci_artifacts.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "1090ec7139fa441d9a45c190cb08be4302e085306c650545a4a551f14e856a01",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-runtime-validation",
+      "path": "release_reconciliation.py",
+      "count": 5
+    },
+    {
+      "fingerprint": "22811fbd2e7c3a595306d10afe973f17157314ec5d59f3ef92ca6cb1486c0454",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-runtime-validation",
+      "path": "src/repo_standards/activation_verification.py",
+      "count": 3
+    },
+    {
+      "fingerprint": "e20e772fb0b611fdefccc9ce2288754b1499d8874b8f34ffc5f24e8283412abb",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-runtime-validation",
+      "path": "src/repo_standards/core/activation_receipt.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "f2f62e36fe5cb8008d5b15b559d8f1343df24ffee58269df96ab6282bae00a2b",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-runtime-validation",
+      "path": "src/repo_standards/github_review_policy.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "6df6d2c0e1ee593f84b9c468130e129fd65733662dec9bf4fa0842441179f1c7",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-runtime-validation",
+      "path": "tests/test_activation_verification.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "673f6a1fa1f76fce56805c476d449e481abdab358d1cb0d0d7fd08c0a611c651",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-runtime-validation",
+      "path": "tests/test_review_policy_stacked_merge_group.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "68c7331db4d795f9928b09f58f1ac9ec0e89c6eaee63942abaa7dccfb6ce5a3b",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/core/test_javascript_artifacts.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "a56d116743cb5f60d2eeac5613261be9c497f49e113dba0e1b561ca1bc7c9563",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/core/test_pull_request_body.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "096675f6575fe543bf357d7affe6fd45888051c2962c4da2e8fab35f62314d4e",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/core/test_pull_request_policy_config.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "010964f0374372b1f4e29fd1dbed749b03e4c1aeb12d551823e7ef63b514f144",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/policy_sarj/test_pull_request_templates.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "8a3853905a0c95e1b31075fa72e29a3aa3f2dc807349e0cea284e3b16a25c71c",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/policy_sarj/test_terraform.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "e9e8341024319c8b81a0b30074465ef6fbfc891e56c64eaef0c10f2ccc50adc6",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/test_added_markdown.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "2bda175afd0641e961d017fb2fbbbb74bfad5a47d11054b6f5f8f1b7f377b6b4",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/test_ci_artifacts.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "b8f3e36fbd40028363a68742e6f4150c262f3c9b990a5afb47fe9d3315088875",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/test_cli.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "bc2479ba0377a7e0ffe33ba61e4bca7111f95cb507124ef171d7020434ab0e05",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/test_distribution_fast_paths.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "d8831bdc17868929e15a5b03f1f95be22a6977807f0df4f6c98949f1ea9b058a",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/test_makefile_growth.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "57b7d2543844434c378081d2364d42416b75e3b7e61448419903d2442139173c",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/test_pull_request_documentation.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "f6fa5cef99cd2dc071f35a460935ce431791a5a9e82d2f5002408980fdbe03d3",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-single-parametrize-contract",
+      "path": "tests/test_release_distributions.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "30bf531a21224a70d1161002a617f4ac7e7a9d3b5017edb3b5c261a96534c78f",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-typed-cli",
+      "path": "src/repo_standards/_entrypoint.py",
+      "count": 2
+    },
+    {
+      "fingerprint": "fea18f7e0fad3bae543046d70d0c1137a78d57e9eb5882822d22e884d747f097",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-typed-settings-field",
       "path": "src/repo_standards/catalog.py",
+      "count": 3
+    },
+    {
+      "fingerprint": "04c77ca82feb7428a6589fbaeff0350a884bdbe04ffde42e2c62561fdb1865f9",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-typed-settings-field",
+      "path": "src/repo_standards/cli.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "56d86475f246a9f941556b47729d2b31af8aeb455b2a151892b6f6c05c2cb490",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-typed-settings-field",
+      "path": "src/repo_standards/cli.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "89e112fc500b43c00ff800cd70ba8ccc6f6139f47133014aeb6f576839ed5a46",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-typed-settings-field",
+      "path": "src/repo_standards/pull_request/_github.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "9c574327e3f3a19f9d7f0608e491c428a6a38c0c0fdf72489fe0a9b8f801d491",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-typed-settings-field",
+      "path": "src/repo_standards/pull_request/_prepare.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "292964e1946397707b88d7798f5cab17e7d91fb64ce2d2371e4411e0ecb92fe8",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-typed-settings-field",
+      "path": "tests/test_pull_request_prepare.py",
+      "count": 1
+    },
+    {
+      "fingerprint": "3695a86920c009bf4e2146d13ace4d4852a024b10d6cf2aae993a0d3e3bb6a3f",
+      "source": "sarj-python-lint",
+      "ruleId": "prefer-typed-settings-field",
+      "path": "tests/test_pull_request_prepare.py",
       "count": 1
     },
     {
@@ -165,55 +781,20 @@
       "source": "sarj-text-lint",
       "ruleId": "workflow-embedded-program",
       "path": ".github/workflows/ci.yml",
-      "count": 3
-    },
-    {
-      "fingerprint": "33e5fa37851c3f8add297cfa8012b47339401aa14e896a48ca09acd8cb167570",
-      "source": "sarj-text-lint",
-      "ruleId": "workflow-embedded-program",
-      "path": ".github/workflows/docs.yml",
-      "count": 3
+      "count": 1
     },
     {
       "fingerprint": "5d1bce47f69ddf6d4c82cef10652d93ad8bb08c4df94c7acb69a5eb2eff7f7cb",
       "source": "sarj-text-lint",
       "ruleId": "workflow-embedded-program",
       "path": ".github/workflows/publish.yml",
-      "count": 4
-    },
-    {
-      "fingerprint": "40c9153551ca01da24f6e8ed09af3b3715d75f1749c8eef075a985d44d95280f",
-      "source": "sarj-text-lint",
-      "ruleId": "workflow-embedded-program",
-      "path": "action.yml",
-      "count": 1
-    },
-    {
-      "fingerprint": "f45420363acdbe0a9fa0e8bc51e56e0b51cc8b780908e0ae7467634814003b45",
-      "source": "sarj-text-lint",
-      "ruleId": "workflow-embedded-program",
-      "path": "documentation/action.yml",
-      "count": 1
-    },
-    {
-      "fingerprint": "f7da881c4a56f166bd14a787ce19dfdb754cfd167db95edea993e35ed6db101e",
-      "source": "sarj-text-lint",
-      "ruleId": "workflow-embedded-program",
-      "path": "pull-request-review-policy/action.yml",
-      "count": 1
+      "count": 3
     },
     {
       "fingerprint": "3716d44465bc44c4f0bf5ecbc44c430a531eb9e7be886d10147a08ed8295bc02",
       "source": "shellcheck",
       "ruleId": "SC2312",
       "path": ".github/workflows/ci.yml",
-      "count": 3
-    },
-    {
-      "fingerprint": "94a0ec9f53495eff30df7816ccee1f44d4dad68548d07cd23ab95f1644b42fee",
-      "source": "shellcheck",
-      "ruleId": "SC2312",
-      "path": ".github/workflows/docs.yml",
       "count": 1
     },
     {
@@ -235,41 +816,6 @@
       "source": "shfmt",
       "ruleId": "format",
       "path": ".github/scripts/verify-python.sh",
-      "count": 1
-    },
-    {
-      "fingerprint": "69697a81bd54766dcc04c31844fcb288f181cc522fc51daf250ce07671d84d75",
-      "source": "shfmt",
-      "ruleId": "format",
-      "path": ".github/scripts/verify-reference.sh",
-      "count": 1
-    },
-    {
-      "fingerprint": "c1b4f2122a0fb1b846e34d3047832495b1331f48a47108d17b7ddf6aaf9abe7d",
-      "source": "shfmt",
-      "ruleId": "format",
-      "path": ".github/workflows/docs.yml",
-      "count": 2
-    },
-    {
-      "fingerprint": "948aa6fd6f4f5c5048642b9a35630f5c8914748e20516a2e9a1fe3f18b6c6c5a",
-      "source": "shfmt",
-      "ruleId": "format",
-      "path": ".github/workflows/publish.yml",
-      "count": 1
-    },
-    {
-      "fingerprint": "67bf7aed5f40a032644cf32900b00f2c22661c40fef228833a36245e990cad6b",
-      "source": "shfmt",
-      "ruleId": "format",
-      "path": "action.yml",
-      "count": 1
-    },
-    {
-      "fingerprint": "def3300d03a7727242ea726befac955a45425fb42a91eb5650c1fa68e3f01f54",
-      "source": "shfmt",
-      "ruleId": "format",
-      "path": "documentation/action.yml",
       "count": 1
     }
   ]
