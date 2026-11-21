@@ -28,6 +28,13 @@ description: Open feature PRs with one commit and follow the repository's config
    use an empty expected lease to avoid overwriting a concurrent creation.
    Preserve pre-push hooks. Verify the remote SHA matches the prepared head.
 4. Follow the repository's current template and trusted base review policy.
+   For commit subjects and PR titles, name the concrete outcome:
+   `fix: preserve retry limit after reconnect`, rather than `fix: enhance retry robustness`.
+   Add a commit body only for useful rationale or required trailers. In the PR
+   body, explain the problem and resulting behavior, then relevant validation
+   and material caveats. Link detailed evidence; omit task diaries, repeated
+   summaries and generic claims such as "comprehensive improvements". Scale
+   detail to the change; preserve required sections and breaking-change guidance.
    Run [merge-risk](../merge-risk/SKILL.md) when `Merge Risk` is required (the
    default). Under that heading, copy only the skill's overall rating and five
    category verdicts, preserving their words and emojis. If the repository sets
@@ -35,4 +42,6 @@ description: Open feature PRs with one commit and follow the repository's config
    omit it. Keep material caveats in the repository's remaining sections.
 5. Create the PR only after preparation and push succeed. For an existing PR,
    update its description and evidence without repeating the opening squash.
-   Refresh any required assessment when scope or evidence changes.
+   Refresh any required assessment when scope or evidence changes. Reuse valid
+   check receipts for reviews and votes; repeat checks only for changed inputs,
+   failures or a concrete unresolved risk, retaining every required gate.
