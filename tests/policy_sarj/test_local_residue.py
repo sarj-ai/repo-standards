@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
+from itertools import product
 import shutil
 import subprocess
 from typing import TYPE_CHECKING
@@ -102,13 +103,13 @@ def _findings(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
         pytest.param(".pyc", id="extension-only-file"),
     ],
 )
-def test_cache_and_metadata_conventions_are_warning_review_candidates(path: str) -> None:
+def test_cache_and_metadata_conventions_require_review(path: str) -> None:
     findings = _findings(_snapshot(path))
     assert len(findings) == 1
     finding = findings[0]
     assert finding.path == finding.observed == path
     assert finding.rule_version == 1
-    assert finding.severity == "warning"
+    assert finding.severity == "error"
     assert finding.evidence_level == "verified"
     assert finding.location is not None
     assert finding.location.path == path
@@ -309,7 +310,7 @@ def test_forced_tracked_ignored_cache_uses_selected_index_then_cleans(
     assert enabled.completion == "complete"
     assert [
         (finding.rule_id, finding.path, finding.severity) for finding in enabled.diagnostics
-    ] == [(_RULE_ID, filename, "warning")]
+    ] == [(_RULE_ID, filename, "error")]
     assert analyze_repository(replace(request, staged=False)).diagnostics == ()
     disabled = analyze_repository(replace(request, enabled_rule_ids=()))
     assert disabled.completion == "complete"
@@ -321,9 +322,12 @@ def test_forced_tracked_ignored_cache_uses_selected_index_then_cleans(
     assert (tmp_path / filename).is_file()
 
 
-@pytest.mark.parametrize("filename", ["cache.pyc", ".eslintcache", ".coverage"])
-def test_native_warning_ratchet_blocks_only_forced_tracked_cache_then_recovers(
-    tmp_path: Path, filename: str
+@pytest.mark.parametrize(
+    ("ratchet_warnings", "filename"),
+    list(product((False, True), ("cache.pyc", ".eslintcache", ".coverage"))),
+)
+def test_native_ratchet_blocks_only_forced_tracked_cache_then_recovers(
+    tmp_path: Path, filename: str, *, ratchet_warnings: bool
 ) -> None:
     _repository(tmp_path)
     manifest = tmp_path / ".repo-standards/repository.toml"
@@ -332,11 +336,12 @@ def test_native_warning_ratchet_blocks_only_forced_tracked_cache_then_recovers(
         encoding="utf-8",
     )
     _git(tmp_path, "add", "--", ".repo-standards/repository.toml")
-    baseline = _RUNNER.invoke(app, ["baseline", str(tmp_path), "--staged", "--ratchet-warnings"])
+    warning_arguments = ["--ratchet-warnings"] if ratchet_warnings else []
+    baseline = _RUNNER.invoke(app, ["baseline", str(tmp_path), "--staged", *warning_arguments])
     assert baseline.exit_code == 0, baseline.stdout
     parsed = parse_baseline_bytes(baseline.stdout.encode())
     assert parsed.fingerprints == ()
-    assert parsed.include_warnings is True
+    assert parsed.include_warnings is ratchet_warnings
     (tmp_path / ".repo-standards/baseline.json").write_text(baseline.stdout, encoding="utf-8")
     _git(tmp_path, "add", "--", ".repo-standards/baseline.json")
     arguments = [
@@ -345,7 +350,7 @@ def test_native_warning_ratchet_blocks_only_forced_tracked_cache_then_recovers(
         "--mode",
         "ratchet",
         "--staged",
-        "--ratchet-warnings",
+        *warning_arguments,
         "--format",
         "json",
     ]
@@ -356,9 +361,9 @@ def test_native_warning_ratchet_blocks_only_forced_tracked_cache_then_recovers(
     probe = _RUNNER.invoke(app, arguments)
     assert probe.exit_code == 1, probe.stdout
     assert '"completion":"complete"' in probe.stdout
-    assert '"severity":"warning"' in probe.stdout
+    assert '"severity":"error"' in probe.stdout
     assert '"new":1' in probe.stdout
-    assert '"errors":0' in probe.stdout
+    assert '"errors":1' in probe.stdout
     _git(tmp_path, "rm", "--cached", filename)
     after = _RUNNER.invoke(app, arguments)
     assert after.exit_code == 0, after.stdout

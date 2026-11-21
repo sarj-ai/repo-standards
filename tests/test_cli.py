@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.metadata import version
 import json
 from pathlib import Path
@@ -14,6 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from repo_standards.cli import app
+from repo_standards.core.canonical import semantic_fingerprint
 from repo_standards.core.models import Diagnostic, RepositorySnapshot, RuleId
 from repo_standards.core.outcome import IncompleteCommand, JSONValue
 from repo_standards.github_review_policy import GitHubRepositoryId, trusted_manifest
@@ -1630,6 +1631,66 @@ def test_manifest_enabled_rules_are_the_single_activation_source(tmp_path: Path)
     assert "cannot be combined" in conflicting.stdout
 
 
+@pytest.mark.parametrize(
+    ("rule", "files", "version"),
+    [
+        ("repository/artifacts/local-residue", {"cache.pyc": "inert fixture"}, 1),
+        ("repository/artifacts/schema-derived-config-examples", {".env.example": ""}, 3),
+        (
+            "repository/terraform/module-layout",
+            {"infra/main.tf": "", "infra/variables/x.tf": ""},
+            1,
+        ),
+        ("repository/documentation/added-markdown", {"notes.md": ""}, 1),
+        (
+            "repository/documentation/pull-request-template-sections",
+            {".github/pull_request_template.md": "## Summary\n"},
+            4,
+        ),
+    ],
+)
+@pytest.mark.parametrize("staged", [False, True])
+def test_promoted_contracts_block_cli_without_changing_finding_identity(
+    tmp_path: Path, rule: str, files: dict[str, str], version: int, *, staged: bool
+) -> None:
+    policy = (
+        '\n[pull_request.commit_history]\nadvisory_base_ref = "main"\n'
+        "[pull_request.review_policy]\nzero_review_below_counted_lines = 200\n"
+        "two_reviews_above_counted_lines = 800\nmigration_roots = []\n"
+        'required_checks = ["ci"]\nrequired_body_sections = ["Summary", "Test evidence"]\n'
+        if rule == "repository/documentation/pull-request-template-sections"
+        else ""
+    )
+    _manifest(
+        tmp_path,
+        f'repository_id = "example-repository"\ncomponents = []\nenabled_rules = ["{rule}"]\n'
+        + policy,
+    )
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    for path, content in files.items():
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    _git(tmp_path, "add", ".")
+    if not staged:
+        _commit_changes(tmp_path)
+    arguments = ["check", str(tmp_path), "--base", base, "--format", "json"]
+    result = runner.invoke(app, [*arguments, *(["--staged"] if staged else [])])
+    assert result.exit_code == 1, result.stdout
+    report = analyze_repository(
+        RepositoryAnalysisRequest(root=tmp_path, base_revision=base, staged=staged)
+    )
+    assert report.completion == "complete"
+    assert report.diagnostics
+    for finding in report.diagnostics:
+        assert finding.rule_id == rule
+        assert finding.severity == "error"
+        assert finding.rule_version == version
+        assert semantic_fingerprint(finding) == semantic_fingerprint(
+            replace(finding, severity="warning")
+        )
+
+
 def test_cli_and_api_skip_unselected_artifact_evaluation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1652,7 +1713,7 @@ def test_cli_and_api_skip_unselected_artifact_evaluation(
     checked = runner.invoke(app, ["check", str(tmp_path), "--format", "json"])
 
     assert api.completion == "complete"
-    assert checked.exit_code == 0, checked.stdout
+    assert checked.exit_code == 1, checked.stdout
     payload = _json_object(checked.stdout)
     assert payload["completion"] == api.completion
     assert payload["conclusion"] == api.conclusion

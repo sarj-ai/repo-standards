@@ -134,10 +134,10 @@ def test_layout_preserves_tfvars_flat_composition_and_independent_roots(paths: l
     assert MODULE_LAYOUT_RULE_ID not in _rules(paths)
 
 
-def test_rule_catalog_retains_warning_lifecycle_and_no_address_autofix() -> None:
+def test_layout_promotion_preserves_cluster_advice_and_no_address_autofix() -> None:
     rules = {rule.rule_id: rule for rule in SarjPolicy.rules()}
     for rule_id in (MODULE_CLUSTER_RULE_ID, MODULE_LAYOUT_RULE_ID):
         rule = rules[rule_id]
         assert rule.version == 1
-        assert rule.severity == "warning"
+        assert rule.severity == ("warning" if rule_id == MODULE_CLUSTER_RULE_ID else "error")
         assert "No auto" in rule.fix
