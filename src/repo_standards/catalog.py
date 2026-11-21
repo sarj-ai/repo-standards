@@ -45,6 +45,7 @@ _CATALOG_KIND = "repo-standards.catalog"
 _CATALOG_SCHEMA_ID = "https://repo-standards.sarj.ai/schema/catalog.schema.json"
 _PUBLIC_REFERENCE_HOSTS = frozenset(
     {
+        "developer.hashicorp.com",
         "docs.github.com",
         "json-schema.org",
         "spec.openapis.org",
@@ -77,6 +78,8 @@ HttpsUrl = Annotated[str, Field(pattern=r"^https://")]
 
 _RULE_SLUGS = types.MappingProxyType(
     {
+        "repository/terraform/module-cluster": "terraform-module-cluster",
+        "repository/terraform/module-layout": "terraform-module-layout",
         "repository/documentation/added-markdown": "added-markdown",
         "repository/documentation/markdown-only-change": "markdown-only-change",
         "repository/artifacts/migration-consolidation": "migration-consolidation",

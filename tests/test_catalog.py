@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 from repo_standards.catalog import (
     Catalog,
+    RuleDescriptor,
     build_catalog,
     catalog_schema,
     report_schema,
@@ -34,6 +35,15 @@ _JSON_OBJECT = TypeAdapter(dict[str, JSONValue])
 def _catalog_payload() -> dict[str, JSONValue]:
     catalog = build_catalog(app, package_version=version("repo-standards"))
     return _JSON_OBJECT.validate_python(catalog.model_dump(mode="json"), strict=True)
+
+
+def test_terraform_primary_references_use_the_exact_public_documentation_host() -> None:
+    url = "https://developer.hashicorp.com/terraform/language/modules/develop/structure"
+    assert RuleDescriptor.validate_references((url,)) == (url,)
+    with pytest.raises(ValueError, match="public-approved"):
+        RuleDescriptor.validate_references(
+            ("https://developer.hashicorp.com.example.invalid/terraform",)
+        )
 
 
 def test_catalog_is_deterministic_and_digest_covers_all_content() -> None:

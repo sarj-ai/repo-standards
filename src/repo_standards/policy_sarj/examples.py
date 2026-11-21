@@ -34,6 +34,7 @@ from .makefiles import MAKEFILE_GROWTH_RULE_ID
 from .migrations import MIGRATION_CONSOLIDATION_RULE_ID, migration_roots
 from .policy import RULES, SarjPolicy
 from .pull_request_templates import PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID
+from .terraform import MODULE_CLUSTER_RULE_ID, MODULE_LAYOUT_RULE_ID
 
 
 class _MakefileExampleSource(BaseModel):
@@ -113,6 +114,8 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
         UNTYPED_JAVASCRIPT_RULE_ID,
         UNDECLARED_IMAGES_RULE_ID,
         LOCAL_RESIDUE_RULE_ID,
+        MODULE_CLUSTER_RULE_ID,
+        MODULE_LAYOUT_RULE_ID,
     } and source.lstrip().startswith("{"):
         context = _TrackedFilesExampleSource.model_validate_json(source)
         return _run_snapshot(
