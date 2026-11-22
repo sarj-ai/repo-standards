@@ -72,7 +72,9 @@ def repository(tmp_path: Path) -> Path:
     "path", ["notes.md", "nested/GUIDE.MD", "guide.mdx", "empty.md", "vendor/doc.md", ".hidden.md"]
 )
 @pytest.mark.parametrize("staged", [False, True])
-def test_new_paths_warn_with_exact_comparison(repository: Path, path: str, *, staged: bool) -> None:
+def test_new_paths_block_with_exact_comparison(
+    repository: Path, path: str, *, staged: bool
+) -> None:
     base = _git(repository, "rev-parse", "HEAD")
     target = repository / path
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -87,7 +89,7 @@ def test_new_paths_warn_with_exact_comparison(repository: Path, path: str, *, st
     )
     assert isinstance(report, FindingsReport)
     assert [(item.rule_id, item.path, item.severity) for item in report.diagnostics] == [
-        (_RULE, path, "warning")
+        (_RULE, path, "error")
     ]
     assert not report.diagnostics[0].baselineable
     assert report.input_provenance is not None
@@ -166,7 +168,7 @@ def test_missing_comparison_evidence_is_incomplete(repository: Path) -> None:
     assert report.completion == "incomplete"
 
 
-def test_public_example_executes_the_warning_contract() -> None:
+def test_public_example_executes_the_page_budget_contract() -> None:
     fixture = FixtureId("sarj-documentation-added-markdown")
     assert run_rule_example(fixture, '{"base":[],"head":["docs/notes.md"]}') == (_RULE,)
     assert run_rule_example(fixture, '{"base":["README.md"],"head":["README.md"]}') == ()

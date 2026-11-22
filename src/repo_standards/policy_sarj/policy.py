@@ -256,7 +256,7 @@ RULES = (
     Rule(
         rule_id=MODULE_LAYOUT_RULE_ID,
         version=1,
-        default_severity="warning",
+        default_severity="error",
         title="Keep Terraform interfaces inside their owning component module",
         description=(
             "Find Terraform sources in variables/ or outputs/ immediately below another module. "
@@ -272,8 +272,7 @@ RULES = (
             "Use a cohesive component module with canonical interface files, or declare a real "
             "separately invoked component in the existing repository contract. Do not require "
             "empty files or relocate tfvars, entrypoints, providers or backends. No automatic "
-            "module movement. Starts as a warning; default blocking needs "
-            "separate reviewed promotion."
+            "module movement."
         ),
         taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
         examples=(
@@ -283,7 +282,7 @@ RULES = (
                 language="json",
                 before=_tracked_files_example("infra/main.tf", "infra/variables/region.tf"),
                 after=_tracked_files_example("infra/main.tf", "infra/variables.tf"),
-                expected_severity="warning",
+                expected_severity="error",
             ),
         ),
     ),
@@ -321,7 +320,7 @@ RULES = (
     Rule(
         rule_id=ADDED_MARKDOWN_RULE_ID,
         version=1,
-        default_severity="warning",
+        default_severity="error",
         title="Review new Markdown pages against the trusted documentation budget",
         description=(
             "Compare exact Git paths with the base tree or HEAD for staged checks. New .md "
@@ -332,13 +331,13 @@ RULES = (
         ),
         why=(
             "New notes, reports and duplicated guides increase review and maintenance noise. "
-            "Required documentation can justify another page, so this policy preference warns "
-            "rather than declaring every addition incorrect."
+            "Required documentation can justify another page through the trusted base budget "
+            "or an exact addition exemption; a candidate cannot authorize itself."
         ),
         fix=(
             "Prefer the existing canonical document or native CLI help. Keep private audit "
             "artifacts outside source. Review necessary pages using the existing documentation "
-            "budget; do not rename files or delete required contracts to silence a warning. "
+            "budget; do not rename files or delete required contracts to bypass review. "
             "Use --base for branch-wide comparison. No content rewrite or autofix is offered."
         ),
         taxonomy=taxonomy(CHANGE_SAFETY, DOCUMENTATION),
@@ -349,7 +348,7 @@ RULES = (
                 language="json",
                 before='{"base":["README.md"],"head":["README.md","docs/notes.md"]}',
                 after='{"base":["README.md"],"head":["README.md"]}',
-                expected_severity="warning",
+                expected_severity="error",
             ),
         ),
     ),
@@ -396,7 +395,7 @@ RULES = (
     Rule(
         rule_id=LOCAL_RESIDUE_RULE_ID,
         version=1,
-        default_severity="warning",
+        default_severity="error",
         title="Review tracked caches, bytecode, coverage data and OS metadata",
         description=(
             "Tracked .pyc, .pyo and .tsbuildinfo filenames, and exact .DS_Store and "
@@ -415,7 +414,7 @@ RULES = (
             "and ignore future copies; gitignore does not affect existing tracked files. "
             "Retain required fixtures or runtime artifacts with an existing exact, dated "
             "fingerprint exception. Do not rename the file or delete a distinct test contract "
-            "merely to silence the warning."
+            "merely to silence the finding."
         ),
         taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
         examples=(
@@ -427,7 +426,7 @@ RULES = (
                     "src/package/client.py", "src/package/__pycache__/client.cpython-315.pyc"
                 ),
                 after=_tracked_files_example("src/package/client.py"),
-                expected_severity="warning",
+                expected_severity="error",
             ),
             _example(
                 example_id="sarj-artifact-local-residue-build-cache",
@@ -435,7 +434,7 @@ RULES = (
                 language="json",
                 before=_tracked_files_example("tsconfig.json", "tsconfig.tsbuildinfo"),
                 after=_tracked_files_example("tsconfig.json"),
-                expected_severity="warning",
+                expected_severity="error",
             ),
             _example(
                 example_id="sarj-artifact-local-residue-desktop-metadata",
@@ -443,7 +442,7 @@ RULES = (
                 language="json",
                 before=_tracked_files_example("assets/theme.css", "assets/Thumbs.db"),
                 after=_tracked_files_example("assets/theme.css"),
-                expected_severity="warning",
+                expected_severity="error",
             ),
             _example(
                 example_id="sarj-artifact-local-residue-eslint-cache",
@@ -451,7 +450,7 @@ RULES = (
                 language="json",
                 before=_tracked_files_example("eslint.config.ts", ".eslintcache"),
                 after=_tracked_files_example("eslint.config.ts"),
-                expected_severity="warning",
+                expected_severity="error",
             ),
             _example(
                 example_id="sarj-artifact-local-residue-coverage-data",
@@ -459,7 +458,7 @@ RULES = (
                 language="json",
                 before=_tracked_files_example(".coveragerc", ".coverage"),
                 after=_tracked_files_example(".coveragerc"),
-                expected_severity="warning",
+                expected_severity="error",
             ),
         ),
     ),
@@ -603,8 +602,8 @@ RULES = (
     Rule(
         rule_id=RuleId("repository/artifacts/schema-derived-config-examples"),
         version=3,
-        default_severity="warning",
-        title="Reject hand-maintained configuration examples",
+        default_severity="error",
+        title="Require review of configuration example artifacts",
         description=(
             "Tracked backend.conf and env example, sample, template, or schema basenames are "
             "prohibited, case-insensitively."
@@ -614,8 +613,9 @@ RULES = (
             "contracts and drift from the settings the application actually accepts."
         ),
         fix=(
-            "Delete the duplicate artifact and generate developer-facing configuration from "
-            "the authoritative Terraform, Zod, Pydantic, or deployment schema."
+            "Generate developer-facing configuration from the authoritative Terraform, Zod, "
+            "Pydantic, or deployment schema. Retain required artifacts with an existing exact, "
+            "dated fingerprint exception; a filename does not prove that deletion is safe."
         ),
         taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
         examples=(
@@ -625,7 +625,7 @@ RULES = (
                 language="text",
                 before="services/api/.env.local.example",
                 after="services/api/settings.py",
-                expected_severity="warning",
+                expected_severity="error",
             ),
         ),
     ),
@@ -856,7 +856,7 @@ RULES = (
     Rule(
         rule_id=PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
         version=4,
-        default_severity="warning",
+        default_severity="error",
         title="Keep the PR template in sync with required sections",
         description=(
             "Each required PR section needs a heading in the PR template. "
@@ -881,7 +881,7 @@ RULES = (
                     '{"required":["What & why","Test evidence"],'
                     '"template":"## What & why\\n\\n## Test evidence\\n"}'
                 ),
-                expected_severity="warning",
+                expected_severity="error",
             ),
             _example(
                 example_id="sarj-documentation-pull-request-template-absent",
@@ -889,7 +889,7 @@ RULES = (
                 language="json",
                 before='{"required":["What & why"],"template":null}',
                 after='{"required":["What & why"],"template":"## What & why\\n"}',
-                expected_severity="warning",
+                expected_severity="error",
             ),
             _example(
                 example_id="sarj-documentation-pull-request-template-optional",
@@ -897,7 +897,7 @@ RULES = (
                 language="json",
                 before='{"required":["Test evidence"],"template":null}',
                 after='{"required":[],"template":null}',
-                expected_severity="warning",
+                expected_severity="error",
             ),
         ),
     ),
@@ -1006,7 +1006,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=40,
+    policy_version=41,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1135,17 +1135,18 @@ def _tracked_artifact_diagnostics(
                 subject_kind="tracked-schema-derived-config-example",
                 observed=path,
                 expected="no tracked schema-derived configuration example basename",
-                message="tracked configuration artifact duplicates source settings",
+                message="tracked configuration example basename requires review",
                 path=path,
                 remediation=Remediation(
                     summary="Generate configuration guidance from source settings.",
                     steps=(
-                        "Delete the derived example or schema artifact.",
+                        "Review whether this artifact duplicates authoritative settings.",
                         (
                             "Generate developer-facing configuration directly from Terraform "
                             "declarations, Zod settings, Pydantic settings, or the "
                             "deployment schema."
                         ),
+                        "Retain required artifacts with an existing exact fingerprint exception.",
                     ),
                     validation=("Inspect the selected Git tree and rerun repo-standards.",),
                 ),
