@@ -160,6 +160,7 @@ _EXECUTABLE_SCRIPT_EXTENSIONS = frozenset(
 )
 _PACKAGE_TEST_DIRECTORY_NAMES = frozenset({"spec", "specs", "test", "tests", "__tests__"})
 _SCRIPT_TEST_DIRECTORIES_RULE_ID = RuleId("repository/artifacts/script-test-directories")
+CROSS_PACKAGE_DUPLICATES_RULE_ID = RuleId("repository/artifacts/cross-package-duplicates")
 _CONVENTIONAL_OPERATIONAL_ROOTS = frozenset(
     {
         "cloudbuild",
@@ -675,6 +676,48 @@ RULES = (
         ),
     ),
     Rule(
+        rule_id=CROSS_PACKAGE_DUPLICATES_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Share files copied across packages",
+        description=(
+            "Warn once per Git blob tracked as a script source (the executable-script "
+            "extensions) under two or more package roots, where a package root is the nearest "
+            "directory holding a tracked package manifest. __init__.py, *.config.* and *.d.ts "
+            "basenames are skipped. Size and generated status are not inspected."
+        ),
+        why=(
+            "Byte-identical sources and tests copied between packages must be fixed and "
+            "reviewed once per copy, and the copies drift silently after the first divergent edit."
+        ),
+        fix=(
+            "Move the file to a shared package and import it, deleting duplicated tests once "
+            "the shared suite covers the same contracts. Retain required copies with an existing "
+            "exact, dated fingerprint exception. No autofix."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-artifact-cross-package-duplicates",
+                title="Import one shared helper instead of two copies",
+                language="json",
+                before=_tracked_files_example(
+                    "apps/a/package.json",
+                    "apps/a/src/retry.ts",
+                    "apps/b/package.json",
+                    "apps/b/src/retry.ts",
+                ),
+                after=_tracked_files_example(
+                    "apps/a/package.json",
+                    "apps/b/package.json",
+                    "packages/retry/package.json",
+                    "packages/retry/src/retry.ts",
+                ),
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
         rule_id=UNTYPED_JAVASCRIPT_RULE_ID,
         version=2,
         default_severity="error",
@@ -1095,6 +1138,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         MODULE_LAYOUT_RULE_ID: RuleClassification.OBJECTIVE,
         UNTYPED_JAVASCRIPT_RULE_ID: RuleClassification.JUDGMENT,
         UNDECLARED_IMAGES_RULE_ID: RuleClassification.OBJECTIVE,
+        CROSS_PACKAGE_DUPLICATES_RULE_ID: RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/schema-derived-config-examples"): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/unmanaged-lint-baselines"): RuleClassification.JUDGMENT,
@@ -1121,6 +1165,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         MODULE_LAYOUT_RULE_ID: 59,
         UNTYPED_JAVASCRIPT_RULE_ID: 49,
         UNDECLARED_IMAGES_RULE_ID: 54,
+        CROSS_PACKAGE_DUPLICATES_RULE_ID: 65,
         RuleId("repository/artifacts/terraform-examples"): 40,
         RuleId("repository/artifacts/schema-derived-config-examples"): 44,
         RuleId("repository/artifacts/unmanaged-lint-baselines"): 64,
@@ -1194,7 +1239,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=51,
+    policy_version=52,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1274,6 +1319,67 @@ def _script_test_directory_diagnostics(
                     validation=(
                         "Run the owning checks and rerun repo-standards on the selected Git tree.",
                     ),
+                ),
+            )
+        )
+    return tuple(sorted(diagnostics, key=lambda item: item.path))
+
+
+def _cross_package_duplicate_diagnostics(
+    snapshot: RepositorySnapshot, *, rule: Rule
+) -> tuple[Diagnostic, ...]:
+    roots = frozenset(_parent_path(project.path) for project in snapshot.inspection.packages)
+    copies: dict[str, dict[str, str]] = {}
+    for tracked in sorted(snapshot.inspection.tracked_files, key=lambda item: item.path):
+        path = PurePosixPath(tracked.path.casefold())
+        if (
+            path.suffix.lstrip(".") not in _EXECUTABLE_SCRIPT_EXTENSIONS
+            or path.name == "__init__.py"
+            or ".config." in path.name
+            or path.name.endswith(".d.ts")
+        ):
+            continue
+        root = tracked.path
+        while root and root not in roots:
+            root = root.rpartition("/")[0]
+        if root in roots:
+            copies.setdefault(tracked.object_id, {}).setdefault(root, tracked.path)
+    components = ComponentIndex(snapshot.manifest.components)
+    diagnostics: list[Diagnostic] = []
+    for object_id, paths in copies.items():
+        if len(paths) <= 1:
+            continue
+        first_copies = sorted(paths.values())
+        path = first_copies[0]
+        component = components.nearest(path)
+        diagnostics.append(
+            Diagnostic(
+                rule_id=rule.rule_id,
+                rule_version=rule.version,
+                severity=rule.severity,
+                evidence_level="verified",
+                component_id=component.component_id if component else ComponentId("repository"),
+                subject_kind="tracked-cross-package-duplicate",
+                observed=", ".join(first_copies),
+                observed_value={"object_id": object_id},
+                expected="one shared implementation imported by each package",
+                message="identical file content is tracked under several package roots",
+                path=path,
+                manifest_anchor=f"tracked_files.{path}",
+                remediation=Remediation(
+                    summary="Share one implementation instead of tracking copies.",
+                    steps=(
+                        (
+                            "Move the file to a shared package or module and import it from "
+                            "each package."
+                        ),
+                        (
+                            "Delete duplicated tests once the shared copy's suite rejects the "
+                            "same wrong outcomes."
+                        ),
+                        "Retain required copies with an existing exact fingerprint exception.",
+                    ),
+                    validation=("Run each affected package's checks and rerun repo-standards.",),
                 ),
             )
         )
@@ -1992,6 +2098,7 @@ class SarjPolicy:
             MODULE_LAYOUT_RULE_ID,
             MAKEFILE_GROWTH_RULE_ID,
             _SCRIPT_TEST_DIRECTORIES_RULE_ID,
+            CROSS_PACKAGE_DUPLICATES_RULE_ID,
         }
         diagnostics = _repository_artifact_diagnostics(snapshot) if enabled - separate_rules else ()
         diagnostics += _documentation_diagnostics(snapshot, enabled)
@@ -2004,6 +2111,7 @@ class SarjPolicy:
             (MODULE_CLUSTER_RULE_ID, module_cluster_diagnostics),
             (MODULE_LAYOUT_RULE_ID, module_layout_diagnostics),
             (_SCRIPT_TEST_DIRECTORIES_RULE_ID, _script_test_directory_diagnostics),
+            (CROSS_PACKAGE_DUPLICATES_RULE_ID, _cross_package_duplicate_diagnostics),
         ):
             if rule_id in enabled:
                 diagnostics += evaluate(snapshot, rule=_rule(rule_id))

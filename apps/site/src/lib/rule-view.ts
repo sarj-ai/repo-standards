@@ -18,6 +18,8 @@ export interface RuleExampleView {
 const DESCRIPTIONS = {
   "repository/artifacts/bespoke-iac-verifiers":
     "Keep verifiers in owned tools.",
+  "repository/artifacts/cross-package-duplicates":
+    "Share files copied across packages.",
   "repository/artifacts/local-residue":
     "Review tracked caches, backups and logs.",
   "repository/artifacts/makefile-growth":
