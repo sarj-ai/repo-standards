@@ -17,8 +17,9 @@ if TYPE_CHECKING:
 
 
 LOCAL_RESIDUE_RULE_ID = RuleId("repository/artifacts/local-residue")
-_CACHE_SUFFIXES = (".pyc", ".pyo", ".tsbuildinfo")
+_RESIDUE_SUFFIXES = (".pyc", ".pyo", ".tsbuildinfo", ".bak", ".orig", ".backup", ".log", ".err")
 _STATE_BASENAMES = frozenset({".ds_store", "thumbs.db", ".eslintcache", ".coverage"})
+_RESIDUE_DIRECTORIES = frozenset({"_backups", "_chats", ".firecrawl"})
 
 
 def local_residue_diagnostics(
@@ -40,9 +41,13 @@ def local_residue_diagnostics(
                 component_id=component.component_id if component else ComponentId("repository"),
                 subject_kind="tracked-local-residue-convention",
                 observed=path,
-                expected="no unreviewed tracked bytecode, cache, coverage data or OS metadata",
+                expected=(
+                    "no unreviewed tracked cache, backup, log, scratch directory, coverage data "
+                    "or OS metadata"
+                ),
                 message=(
-                    "Tracked filename matches a cache, coverage data or OS metadata convention."
+                    "Tracked path matches a cache, backup, log, scratch directory, coverage data "
+                    "or OS metadata convention."
                 ),
                 path=path,
                 manifest_anchor=f"tracked_files.{path}",
@@ -75,5 +80,9 @@ def local_residue_diagnostics(
 
 
 def _is_local_residue_path(path: str) -> bool:
-    basename = path.rsplit("/", 1)[-1].lower()
-    return basename.endswith(_CACHE_SUFFIXES) or basename in _STATE_BASENAMES
+    *directories, basename = path.lower().split("/")
+    return (
+        basename.endswith(_RESIDUE_SUFFIXES)
+        or basename in _STATE_BASENAMES
+        or not _RESIDUE_DIRECTORIES.isdisjoint(directories)
+    )

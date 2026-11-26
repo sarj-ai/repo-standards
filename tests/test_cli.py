@@ -1634,7 +1634,7 @@ def test_manifest_enabled_rules_are_the_single_activation_source(tmp_path: Path)
 @pytest.mark.parametrize(
     ("rule", "files", "version"),
     [
-        ("repository/artifacts/local-residue", {"cache.pyc": "inert fixture"}, 1),
+        ("repository/artifacts/local-residue", {"cache.pyc": "inert fixture"}, 2),
         ("repository/artifacts/schema-derived-config-examples", {".env.example": ""}, 3),
         (
             "repository/terraform/module-layout",

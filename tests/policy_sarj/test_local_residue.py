@@ -101,6 +101,14 @@ def _findings(snapshot: RepositorySnapshot) -> tuple[Diagnostic, ...]:
         pytest.param("fixtures/.COVERAGE", id="nested-case-insensitive-coverage-data"),
         pytest.param("café/[id].pyc", id="unicode-literal-brackets"),
         pytest.param(".pyc", id="extension-only-file"),
+        pytest.param("data/requests.log", id="log-data"),
+        pytest.param("fixtures/input.bak", id="backup-looking-fixture"),
+        pytest.param("fixtures/input.orig", id="patch-original-fixture"),
+        pytest.param("Thumbs.db.backup", id="thumbnail-basename-suffix"),
+        pytest.param("audits/run.ERR", id="error-log-case-insensitive"),
+        pytest.param("demos/app/_backups/scenario.json", id="backup-directory"),
+        pytest.param("demos/app/_Chats/1.json", id="chat-export-directory"),
+        pytest.param("demos/app/.firecrawl/page.md", id="crawl-cache-directory"),
     ],
 )
 def test_cache_and_metadata_conventions_require_review(path: str) -> None:
@@ -108,7 +116,7 @@ def test_cache_and_metadata_conventions_require_review(path: str) -> None:
     assert len(findings) == 1
     finding = findings[0]
     assert finding.path == finding.observed == path
-    assert finding.rule_version == 1
+    assert finding.rule_version == 2
     assert finding.severity == "error"
     assert finding.evidence_level == "verified"
     assert finding.location is not None
@@ -130,10 +138,7 @@ def test_cache_and_metadata_conventions_require_review(path: str) -> None:
         pytest.param("runtime/tool.jar", id="jvm-runtime"),
         pytest.param("vendor/package.zip", id="archive"),
         pytest.param("uv.lock", id="dependency-lock"),
-        pytest.param("data/requests.log", id="log-data"),
         pytest.param("fixtures/input.tmp", id="temporary-looking-fixture"),
-        pytest.param("fixtures/input.bak", id="backup-looking-fixture"),
-        pytest.param("fixtures/input.orig", id="patch-original-fixture"),
         pytest.param("fixtures/input.rej", id="patch-rejection-fixture"),
         pytest.param("fixtures/input.swp", id="swap-looking-data"),
         pytest.param("module.pyc.txt", id="bytecode-name-document"),
@@ -141,7 +146,6 @@ def test_cache_and_metadata_conventions_require_review(path: str) -> None:
         pytest.param("cache.tsbuildinfo.map", id="source-map"),
         pytest.param(".DS_Store.json", id="metadata-name-json"),
         pytest.param("prefixThumbs.db", id="thumbnail-basename-prefix"),
-        pytest.param("Thumbs.db.backup", id="thumbnail-basename-suffix"),
         pytest.param(".eslintcache.json", id="eslint-cache-json-fixture"),
         pytest.param("eslintcache", id="eslint-basename-without-dot"),
         pytest.param("data.cache", id="generic-cache-data"),
@@ -155,6 +159,9 @@ def test_cache_and_metadata_conventions_require_review(path: str) -> None:
         pytest.param("cache.pyc/input.ts", id="bytecode-directory-segment"),
         pytest.param("Thumb\u017f.db", id="unicode-confusable-not-ascii-convention"),
         pytest.param(".DS_\uff33tore", id="fullwidth-confusable"),
+        pytest.param("demos/app/backups/scenario.json", id="backup-directory-without-underscore"),
+        pytest.param("notes/_backups", id="residue-directory-name-as-file"),
+        pytest.param("build/run.out", id="generic-output-data"),
     ],
 )
 def test_other_languages_runtime_assets_and_near_misses_remain_out_of_scope(path: str) -> None:

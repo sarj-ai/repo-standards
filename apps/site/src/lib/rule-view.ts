@@ -18,7 +18,8 @@ export interface RuleExampleView {
 const DESCRIPTIONS = {
   "repository/artifacts/bespoke-iac-verifiers":
     "Keep verifiers in owned tools.",
-  "repository/artifacts/local-residue": "Review tracked caches and bytecode.",
+  "repository/artifacts/local-residue":
+    "Review tracked caches, backups and logs.",
   "repository/artifacts/makefile-growth":
     "New or larger Makefiles need an exception.",
   "repository/artifacts/migration-consolidation":
