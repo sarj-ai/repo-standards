@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from repo_standards.core.errors import ConfigurationError
 from repo_standards.core.inspection import (
     GitIdentity,
+    TrackedBlob,
     git_parent_identity,
     git_revision_identity,
     read_tracked_blob_contents,
     tracked_files_for_identity,
 )
 from repo_standards.core.models import (
+    DEFAULT_MAXIMUM_ADDED_WORDS,
     ComparisonProvenance,
     DocumentationComparison,
     MakefileComparison,
@@ -21,7 +24,11 @@ from repo_standards.core.models import (
 )
 from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.core.pull_request_documentation import markdown_only_paths_for_revisions
-from repo_standards.policy_sarj.documentation import ADDED_MARKDOWN_RULE_ID, MARKDOWN_ONLY_RULE_ID
+from repo_standards.policy_sarj.documentation import (
+    ADDED_MARKDOWN_RULE_ID,
+    MARKDOWN_ONLY_RULE_ID,
+    MARKDOWN_WORD_GROWTH_RULE_ID,
+)
 from repo_standards.policy_sarj.makefiles import (
     MAKEFILE_GROWTH_RULE_ID,
     is_makefile_path,
@@ -37,6 +44,7 @@ from repo_standards.policy_sarj.migrations import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from datetime import date
     from pathlib import Path
 
@@ -71,9 +79,8 @@ def with_documentation_comparison(
     enabled_rules: frozenset[RuleVersion],
     base_revision: str | None,
 ) -> RepositorySnapshot:
-    if not any(
-        item.rule_id in {ADDED_MARKDOWN_RULE_ID, MARKDOWN_ONLY_RULE_ID} for item in enabled_rules
-    ):
+    rule_ids = {ADDED_MARKDOWN_RULE_ID, MARKDOWN_ONLY_RULE_ID, MARKDOWN_WORD_GROWTH_RULE_ID}
+    if not any(item.rule_id in rule_ids for item in enabled_rules):
         return snapshot
     provenance = snapshot.provenance
     if provenance.mode == "worktree":
@@ -83,11 +90,8 @@ def with_documentation_comparison(
         base_revision = provenance.comparison_base_revision
     comparison_base = _comparison_base(root, head, base_revision)
     base = comparison_base.identity
-    base_paths = (
-        frozenset(item.path for item in tracked_files_for_identity(root, base))
-        if base
-        else frozenset[str]()
-    )
+    base_files = tracked_files_for_identity(root, base) if base else ()
+    base_paths = frozenset(item.path for item in base_files)
     policy = None
     if base is not None and provenance.manifest_path in base_paths:
         blob = read_tracked_blob_contents(root, (provenance.manifest_path,), identity=base)[0]
@@ -109,6 +113,12 @@ def with_documentation_comparison(
             maximum_added_pages=policy.maximum_added_pages if policy else 0,
             added_pages=added_pages,
             markdown_only_paths=markdown_only_paths,
+            maximum_added_words=policy.maximum_added_words
+            if policy
+            else DEFAULT_MAXIMUM_ADDED_WORDS,
+            added_words=_added_words(root, head, base, snapshot, base_files)
+            if any(item.rule_id == MARKDOWN_WORD_GROWTH_RULE_ID for item in enabled_rules)
+            else 0,
         ),
         provenance=replace(
             provenance,
@@ -119,6 +129,46 @@ def with_documentation_comparison(
             ),
         ),
     )
+
+
+def _added_words(
+    root: Path,
+    head: GitIdentity,
+    base: GitIdentity | None,
+    snapshot: RepositorySnapshot,
+    base_files: tuple[TrackedBlob, ...],
+) -> int:
+    head_pages = _markdown_objects(snapshot.inspection.tracked_files)
+    base_pages = _markdown_objects(base_files)
+    head_objects = Counter(head_pages.values())
+    base_objects = Counter(base_pages.values())
+    unchanged = head_objects & base_objects
+    added = _object_words(root, head, head_pages, head_objects - unchanged)
+    removed = _object_words(root, base, base_pages, base_objects - unchanged) if base else 0
+    return added - removed
+
+
+def _markdown_objects(files: Iterable[TrackedBlob | TrackedFileEvidence]) -> dict[str, str]:
+    return {
+        item.path: item.object_id
+        for item in files
+        if item.path.casefold().endswith((".md", ".mdx"))
+    }
+
+
+def _object_words(
+    root: Path, identity: GitIdentity, pages: dict[str, str], objects: Counter[str]
+) -> int:
+    paths = tuple(sorted({oid: path for path, oid in pages.items() if oid in objects}.values()))
+    words: dict[str, int] = {}
+    for start in range(0, len(paths), _BLOB_BATCH):
+        words.update(
+            (item.object_id, len(item.content.split()))
+            for item in read_tracked_blob_contents(
+                root, paths[start : start + _BLOB_BATCH], identity=identity
+            )
+        )
+    return sum(words[oid] * count for oid, count in objects.items())
 
 
 def _markdown_only_paths(

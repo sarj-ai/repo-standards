@@ -31,7 +31,7 @@ Do not commit rehearsal helpers, reports or runbook narratives just to prove a
 change. Permanent validation needs a distinct recurring regression, an existing
 gate's demonstrated gap, an owned harness and a bounded execution cost.
 Reuse existing artifact/documentation rules; do not add filename aliases,
-word-count limits or duplicate detectors to enforce a judgment about verbosity.
+per-page word limits or duplicate detectors to enforce a judgment about verbosity.
 
 The developer-only calibration helper is
 `scripts/calibrate_rules.py`; its commands and private-report rules are in the
