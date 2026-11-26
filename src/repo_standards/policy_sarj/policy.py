@@ -333,7 +333,8 @@ RULES = (
             "and .mdx paths, case-insensitively, count toward documentation.maximum_added_pages "
             "(default zero). Only exact addition_exemptions from the base manifest apply; "
             "a candidate cannot authorize its own additions. Renamed and copied destinations "
-            "count as new paths. Existing-page edits, deletions and non-Markdown files pass."
+            "count as new paths. Existing-page edits, deletions, non-Markdown files and paths "
+            "under the base manifest's documentation.generated outputs pass."
         ),
         why=(
             "New notes, reports and duplicated guides increase review and maintenance noise. "
@@ -365,7 +366,8 @@ RULES = (
         title="Keep net tracked Markdown growth within the trusted word budget",
         description=(
             "Compare whitespace-separated words in every tracked .md and .mdx file, "
-            "case-insensitively, with the base tree or HEAD for staged checks. Deletions "
+            "case-insensitively, outside the base manifest's documentation.generated outputs, "
+            "with the base tree or HEAD for staged checks. Deletions "
             "offset additions and unchanged content is neutral wherever it moves. Warn once "
             "when net growth exceeds documentation.maximum_added_words from the base manifest "
             "(default 150); a candidate cannot raise its own budget."
@@ -1119,7 +1121,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=44,
+    policy_version=45,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),

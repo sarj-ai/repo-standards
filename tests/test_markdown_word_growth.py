@@ -121,3 +121,30 @@ def test_public_example_executes_the_word_budget_contract() -> None:
     fixture = FixtureId("sarj-documentation-markdown-word-growth")
     assert run_rule_example(fixture, '{"added_words":151}') == (_RULE,)
     assert run_rule_example(fixture, '{"added_words":150}') == ()
+
+
+@pytest.mark.parametrize("trusted", [False, True])
+def test_base_declared_generated_documentation_is_outside_both_budgets(
+    repository: Path, *, trusted: bool
+) -> None:
+    manifest = repository / ".repo-standards/repository.toml"
+    rules = f'"{_RULE}", "repository/documentation/added-markdown"'
+    declared = _MANIFEST.replace(f'"{_RULE}"', rules) + (
+        '\n[documentation]\nentrypoints = ["README.md"]\n\n[[documentation.generated]]\n'
+        'path = "docs/sdk"\nsource = "openapi.json"\ncommand = "make sdk"\n'
+    )
+    if trusted:
+        manifest.write_text(declared)
+        _commit(repository)
+    base = _git(repository, "rev-parse", "HEAD")
+    manifest.write_text(declared)
+    (repository / "docs/sdk").mkdir(parents=True)
+    (repository / "docs/sdk/models.md").write_text(_words(500))
+    (repository / "docs/sdk-notes.md").write_text(_words(5))
+    _commit(repository)
+    report = analyze_repository(RepositoryAnalysisRequest(root=repository, base_revision=base))
+    assert [(item.rule_id, item.observed_value) for item in report.diagnostics] == (
+        [("repository/documentation/added-markdown", 1)]
+        if trusted
+        else [(_RULE, 505), ("repository/documentation/added-markdown", 2)]
+    )
