@@ -154,6 +154,7 @@ _DERIVED_ENV_BASENAMES = frozenset(
     }
 )
 _DERIVED_BACKEND_BASENAMES = frozenset(f"backend.conf{suffix}" for suffix in _ENV_EXAMPLE_SUFFIXES)
+_MANAGED_BASELINE_BASENAMES = frozenset({"diagnostic-baseline.json", "suppression-baseline.json"})
 _EXECUTABLE_SCRIPT_EXTENSIONS = frozenset(
     {"bash", "cjs", "cts", "jq", "js", "jsx", "mjs", "mts", "py", "sh", "ts", "tsx", "zsh"}
 )
@@ -777,6 +778,36 @@ RULES = (
         ),
     ),
     Rule(
+        rule_id=RuleId("repository/artifacts/unmanaged-lint-baselines"),
+        version=1,
+        default_severity="warning",
+        title="Keep lint baselines in Standards-managed ledgers",
+        description=(
+            "Tracked lint-exempt.json and *-baseline.json or *-baseline-bootstrap.json basenames, "
+            "case-insensitively, need review. diagnostic-baseline.json, suppression-baseline.json, "
+            "dot-prefixed native analyzer baselines and coverage baselines are excluded."
+        ),
+        why=(
+            "A consumer-owned ledger and its reader script form a second ratchet that drifts "
+            "from the managed baseline and hides accepted debt from Standards reports."
+        ),
+        fix=(
+            "Fix the recorded findings or record them with the owning Standards baseline command, "
+            "then delete the ledger and its reader. No autofix."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, ARTIFACTS),
+        examples=(
+            _example(
+                example_id="sarj-artifact-unmanaged-lint-baselines",
+                title="Consumer-owned lint baseline",
+                language="text",
+                before="pyright-baseline.json",
+                after="diagnostic-baseline.json",
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
         rule_id=RuleId("repository/artifacts/bespoke-iac-verifiers"),
         version=7,
         default_severity="error",
@@ -1066,6 +1097,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         UNDECLARED_IMAGES_RULE_ID: RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/terraform-examples"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/schema-derived-config-examples"): RuleClassification.JUDGMENT,
+        RuleId("repository/artifacts/unmanaged-lint-baselines"): RuleClassification.JUDGMENT,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): RuleClassification.OBJECTIVE,
         RuleId("repository/artifacts/operational-script-tests"): RuleClassification.JUDGMENT,
         _SCRIPT_TEST_DIRECTORIES_RULE_ID: RuleClassification.OBJECTIVE,
@@ -1091,6 +1123,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         UNDECLARED_IMAGES_RULE_ID: 54,
         RuleId("repository/artifacts/terraform-examples"): 40,
         RuleId("repository/artifacts/schema-derived-config-examples"): 44,
+        RuleId("repository/artifacts/unmanaged-lint-baselines"): 64,
         RuleId("repository/artifacts/bespoke-iac-verifiers"): 45,
         RuleId("repository/artifacts/operational-script-tests"): 46,
         _SCRIPT_TEST_DIRECTORIES_RULE_ID: 55,
@@ -1161,7 +1194,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=50,
+    policy_version=51,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1307,6 +1340,7 @@ def _tracked_artifact_diagnostics(
                 ),
             )
         )
+    diagnostics.extend(_unmanaged_lint_baseline_diagnostics(path, basename, component))
     is_terraform_path = _is_terraform_artifact_path(path, artifact_roots.terraform)
     is_github_automation_path = _is_github_automation_path(path)
     is_operational_path = is_terraform_path or _is_operational_path(
@@ -1464,6 +1498,40 @@ def _tracked_artifact_diagnostics(
             )
         )
     return diagnostics
+
+
+def _unmanaged_lint_baseline_diagnostics(
+    path: str, basename: str, component: Component | None
+) -> list[Diagnostic]:
+    if basename != "lint-exempt.json" and (
+        not basename.endswith(("-baseline.json", "-baseline-bootstrap.json"))
+        or basename.startswith(".")
+        or "coverage" in basename
+        or basename in _MANAGED_BASELINE_BASENAMES
+    ):
+        return []
+    return [
+        _repository_diagnostic(
+            rule_id=RuleId("repository/artifacts/unmanaged-lint-baselines"),
+            component=component,
+            subject_kind="tracked-unmanaged-lint-baseline",
+            observed=path,
+            expected="no consumer-owned lint baseline beside the Standards-managed ledgers",
+            message="tracked lint baseline is not a Standards-managed ledger",
+            path=path,
+            remediation=Remediation(
+                summary="Move the debt into the Standards-managed baseline or fix it.",
+                steps=(
+                    (
+                        "Fix the recorded findings, or record them with the owning Standards "
+                        "baseline command."
+                    ),
+                    "Delete the consumer-owned ledger and the script that reads it.",
+                ),
+                validation=("Run the owning lint checks and rerun repo-standards.",),
+            ),
+        )
+    ]
 
 
 def _parent_path(path: str) -> str:

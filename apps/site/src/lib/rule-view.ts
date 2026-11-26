@@ -35,6 +35,8 @@ const DESCRIPTIONS = {
     "Replace .tftest files; preserve coverage.",
   "repository/artifacts/undeclared-images":
     "Declare each tracked image’s purpose.",
+  "repository/artifacts/unmanaged-lint-baselines":
+    "Keep lint debt in managed baselines.",
   "repository/artifacts/untyped-javascript":
     "Use TypeScript or declare required JS.",
   "repository/documentation/added-markdown": "Review new Markdown pages.",

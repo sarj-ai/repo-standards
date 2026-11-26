@@ -37,6 +37,30 @@ _SCRIPT_TEST_DIRECTORIES = RuleId("repository/artifacts/script-test-directories"
 
 
 @pytest.mark.parametrize(
+    ("path", "flagged"),
+    [
+        pytest.param("pyright-baseline.json", True),
+        pytest.param(".ci/standards-eslint-baseline-bootstrap.json", True),
+        pytest.param(".ci/Lint-Exempt.json", True),
+        pytest.param("diagnostic-baseline.json", False),
+        pytest.param("python/suppression-baseline.json", False),
+        pytest.param(".repo-standards/baseline.json", False),
+        pytest.param("python/.basedpyright-baseline.json", False),
+        pytest.param("python/coverage-baseline.json", False),
+        pytest.param("evidence/prod-baseline-20260929.json", False),
+        pytest.param("pyright-baseline.json.md", False),
+    ],
+)
+def test_unmanaged_lint_baselines_use_basename(path: str, *, flagged: bool) -> None:
+    findings = SarjPolicy.evaluate_repository(
+        _snapshot(path),
+        enabled_rule_ids=frozenset({RuleId("repository/artifacts/unmanaged-lint-baselines")}),
+    )
+    assert [item.path for item in findings] == ([path] if flagged else [])
+    assert all(item.severity == "warning" for item in findings)
+
+
+@pytest.mark.parametrize(
     ("path", "prohibited"),
     [
         ("scripts/tests/test_release.py", True),
