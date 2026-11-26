@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import PurePosixPath
 import posixpath
@@ -9,10 +10,11 @@ from urllib.parse import unquote
 
 from repo_standards.core.canonical import nearest_component
 from repo_standards.core.models import ComponentId, Diagnostic, Remediation, RuleId, SourceLocation
+from repo_standards.policy_sarj.makefiles import is_makefile_path
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from repo_standards.core.models import GeneratedDocument, RepositorySnapshot, RuleDefinition
 
@@ -23,9 +25,25 @@ MARKDOWN_WORD_GROWTH_RULE_ID = RuleId("repository/documentation/markdown-word-gr
 GENERATED_DOCUMENTATION_RULE_ID = RuleId("repository/documentation/generated-sources")
 LOCAL_LINKS_RULE_ID = RuleId("repository/documentation/local-links")
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-_CODE_SPAN = re.compile(r"(`+).+?\1")
+_CODE_SPAN = re.compile(r"(`+)(.+?)\1")
 _LINK_TARGETS = re.compile(r"(?:\]\(|^ {0,3}\[[^\]^][^\]]*\]:)\s*(?:<([^>]+)>|([^)\s]+))")
 _NON_RELATIVE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.-]*:|[#/])")
+MAKE_TARGETS_RULE_ID = RuleId("repository/documentation/make-targets")
+_SHELL_FENCES = frozenset({"bash", "console", "sh", "shell", "zsh"})
+_MAKE_ENTRIES = ("GNUmakefile", "makefile", "Makefile")
+_MAKE_TARGET = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+_MAKE_DIRECTORY = re.compile(r"[A-Za-z0-9_./-]+")
+_MAKE_ARGUMENT_OPTIONS = ("-f", "--file", "--makefile", "-I", "--include-dir", "-o", "-W")
+_ASSIGNMENT = re.compile(
+    r"(?:(?:export|override|private)\s+)*([^\s:#=$]+)\s*(:{1,3}|[+?!])?=\s*(.*)"
+)
+_DIRECTIVE = re.compile(r"(?:ifn?eq|ifn?def|else|endif|export|unexport|vpath|undefine)\b")
+_DEFINE = re.compile(r"(?:(?:export|override)\s+)*define\b")
+_INCLUDE = re.compile(r"(-|s)?include\s+(.*)")
+_RULE = re.compile(r"([^:=#]+?)\s*::?(?!=)")
+_REFERENCE = re.compile(r"\$[({]([^\s(){}:$]+)[)}]")
+_SELF_DIRECTORY = "$(dir $(lastword $(MAKEFILE_LIST)))"
+_MAX_MAKE_DEPTH = 8
 
 
 def added_markdown_diagnostics(
@@ -218,7 +236,8 @@ def local_link_diagnostics(
     targets = tracked | {str(parent) for path in tracked for parent in PurePosixPath(path).parents}
     return tuple(
         _local_link_diagnostic(rule, path=page.path, line=line, target=target)
-        for page in snapshot.markdown_pages
+        for page in snapshot.tracked_texts
+        if page.path.endswith(".md")
         for target, line in _relative_links(page.content).items()
         if _resolve(page.path, target) not in targets
     )
@@ -305,4 +324,225 @@ def _undeclared_diagnostic(rule: RuleDefinition, path: str) -> Diagnostic:
             validation=("Rerun the same Git comparison and require no active findings.",),
         ),
         baselineable=False,
+    )
+
+
+def is_make_source(path: str) -> bool:
+    return is_makefile_path(path) or path.rpartition("/")[2].startswith("Make")
+
+
+def make_target_diagnostics(
+    snapshot: RepositorySnapshot, *, rule: RuleDefinition
+) -> tuple[Diagnostic, ...]:
+    tracked = {item.path for item in snapshot.inspection.tracked_files}
+    tracked |= {str(parent) for path in tracked for parent in PurePosixPath(path).parents}
+    targets = _directory_targets(snapshot)
+    return tuple(
+        _make_target_diagnostic(rule, path=page.path, line=line, directory=directory, target=target)
+        for page in snapshot.tracked_texts
+        if page.path.endswith(".md")
+        for (directory, target), line in _make_invocations(page.content).items()
+        if _missing_target(
+            target, _make_candidates(page.path, directory, targets), targets, tracked
+        )
+    )
+
+
+def _directory_targets(snapshot: RepositorySnapshot) -> dict[str, frozenset[str] | None]:
+    sources = {
+        item.path: item.content for item in snapshot.tracked_texts if is_make_source(item.path)
+    }
+    entries = [path for path in sources if path.rpartition("/")[2] in _MAKE_ENTRIES]
+    directories = {_directory(posixpath.dirname(path)) for path in entries}
+    return {directory: _make_targets(directory, sources) for directory in directories}
+
+
+def _make_candidates(
+    page: str, directory: str | None, targets: dict[str, frozenset[str] | None]
+) -> set[str]:
+    if directory is None:
+        return set(targets)
+    paths = (directory, posixpath.join(posixpath.dirname(page), directory))
+    return {_directory(posixpath.normpath(path)) for path in paths} & set(targets)
+
+
+def _missing_target(
+    target: str,
+    candidates: set[str],
+    targets: dict[str, frozenset[str] | None],
+    tracked: set[str],
+) -> bool:
+    resolved = [targets[candidate] for candidate in candidates]
+    defined = [item for item in resolved if item is not None]
+    if not resolved or len(defined) < len(resolved):
+        return False
+    return not any(_defines(item, target) for item in defined) and not any(
+        posixpath.join(candidate, target) in tracked for candidate in candidates
+    )
+
+
+def _directory(path: str) -> str:
+    return "" if path in {"", "."} else path
+
+
+def _make_invocations(content: str) -> dict[tuple[str | None, str], int]:
+    found: dict[tuple[str | None, str], int] = {}
+    for number, command in _shell_commands(content):
+        for segment in re.split(r"&&|\|\|?|;", command):
+            for invocation in _make_invocation(segment.split()):
+                found.setdefault(invocation, number)
+    return found
+
+
+def _shell_commands(content: str) -> Iterator[tuple[int, str]]:
+    fence = ""
+    shell = False
+    for number, line in enumerate(content.splitlines(), start=1):
+        if marker := _FENCE.match(line):
+            opened = marker.group(1)
+            if not fence:
+                fence = opened
+                shell = line[marker.end() :].strip().partition(" ")[0].lower() in _SHELL_FENCES
+            elif opened[0] == fence[0] and len(opened) >= len(fence):
+                fence = ""
+        elif not fence:
+            yield from ((number, match.group(2)) for match in _CODE_SPAN.finditer(line))
+        elif shell:
+            yield number, line
+
+
+def _make_invocation(words: list[str]) -> tuple[tuple[str | None, str], ...]:
+    if "--" in words:
+        words = words[words.index("--") + 1 :]
+    while words and (words[0] == "$" or "=" in words[0]):
+        words = words[1:]
+    if not words or words[0] != "make":
+        return ()
+    directory: str | None = None
+    targets: list[str] = []
+    remaining = iter(words[1:])
+    for word in remaining:
+        if word.startswith("#"):
+            break
+        if word.startswith(_MAKE_ARGUMENT_OPTIONS):
+            return ()
+        if word.startswith(("-C", "--directory=")):
+            path = word.removeprefix("--directory=").removeprefix("-C") or next(remaining, "")
+            if not _MAKE_DIRECTORY.fullmatch(path):
+                return ()
+            directory = posixpath.join(directory or "", path)
+        elif _MAKE_TARGET.fullmatch(word):
+            targets.append(word)
+    return tuple((directory, target) for target in targets)
+
+
+def _make_targets(directory: str, sources: dict[str, str]) -> frozenset[str] | None:
+    entry = next(
+        (path for name in _MAKE_ENTRIES if (path := posixpath.join(directory, name)) in sources),
+        None,
+    )
+    makefiles = _Makefiles(directory, sources)
+    if entry is None or not makefiles.read(entry, depth=0):
+        return None
+    return frozenset(makefiles.targets)
+
+
+@dataclass(slots=True)
+class _Makefiles:
+    directory: str
+    sources: dict[str, str]
+    targets: set[str] = field(default_factory=set[str])
+    variables: dict[str, str | None] = field(default_factory=dict[str, str | None])
+
+    def read(self, path: str, *, depth: int) -> bool:
+        relative = posixpath.relpath(posixpath.dirname(path) or ".", self.directory or ".")
+        self_directory = "" if relative == "." else f"{relative}/"
+        define = False
+        for raw in re.sub(r"\\\n[ \t]*", " ", self.sources[path]).splitlines():
+            if define:
+                define = not raw.strip().startswith("endef")
+                continue
+            line = raw.split("#", 1)[0].strip().replace(_SELF_DIRECTORY, self_directory)
+            if raw.startswith("\t") or not line:
+                continue
+            if _DEFINE.match(line):
+                define = True
+            elif not self._read_line(line, depth=depth):
+                return False
+        return True
+
+    def _read_line(self, line: str, *, depth: int) -> bool:
+        if assignment := _ASSIGNMENT.fullmatch(line):
+            name, operator, value = assignment.groups()
+            same = self.variables.get(name, value) == value
+            self.variables[name] = value if operator != "+" and same else None
+            return True
+        if include := _INCLUDE.fullmatch(line):
+            names = self._expand(include.group(2))
+            return (
+                names is not None
+                and depth < _MAX_MAKE_DEPTH
+                and all(
+                    self._include(name, include.group(1), depth=depth) for name in names.split()
+                )
+            )
+        if rule := _RULE.match(line):
+            names = self._expand(rule.group(1))
+            self.targets.update(names.split() if names else ())
+            return names is not None
+        return bool(_DIRECTIVE.match(line)) or "$" not in line
+
+    def _include(self, name: str, optional: str | None, *, depth: int) -> bool:
+        path = posixpath.normpath(posixpath.join(self.directory, name))
+        if path in self.sources:
+            return self.read(path, depth=depth + 1)
+        return optional is not None
+
+    def _expand(self, text: str) -> str | None:
+        for _ in range(_MAX_MAKE_DEPTH):
+            if "$" not in text:
+                return text
+            names: list[str] = _REFERENCE.findall(text)
+            if not names or any(self.variables.get(name) is None for name in names):
+                return None
+            text = _REFERENCE.sub(lambda match: self.variables.get(match.group(1)) or "", text)
+        return None
+
+
+def _defines(targets: frozenset[str], target: str) -> bool:
+    return target in targets or any(
+        len(target) > len(prefix) + len(suffix)
+        and target.startswith(prefix)
+        and target.endswith(suffix)
+        for pattern in targets
+        if "%" in pattern
+        for prefix, _, suffix in (pattern.partition("%"),)
+    )
+
+
+def _make_target_diagnostic(
+    rule: RuleDefinition, *, path: str, line: int, directory: str | None, target: str
+) -> Diagnostic:
+    command = f"make {target}" if directory is None else f"make -C {directory} {target}"
+    return Diagnostic(
+        rule_id=rule.rule_id,
+        rule_version=rule.version,
+        severity=rule.severity,
+        evidence_level="verified",
+        component_id=ComponentId("repository"),
+        subject_kind="documentation-command",
+        observed=command,
+        expected="a target defined by the tracked Makefile",
+        message=f"`{command}` names no target in the tracked Makefiles.",
+        path=path,
+        manifest_anchor=f"tracked_files.{path}.make.{command}",
+        location=SourceLocation(path, line=line),
+        remediation=Remediation(
+            summary="Name the current target or remove the stale command.",
+            steps=(
+                "Update the command when the target was renamed or moved to another Makefile.",
+                "Remove the step when the target was deleted.",
+            ),
+            validation=("Rerun repo-standards and require no active findings.",),
+        ),
     )

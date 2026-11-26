@@ -38,11 +38,13 @@ from .documentation import (
     ADDED_MARKDOWN_RULE_ID,
     GENERATED_DOCUMENTATION_RULE_ID,
     LOCAL_LINKS_RULE_ID,
+    MAKE_TARGETS_RULE_ID,
     MARKDOWN_ONLY_RULE_ID,
     MARKDOWN_WORD_GROWTH_RULE_ID,
     added_markdown_diagnostics,
     generated_documentation_diagnostics,
     local_link_diagnostics,
+    make_target_diagnostics,
     markdown_only_diagnostics,
     markdown_word_growth_diagnostics,
 )
@@ -460,6 +462,36 @@ RULES = (
                 language="json",
                 before='{"tracked":["docs/guide.md"],"readme":"[Guide](docs/old.md)"}',
                 after='{"tracked":["docs/guide.md"],"readme":"[Guide](docs/guide.md)"}',
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=MAKE_TARGETS_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Name existing Make targets in Markdown commands",
+        description=(
+            "Read `make [-C <dir>] <target>` commands in code spans and shell code blocks of "
+            "every tracked .md file. Resolve `-C` against the repository root or the page's "
+            "directory and a bare command against every tracked Makefile, following tracked "
+            "includes and literal variables. Warn when no resolved Makefile defines the target "
+            "as a rule or pattern rule. Commands with -f, placeholders, or Makefiles using "
+            "unresolvable includes, variables or generated rules are skipped."
+        ),
+        why=(
+            "Renaming or deleting a Make target leaves runbooks naming a command that fails, "
+            "so operators and agents stop at the first step."
+        ),
+        fix="Name the current target or remove the stale command. No autofix.",
+        taxonomy=taxonomy(CHANGE_SAFETY, DOCUMENTATION),
+        examples=(
+            _example(
+                example_id="sarj-documentation-make-targets",
+                title="Run a target the Makefile defines",
+                language="json",
+                before='{"makefile":"check:\\n","readme":"`make lint`"}',
+                after='{"makefile":"check:\\n","readme":"`make check`"}',
                 expected_severity="warning",
             ),
         ),
@@ -1022,6 +1054,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         MARKDOWN_WORD_GROWTH_RULE_ID: RuleClassification.JUDGMENT,
         GENERATED_DOCUMENTATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_LINKS_RULE_ID: RuleClassification.OBJECTIVE,
+        MAKE_TARGETS_RULE_ID: RuleClassification.OBJECTIVE,
         MIGRATION_CONSOLIDATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
         MODULE_CLUSTER_RULE_ID: RuleClassification.JUDGMENT,
@@ -1046,6 +1079,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         MARKDOWN_WORD_GROWTH_RULE_ID: 60,
         GENERATED_DOCUMENTATION_RULE_ID: 61,
         LOCAL_LINKS_RULE_ID: 62,
+        MAKE_TARGETS_RULE_ID: 63,
         MIGRATION_CONSOLIDATION_RULE_ID: 53,
         LOCAL_RESIDUE_RULE_ID: 51,
         MODULE_CLUSTER_RULE_ID: 58,
@@ -1124,7 +1158,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=47,
+    policy_version=48,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1840,6 +1874,8 @@ def _documentation_diagnostics(
         )
     if LOCAL_LINKS_RULE_ID in enabled:
         diagnostics += local_link_diagnostics(snapshot, rule=_rule(LOCAL_LINKS_RULE_ID))
+    if MAKE_TARGETS_RULE_ID in enabled:
+        diagnostics += make_target_diagnostics(snapshot, rule=_rule(MAKE_TARGETS_RULE_ID))
     return diagnostics
 
 
@@ -1875,6 +1911,7 @@ class SarjPolicy:
             MARKDOWN_WORD_GROWTH_RULE_ID,
             GENERATED_DOCUMENTATION_RULE_ID,
             LOCAL_LINKS_RULE_ID,
+            MAKE_TARGETS_RULE_ID,
             MIGRATION_CONSOLIDATION_RULE_ID,
             PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
             UNTYPED_JAVASCRIPT_RULE_ID,

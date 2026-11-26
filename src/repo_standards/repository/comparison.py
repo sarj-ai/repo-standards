@@ -19,9 +19,9 @@ from repo_standards.core.models import (
     DocumentationConfig,
     MakefileComparison,
     MakefileMetric,
-    MarkdownPage,
     MigrationComparison,
     TrackedFileEvidence,
+    TrackedText,
 )
 from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.core.pull_request_documentation import markdown_only_paths_for_revisions
@@ -30,8 +30,10 @@ from repo_standards.policy_sarj.documentation import (
     ADDED_MARKDOWN_RULE_ID,
     GENERATED_DOCUMENTATION_RULE_ID,
     LOCAL_LINKS_RULE_ID,
+    MAKE_TARGETS_RULE_ID,
     MARKDOWN_ONLY_RULE_ID,
     MARKDOWN_WORD_GROWTH_RULE_ID,
+    is_make_source,
 )
 from repo_standards.policy_sarj.makefiles import (
     MAKEFILE_GROWTH_RULE_ID,
@@ -76,26 +78,32 @@ class _EmptyComparisonBase:
 type _ComparisonBase = _ExistingComparisonBase | _EmptyComparisonBase
 
 
-def with_markdown_pages(
+def with_tracked_texts(
     root: Path, snapshot: RepositorySnapshot, *, enabled_rules: frozenset[RuleVersion]
 ) -> RepositorySnapshot:
-    if not any(item.rule_id == LOCAL_LINKS_RULE_ID for item in enabled_rules):
+    enabled = {item.rule_id for item in enabled_rules}
+    if enabled.isdisjoint({LOCAL_LINKS_RULE_ID, MAKE_TARGETS_RULE_ID}):
         return snapshot
     provenance = snapshot.provenance
     if provenance.mode == "worktree":
-        ConfigurationError.fail("Markdown link checks require an exact Git tree or index")
+        ConfigurationError.fail(
+            "Markdown link and command checks require an exact Git tree or index"
+        )
     identity = GitIdentity(provenance.source_revision, provenance.tree_digest, provenance.mode)
     paths = tuple(
-        item.path for item in snapshot.inspection.tracked_files if item.path.endswith(".md")
+        item.path
+        for item in snapshot.inspection.tracked_files
+        if item.path.endswith(".md")
+        or (MAKE_TARGETS_RULE_ID in enabled and is_make_source(item.path))
     )
     pages = tuple(
-        MarkdownPage(item.path, item.content.decode("utf-8", errors="replace"))
+        TrackedText(item.path, item.content.decode("utf-8", errors="replace"))
         for start in range(0, len(paths), _BLOB_BATCH)
         for item in read_tracked_blob_contents(
             root, paths[start : start + _BLOB_BATCH], identity=identity
         )
     )
-    return replace(snapshot, markdown_pages=pages)
+    return replace(snapshot, tracked_texts=pages)
 
 
 def with_documentation_comparison(
