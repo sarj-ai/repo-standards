@@ -1,24 +1,12 @@
 # repo-standards
 
-`repo-standards` measures pull-request review size without executing repository code.
-
-## Where rules belong
-
-- Exact tracked-tree facts—filenames, placement, topology, migrations, pull-request size,
-  ownership, delivery/GitHub state, and repository-wide API/document sets—belong here.
-- Source and configuration semantics for Python, TypeScript, SQL, Terraform/HCL, Markdown,
-  YAML, JSON, and shell belong in `sarj-ai/code-standards`.
+`repo-standards` enforces deterministic repository, pull-request, commit, and API contract
+policy without executing repository code.
 
 ## Run it
 
-Sarj repositories should use the single Code Standards setup path. It installs the canonical
-staged repository check, managed commit-message check, and authoritative pull-request history
-workflow without creating a second Python environment:
-
-```bash
-uvx --no-config --isolated --python 3.14 --from code-standards code-standards setup
-code-standards doctor
-```
+Sarj repositories adopt it through [Code Standards setup](https://github.com/sarj-ai/code-standards#readme)
+rather than installing it separately.
 
 Use the current release without installing it:
 
@@ -33,8 +21,7 @@ uv tool install repo-standards
 repo-standards pull-request size . --base origin/main
 ```
 
-Upgrade with `uv tool upgrade repo-standards`. Automation should pin the package version or
-the GitHub Action's full commit SHA.
+Automation should pin the package version or the GitHub Action's full commit SHA.
 
 ## Safety model
 

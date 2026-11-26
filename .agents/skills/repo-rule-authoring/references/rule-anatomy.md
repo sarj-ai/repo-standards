@@ -31,7 +31,5 @@ repo_test_plan=$(mktemp)
 uv run python test_selection.py --base origin/main --report "$repo_test_plan"
 ```
 
-The JSON includes the selection reason; add `--run` to execute it, or `--jobs 1` for
-serial debugging. Shared inputs, unavailable Git evidence, deletions and renames
-fall back to every test. Keep reports task-local and outside the tracked tree.
-This iteration shortcut does not replace the full checks required by `AGENTS.md`.
+Add `--run` to execute the plan. This iteration shortcut does not replace the full checks
+required by `AGENTS.md`.
