@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 from repo_standards.core.canonical import nearest_component
@@ -7,12 +8,15 @@ from repo_standards.core.models import ComponentId, Diagnostic, Remediation, Rul
 
 
 if TYPE_CHECKING:
-    from repo_standards.core.models import RepositorySnapshot, RuleDefinition
+    from collections.abc import Iterable
+
+    from repo_standards.core.models import GeneratedDocument, RepositorySnapshot, RuleDefinition
 
 
 MARKDOWN_ONLY_RULE_ID = RuleId("repository/documentation/markdown-only-change")
 ADDED_MARKDOWN_RULE_ID = RuleId("repository/documentation/added-markdown")
 MARKDOWN_WORD_GROWTH_RULE_ID = RuleId("repository/documentation/markdown-word-growth")
+GENERATED_DOCUMENTATION_RULE_ID = RuleId("repository/documentation/generated-sources")
 
 
 def added_markdown_diagnostics(
@@ -129,4 +133,67 @@ def markdown_word_growth_diagnostics(
             ),
             baselineable=False,
         ),
+    )
+
+
+def generated_documentation_diagnostics(
+    snapshot: RepositorySnapshot, *, rule: RuleDefinition
+) -> tuple[Diagnostic, ...]:
+    comparison = snapshot.documentation_comparison
+    policy = snapshot.manifest.documentation
+    if comparison is None or policy is None:
+        return ()
+    tracked = frozenset(item.path for item in snapshot.inspection.tracked_files)
+    changed = comparison.changed_paths
+    source_changes = frozenset(changed).difference(
+        *(_paths_under(changed, item.path) for item in policy.generated)
+    )
+    diagnostics: list[Diagnostic] = []
+    for index, document in enumerate(policy.generated):
+        finding = partial(_generated_diagnostic, rule, document, index)
+        edited = [path for path in _paths_under(changed, document.path) if path in tracked]
+        if not _paths_under(tracked, document.source):
+            diagnostics.append(
+                finding(document.source, f"Generator source {document.source} is not tracked.")
+            )
+        elif not _paths_under(tracked, document.path):
+            diagnostics.append(
+                finding(document.path, f"Generated {document.path} is declared but not tracked.")
+            )
+        elif edited and not _paths_under(source_changes, document.source):
+            diagnostics.append(
+                finding(edited[0], f"Generated {edited[0]} changed without {document.source}.")
+            )
+    return tuple(diagnostics)
+
+
+def _paths_under(paths: Iterable[str], prefix: str) -> list[str]:
+    return sorted(path for path in paths if path == prefix or path.startswith(f"{prefix}/"))
+
+
+def _generated_diagnostic(
+    rule: RuleDefinition, document: GeneratedDocument, index: int, path: str, message: str
+) -> Diagnostic:
+    return Diagnostic(
+        rule_id=rule.rule_id,
+        rule_version=rule.version,
+        severity=rule.severity,
+        evidence_level="verified",
+        component_id=ComponentId("repository"),
+        subject_kind="generated-documentation",
+        observed=path,
+        expected=f"{document.path} regenerated from {document.source}",
+        message=message,
+        path=path,
+        manifest_anchor=f"documentation.generated[{index}]",
+        remediation=Remediation(
+            summary=f"Regenerate {document.path} with `{document.command}`.",
+            steps=(
+                "Change the generator source or its inputs, not the generated output.",
+                "Commit the regenerated output together with the source change.",
+                "Update or remove the documentation.generated entry when the generator moves.",
+            ),
+            validation=("Rerun the same Git comparison and require no active findings.",),
+        ),
+        baselineable=False,
     )

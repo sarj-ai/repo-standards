@@ -26,6 +26,7 @@ from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.core.pull_request_documentation import markdown_only_paths_for_revisions
 from repo_standards.policy_sarj.documentation import (
     ADDED_MARKDOWN_RULE_ID,
+    GENERATED_DOCUMENTATION_RULE_ID,
     MARKDOWN_ONLY_RULE_ID,
     MARKDOWN_WORD_GROWTH_RULE_ID,
 )
@@ -79,7 +80,12 @@ def with_documentation_comparison(
     enabled_rules: frozenset[RuleVersion],
     base_revision: str | None,
 ) -> RepositorySnapshot:
-    rule_ids = {ADDED_MARKDOWN_RULE_ID, MARKDOWN_ONLY_RULE_ID, MARKDOWN_WORD_GROWTH_RULE_ID}
+    rule_ids = {
+        ADDED_MARKDOWN_RULE_ID,
+        GENERATED_DOCUMENTATION_RULE_ID,
+        MARKDOWN_ONLY_RULE_ID,
+        MARKDOWN_WORD_GROWTH_RULE_ID,
+    }
     if not any(item.rule_id in rule_ids for item in enabled_rules):
         return snapshot
     provenance = snapshot.provenance
@@ -119,6 +125,7 @@ def with_documentation_comparison(
             added_words=_added_words(root, head, base, snapshot, base_files)
             if any(item.rule_id == MARKDOWN_WORD_GROWTH_RULE_ID for item in enabled_rules)
             else 0,
+            changed_paths=_changed_paths(snapshot.inspection.tracked_files, base_files),
         ),
         provenance=replace(
             provenance,
@@ -146,6 +153,14 @@ def _added_words(
     added = _object_words(root, head, head_pages, head_objects - unchanged)
     removed = _object_words(root, base, base_pages, base_objects - unchanged) if base else 0
     return added - removed
+
+
+def _changed_paths(
+    head: Iterable[TrackedFileEvidence], base: Iterable[TrackedBlob]
+) -> tuple[str, ...]:
+    objects = {(item.path, item.object_id) for item in head}
+    objects ^= {(item.path, item.object_id) for item in base}
+    return tuple(sorted({path for path, _ in objects}))
 
 
 def _markdown_objects(files: Iterable[TrackedBlob | TrackedFileEvidence]) -> dict[str, str]:
