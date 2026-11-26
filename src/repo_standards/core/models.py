@@ -557,7 +557,7 @@ class PullRequestTemplate:
 
 
 @dataclass(frozen=True, slots=True)
-class MarkdownPage:
+class TrackedText:
     path: str
     content: str
 
@@ -572,7 +572,7 @@ class RepositorySnapshot:
     pull_request_templates: tuple[PullRequestTemplate, ...] = ()
     migration_comparison: MigrationComparison | None = None
     documentation_comparison: DocumentationComparison | None = None
-    markdown_pages: tuple[MarkdownPage, ...] = ()
+    tracked_texts: tuple[TrackedText, ...] = ()
 
 
 @runtime_checkable

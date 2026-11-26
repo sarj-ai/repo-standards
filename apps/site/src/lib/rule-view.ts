@@ -41,6 +41,7 @@ const DESCRIPTIONS = {
     "Regenerate docs from their declared source.",
   "repository/documentation/local-links":
     "Point relative links at tracked paths.",
+  "repository/documentation/make-targets": "Name Make targets that exist.",
   "repository/documentation/markdown-only-change":
     "Review standalone documentation changes.",
   "repository/documentation/markdown-word-growth":
