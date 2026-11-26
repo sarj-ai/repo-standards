@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from functools import partial
+from functools import cache, partial
+import html
 from pathlib import PurePosixPath
 import posixpath
 import re
 from typing import TYPE_CHECKING
+import unicodedata
 from urllib.parse import unquote
 
 from repo_standards.core.canonical import nearest_component
@@ -14,7 +16,7 @@ from repo_standards.policy_sarj.makefiles import is_makefile_path
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
 
     from repo_standards.core.models import GeneratedDocument, RepositorySnapshot, RuleDefinition
 
@@ -28,6 +30,13 @@ _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"(`+)(.+?)\1")
 _LINK_TARGETS = re.compile(r"(?:\]\(|^ {0,3}\[[^\]^][^\]]*\]:)\s*(?:<([^>]+)>|([^)\s]+))")
 _NON_RELATIVE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.-]*:|[#/])")
+_LINE_FRAGMENT = re.compile(r"l\d+(?:c\d+)?(?:-l\d+(?:c\d+)?)?")
+_ATX_HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
+_SETEXT_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
+_INLINE_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+_HTML_TAG = re.compile(r"<[^>]*>")
+_FILENAME_LINK = re.compile(r"\[(`?)([\w.-]+\.md)\1\]\(<?([^)>\s#?]+\.md)(?=[#>)\s])")
+_HTML_ID = re.compile(r"""\b(?:id|name)\s*=\s*["']?([^"'\s>]+)""")
 MAKE_TARGETS_RULE_ID = RuleId("repository/documentation/make-targets")
 _SHELL_FENCES = frozenset({"bash", "console", "sh", "shell", "zsh"})
 _MAKE_ENTRIES = ("GNUmakefile", "makefile", "Makefile")
@@ -234,17 +243,63 @@ def local_link_diagnostics(
 ) -> tuple[Diagnostic, ...]:
     tracked = {item.path for item in snapshot.inspection.tracked_files}
     targets = tracked | {str(parent) for path in tracked for parent in PurePosixPath(path).parents}
+    pages = {
+        text.path: text.content for text in snapshot.tracked_texts if text.path.endswith(".md")
+    }
+    anchors = cache(_anchors)
     return tuple(
-        _local_link_diagnostic(rule, path=page.path, line=line, target=target)
-        for page in snapshot.tracked_texts
-        if page.path.endswith(".md")
-        for target, line in _relative_links(page.content).items()
-        if _resolve(page.path, target) not in targets
+        _local_link_diagnostic(rule, path=path, finding=finding)
+        for path, content in pages.items()
+        for finding in (
+            *_broken_links(path, content, targets, pages, anchors),
+            *_misnamed_links(path, content, targets),
+        )
     )
 
 
-def _relative_links(content: str) -> dict[str, int]:
-    links: dict[str, int] = {}
+@dataclass(frozen=True, slots=True)
+class _LinkFinding:
+    line: int
+    target: str
+    expected: str
+    message: str
+    anchor: str
+
+
+def _broken_links(
+    path: str,
+    content: str,
+    targets: set[str],
+    pages: dict[str, str],
+    anchors: Callable[[str], frozenset[str]],
+) -> Iterator[_LinkFinding]:
+    for target, line in _relative_links(content).items():
+        resolved = _resolve(path, target)
+        if resolved not in targets:
+            message = f"Link {target} does not resolve to a tracked path."
+            yield _LinkFinding(line, target, "a tracked file or directory", message, target)
+        elif (page := pages.get(resolved)) is not None and _missing_anchor(target, page, anchors):
+            message = f"Link {target} names no heading anchor in {resolved}."
+            yield _LinkFinding(line, target, f"a heading anchor in {resolved}", message, target)
+
+
+def _misnamed_links(path: str, content: str, targets: set[str]) -> Iterator[_LinkFinding]:
+    for number, line in _prose_lines(content):
+        spans = [match.span() for match in _CODE_SPAN.finditer(line)]
+        for match in _FILENAME_LINK.finditer(line):
+            name, target = match.group(2), match.group(3)
+            resolved = _resolve(path, target)
+            basename = posixpath.basename(resolved)
+            if (
+                resolved in targets
+                and name.lower() != basename.lower()
+                and not any(start < match.start() < end for start, end in spans)
+            ):
+                message = f"Link text {name} names a different file than {target}."
+                yield _LinkFinding(number, target, basename, message, f"{target}.text")
+
+
+def _prose_lines(content: str) -> Iterator[tuple[int, str]]:
     fence = ""
     for number, line in enumerate(content.splitlines(), start=1):
         if marker := _FENCE.match(line):
@@ -253,9 +308,14 @@ def _relative_links(content: str) -> dict[str, int]:
                 fence = opened
             elif opened[0] == fence[0] and len(opened) >= len(fence):
                 fence = ""
-            continue
-        if fence:
-            continue
+            yield number, ""
+        elif not fence:
+            yield number, line
+
+
+def _relative_links(content: str) -> dict[str, int]:
+    links: dict[str, int] = {}
+    for number, line in _prose_lines(content):
         for match in _LINK_TARGETS.finditer(_CODE_SPAN.sub("", line)):
             target = match.group(1) or match.group(2)
             if not _NON_RELATIVE.match(target):
@@ -268,9 +328,50 @@ def _resolve(page: str, target: str) -> str:
     return posixpath.normpath(posixpath.join(posixpath.dirname(page), path)) if path else "."
 
 
-def _local_link_diagnostic(
-    rule: RuleDefinition, *, path: str, line: int, target: str
-) -> Diagnostic:
+def _missing_anchor(target: str, page: str, anchors: Callable[[str], frozenset[str]]) -> bool:
+    fragment = _fragment(target)
+    return fragment is not None and fragment not in anchors(page)
+
+
+def _fragment(target: str) -> str | None:
+    path, _, fragment = target.partition("#")
+    fragment = unquote(fragment).lower()
+    if "?" in path or not fragment or ":~:" in fragment or _LINE_FRAGMENT.fullmatch(fragment):
+        return None
+    return fragment
+
+
+def _anchors(content: str) -> frozenset[str]:
+    anchors = {match.group(1).lower() for match in _HTML_ID.finditer(content)}
+    counts: dict[str, int] = {}
+    previous = ""
+    for _, line in _prose_lines(content):
+        if heading := _ATX_HEADING.match(line):
+            text = heading.group(1) or ""
+        elif previous.strip() and _SETEXT_UNDERLINE.match(line):
+            text = previous
+        else:
+            previous = line
+            continue
+        previous = ""
+        rendered = html.unescape(_HTML_TAG.sub("", _INLINE_LINK.sub(r"\1", text)))
+        for slug in {_slug(rendered), _slug(rendered.replace("_", ""))}:
+            count = counts.get(slug, 0)
+            counts[slug] = count + 1
+            anchors.add(f"{slug}-{count}" if count else slug)
+    return frozenset(anchors)
+
+
+def _slug(text: str) -> str:
+    kept = (
+        character
+        for character in text.strip().lower()
+        if character in " -_" or unicodedata.category(character)[0] in "LMN"
+    )
+    return "".join(kept).replace(" ", "-")
+
+
+def _local_link_diagnostic(rule: RuleDefinition, *, path: str, finding: _LinkFinding) -> Diagnostic:
     return Diagnostic(
         rule_id=rule.rule_id,
         rule_version=rule.version,
@@ -278,16 +379,16 @@ def _local_link_diagnostic(
         evidence_level="verified",
         component_id=ComponentId("repository"),
         subject_kind="documentation-link",
-        observed=target,
-        expected="a tracked file or directory",
-        message=f"Link {target} does not resolve to a tracked path.",
+        observed=finding.target,
+        expected=finding.expected,
+        message=finding.message,
         path=path,
-        manifest_anchor=f"tracked_files.{path}.links.{target}",
-        location=SourceLocation(path, line=line),
+        manifest_anchor=f"tracked_files.{path}.links.{finding.anchor}",
+        location=SourceLocation(path, line=finding.line),
         remediation=Remediation(
-            summary="Point the link at the tracked canonical page or remove it.",
+            summary="Point the link and its text at the tracked page or heading, or remove it.",
             steps=(
-                "Update the link when its target moved; remove it when the target was deleted.",
+                "Update the link when its page or heading moved; remove it when it was deleted.",
                 "Use an absolute URL for content outside this repository.",
             ),
             validation=("Rerun repo-standards and require no active findings.",),
