@@ -153,8 +153,15 @@ pull_request_app = typer.Typer(
     no_args_is_help=True,
     pretty_exceptions_enable=False,
 )
+worktree_app = typer.Typer(
+    name="worktree",
+    help="Create, guard and audit linked worktrees at their derived path.",
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+)
 app.add_typer(rest_app, name="rest")
 app.add_typer(pull_request_app, name="pull-request")
+app.add_typer(worktree_app, name="worktree", hidden=True)
 
 _INSPECTION_KINDS = frozenset(
     {"all", "project", "workflow", "cloudbuild", "dockerfile", "terraform", "openapi"}
@@ -372,6 +379,35 @@ def catalog_command() -> None:
             remediation="Repair the installed metadata before publishing its public catalog.",
         )
     typer.echo(canonical_json(payload.model_dump(mode="json")))
+
+
+@worktree_app.command("new")
+def worktree_new_command(branch: Annotated[str, typer.Argument()]) -> None:
+    from repo_standards.worktree import create  # ruff: ignore[import-outside-top-level] - defer worktree operations for other commands.
+
+    try:
+        path = create(Path.cwd(), branch)
+    except (OSError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(2) from error
+    typer.echo(str(path))
+
+
+@worktree_app.command("guard")
+def worktree_guard_command(_old: str, _new: str, _flag: str) -> None:
+    from repo_standards.worktree import guard  # ruff: ignore[import-outside-top-level] - defer worktree operations for other commands.
+
+    raise typer.Exit(guard(Path.cwd()))
+
+
+@worktree_app.command("audit")
+def worktree_audit_command(organization: Annotated[Path, typer.Argument()]) -> None:
+    from repo_standards.worktree import audit  # ruff: ignore[import-outside-top-level] - defer worktree operations for other commands.
+
+    rows = audit(organization)
+    typer.echo(canonical_json([asdict(row) for row in rows]))
+    if rows:
+        raise typer.Exit(1)
 
 
 @app.command("commit-message")
