@@ -397,7 +397,7 @@ RULES = (
     ),
     Rule(
         rule_id=GENERATED_DOCUMENTATION_RULE_ID,
-        version=1,
+        version=2,
         default_severity="warning",
         title="Change generated documentation only through its declared generator",
         description=(
@@ -405,7 +405,9 @@ RULES = (
             "directory), the tracked source path that its command regenerates it from, and "
             "the command. Warn when the source or output is not tracked, or when the Git "
             "comparison changes the output while nothing under the source changes. Changes "
-            "under any declared output do not count as source changes."
+            "under any declared output do not count as source changes. Also warn for each "
+            "tracked Markdown file that Git attributes mark linguist-generated outside every "
+            "declared output."
         ),
         why=(
             "A hand edit to generated documentation drifts from its owner and is lost at the "
@@ -415,7 +417,8 @@ RULES = (
         fix=(
             "Change the declared source and rerun the declared command, committing both. "
             "Update or remove the entry when the generator moves or the page becomes "
-            "hand-maintained. No autofix."
+            "hand-maintained. Declare linguist-generated Markdown or drop the attribute. "
+            "No autofix."
         ),
         taxonomy=taxonomy(CHANGE_SAFETY, DOCUMENTATION),
         examples=(
@@ -1121,7 +1124,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=45,
+    policy_version=47,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),

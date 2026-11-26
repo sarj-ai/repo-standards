@@ -150,6 +150,37 @@ def test_another_generated_output_is_not_a_source_change(repository: Path) -> No
     assert _findings(repository, base) == ["docs/api/index.md", "src/generated.md"]
 
 
+@pytest.mark.parametrize("staged", [False, True], ids=["git-tree", "git-index"])
+def test_linguist_generated_markdown_needs_a_declared_generator(
+    repository: Path, *, staged: bool
+) -> None:
+    base = _git(repository, "rev-parse", "HEAD")
+    _write(
+        repository,
+        {
+            ".gitattributes": "docs/** linguist-generated=true\n"
+            "docs/hand.md -linguist-generated\n"
+            "notes/** linguist-generated\n"
+            "notes/off.md linguist-generated=false\n",
+            "docs/hand.md": "hand\n",
+            "docs/undeclared.MD": "v1\n",
+            "notes/off.md": "hand\n",
+            "notes/data.json": "{}\n",
+        },
+    )
+    if staged:
+        _git(repository, "add", "--all")
+    else:
+        _commit(repository)
+    _write(repository, {".gitattributes": "*.md linguist-generated\n"})
+    report = analyze_repository(
+        RepositoryAnalysisRequest(
+            root=repository, staged=staged, base_revision=None if staged else base
+        )
+    )
+    assert [item.observed for item in report.diagnostics] == ["docs/undeclared.MD"]
+
+
 @pytest.mark.parametrize(
     ("entry", "error"),
     [

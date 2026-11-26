@@ -519,6 +519,7 @@ class DocumentationComparison:
     maximum_added_words: int = 0
     added_words: int = 0
     changed_paths: tuple[str, ...] = ()
+    linguist_generated: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

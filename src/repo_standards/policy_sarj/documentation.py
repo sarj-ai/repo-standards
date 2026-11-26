@@ -173,7 +173,10 @@ def generated_documentation_diagnostics(
             diagnostics.append(
                 finding(edited[0], f"Generated {edited[0]} changed without {document.source}.")
             )
-    return tuple(diagnostics)
+    return (
+        *diagnostics,
+        *_undeclared_diagnostics(rule, comparison.linguist_generated, policy.generated),
+    )
 
 
 def _paths_under(paths: Iterable[str], prefix: str) -> list[str]:
@@ -270,4 +273,36 @@ def _local_link_diagnostic(
             ),
             validation=("Rerun repo-standards and require no active findings.",),
         ),
+    )
+
+
+def _undeclared_diagnostics(
+    rule: RuleDefinition, paths: tuple[str, ...], generated: tuple[GeneratedDocument, ...]
+) -> tuple[Diagnostic, ...]:
+    declared = frozenset(path for item in generated for path in _paths_under(paths, item.path))
+    return tuple(_undeclared_diagnostic(rule, path) for path in paths if path not in declared)
+
+
+def _undeclared_diagnostic(rule: RuleDefinition, path: str) -> Diagnostic:
+    return Diagnostic(
+        rule_id=rule.rule_id,
+        rule_version=rule.version,
+        severity=rule.severity,
+        evidence_level="verified",
+        component_id=ComponentId("repository"),
+        subject_kind="generated-documentation",
+        observed=path,
+        expected=f"a documentation.generated entry covering {path}",
+        message=f"{path} is linguist-generated but has no declared generator.",
+        path=path,
+        manifest_anchor="documentation.generated",
+        remediation=Remediation(
+            summary=f"Declare the generator of {path} under documentation.generated.",
+            steps=(
+                "Add a documentation.generated entry whose path covers the output.",
+                "Remove linguist-generated from .gitattributes when the page is hand-maintained.",
+            ),
+            validation=("Rerun the same Git comparison and require no active findings.",),
+        ),
+        baselineable=False,
     )

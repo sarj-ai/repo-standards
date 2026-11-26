@@ -25,6 +25,7 @@ from repo_standards.core.models import (
 )
 from repo_standards.core.parser import parse_manifest_bytes
 from repo_standards.core.pull_request_documentation import markdown_only_paths_for_revisions
+from repo_standards.core.pull_request_size import attribute_paths
 from repo_standards.policy_sarj.documentation import (
     ADDED_MARKDOWN_RULE_ID,
     GENERATED_DOCUMENTATION_RULE_ID,
@@ -142,6 +143,9 @@ def with_documentation_comparison(
             if any(item.rule_id == MARKDOWN_WORD_GROWTH_RULE_ID for item in enabled_rules)
             else 0,
             changed_paths=_changed_paths(snapshot.inspection.tracked_files, base_files),
+            linguist_generated=_linguist_generated(root, head, snapshot.inspection.tracked_files)
+            if any(item.rule_id == GENERATED_DOCUMENTATION_RULE_ID for item in enabled_rules)
+            else (),
         ),
         provenance=replace(
             provenance,
@@ -175,6 +179,19 @@ def _changed_paths(
     objects = {(item.path, item.object_id) for item in head}
     objects ^= {(item.path, item.object_id) for item in base}
     return tuple(sorted({path for path, _ in objects}))
+
+
+def _linguist_generated(
+    root: Path, head: GitIdentity, files: Iterable[TrackedFileEvidence]
+) -> tuple[str, ...]:
+    generated = attribute_paths(
+        root,
+        source="--cached" if head.mode == "git-index" else f"--source={head.tree_digest}",
+        paths=tuple(item.path for item in files if item.path.casefold().endswith((".md", ".mdx"))),
+        attribute="linguist-generated",
+        values=frozenset({b"set", b"true"}),
+    )
+    return tuple(sorted(generated))
 
 
 def _markdown_objects(
