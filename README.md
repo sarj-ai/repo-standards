@@ -1,12 +1,15 @@
 # repo-standards
 
-`repo-standards` enforces deterministic repository, pull-request, commit, and API contract
-policy without executing repository code.
+`repo-standards` measures pull-request review size without executing repository code.
 
 ## Run it
 
-Sarj repositories adopt it through [Code Standards setup](https://github.com/sarj-ai/code-standards#readme)
-rather than installing it separately.
+Sarj repositories should use the single Code Standards setup path:
+
+```bash
+uvx --no-config --isolated --python 3.14 --from code-standards code-standards setup
+code-standards doctor
+```
 
 Use the current release without installing it:
 
