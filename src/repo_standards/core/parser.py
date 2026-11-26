@@ -27,6 +27,7 @@ from .models import (
     DeclaredJavaScriptArtifact,
     DocumentationConfig,
     ExceptionRecord,
+    GeneratedDocument,
     GeneratedJavaScriptArtifact,
     ImageArtifact,
     ImageArtifactKind,
@@ -251,7 +252,13 @@ def parse_documentation(value: ParsedValue) -> DocumentationConfig:
     data = _mapping(value, "documentation")
     _strict_keys(
         data,
-        {"entrypoints", "maximum_added_pages", "addition_exemptions", "maximum_added_words"},
+        {
+            "entrypoints",
+            "maximum_added_pages",
+            "addition_exemptions",
+            "maximum_added_words",
+            "generated",
+        },
         {"entrypoints"},
         "documentation",
     )
@@ -281,12 +288,31 @@ def parse_documentation(value: ParsedValue) -> DocumentationConfig:
     )
     if maximum_added_words < 0:
         ConfigurationError.fail("documentation.maximum_added_words must be non-negative")
+    generated = tuple(
+        _generated_document(item, index)
+        for index, item in enumerate(_list(data.get("generated", []), "documentation.generated"))
+    )
+    if len({item.path for item in generated}) != len(generated):
+        ConfigurationError.fail("documentation.generated contains duplicate paths")
     return DocumentationConfig(
         entrypoints=entrypoints,
         maximum_added_pages=maximum_added_pages,
         addition_exemptions=addition_exemptions,
         maximum_added_words=maximum_added_words,
+        generated=generated,
     )
+
+
+def _generated_document(value: ParsedValue, index: int) -> GeneratedDocument:
+    context = f"documentation.generated[{index}]"
+    data = _mapping(value, context)
+    fields = {"path", "source", "command"}
+    _strict_keys(data, fields, fields, context)
+    path = _exact_artifact_path(_string(data, "path", context), f"{context}.path")
+    source = _exact_artifact_path(_string(data, "source", context), f"{context}.source")
+    if source == path or source.startswith(f"{path}/"):
+        ConfigurationError.fail(f"{context}.source must be outside path")
+    return GeneratedDocument(path=path, source=source, command=_string(data, "command", context))
 
 
 def parse_pull_request_commit_history_transition(

@@ -36,9 +36,11 @@ from repo_standards.core.taxonomy import (
 
 from .documentation import (
     ADDED_MARKDOWN_RULE_ID,
+    GENERATED_DOCUMENTATION_RULE_ID,
     MARKDOWN_ONLY_RULE_ID,
     MARKDOWN_WORD_GROWTH_RULE_ID,
     added_markdown_diagnostics,
+    generated_documentation_diagnostics,
     markdown_only_diagnostics,
     markdown_word_growth_diagnostics,
 )
@@ -385,6 +387,40 @@ RULES = (
                 language="json",
                 before='{"added_words":400}',
                 after='{"added_words":40}',
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=GENERATED_DOCUMENTATION_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Change generated documentation only through its declared generator",
+        description=(
+            "Each documentation.generated entry names a tracked output path (file or "
+            "directory), the tracked source path that its command regenerates it from, and "
+            "the command. Warn when the source or output is not tracked, or when the Git "
+            "comparison changes the output while nothing under the source changes. Changes "
+            "under any declared output do not count as source changes."
+        ),
+        why=(
+            "A hand edit to generated documentation drifts from its owner and is lost at the "
+            "next regeneration; a declaration whose generator is gone leaves readers trusting "
+            "a page nothing maintains."
+        ),
+        fix=(
+            "Change the declared source and rerun the declared command, committing both. "
+            "Update or remove the entry when the generator moves or the page becomes "
+            "hand-maintained. No autofix."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, DOCUMENTATION),
+        examples=(
+            _example(
+                example_id="sarj-documentation-generated-sources",
+                title="Regenerate documentation from its source",
+                language="json",
+                before='{"changed":["docs/api.md"]}',
+                after='{"changed":["docs/api.md","openapi.json"]}',
                 expected_severity="warning",
             ),
         ),
@@ -945,6 +981,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         ADDED_MARKDOWN_RULE_ID: RuleClassification.JUDGMENT,
         MARKDOWN_ONLY_RULE_ID: RuleClassification.JUDGMENT,
         MARKDOWN_WORD_GROWTH_RULE_ID: RuleClassification.JUDGMENT,
+        GENERATED_DOCUMENTATION_RULE_ID: RuleClassification.JUDGMENT,
         MIGRATION_CONSOLIDATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
         MODULE_CLUSTER_RULE_ID: RuleClassification.JUDGMENT,
@@ -967,6 +1004,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         ADDED_MARKDOWN_RULE_ID: 56,
         MARKDOWN_ONLY_RULE_ID: 57,
         MARKDOWN_WORD_GROWTH_RULE_ID: 60,
+        GENERATED_DOCUMENTATION_RULE_ID: 61,
         MIGRATION_CONSOLIDATION_RULE_ID: 53,
         LOCAL_RESIDUE_RULE_ID: 51,
         MODULE_CLUSTER_RULE_ID: 58,
@@ -1045,7 +1083,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=42,
+    policy_version=43,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1755,6 +1793,10 @@ def _documentation_diagnostics(
         diagnostics += markdown_word_growth_diagnostics(
             snapshot, rule=_rule(MARKDOWN_WORD_GROWTH_RULE_ID)
         )
+    if GENERATED_DOCUMENTATION_RULE_ID in enabled:
+        diagnostics += generated_documentation_diagnostics(
+            snapshot, rule=_rule(GENERATED_DOCUMENTATION_RULE_ID)
+        )
     return diagnostics
 
 
@@ -1788,6 +1830,7 @@ class SarjPolicy:
             ADDED_MARKDOWN_RULE_ID,
             MARKDOWN_ONLY_RULE_ID,
             MARKDOWN_WORD_GROWTH_RULE_ID,
+            GENERATED_DOCUMENTATION_RULE_ID,
             MIGRATION_CONSOLIDATION_RULE_ID,
             PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
             UNTYPED_JAVASCRIPT_RULE_ID,

@@ -148,11 +148,19 @@ DEFAULT_MAXIMUM_ADDED_WORDS = 150
 
 
 @dataclass(frozen=True, slots=True)
+class GeneratedDocument:
+    path: str
+    source: str
+    command: str
+
+
+@dataclass(frozen=True, slots=True)
 class DocumentationConfig:
     entrypoints: tuple[str, ...]
     maximum_added_pages: int = 0
     addition_exemptions: tuple[str, ...] = ()
     maximum_added_words: int = DEFAULT_MAXIMUM_ADDED_WORDS
+    generated: tuple[GeneratedDocument, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -510,6 +518,7 @@ class DocumentationComparison:
     markdown_only_paths: tuple[str, ...] = ()
     maximum_added_words: int = 0
     added_words: int = 0
+    changed_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

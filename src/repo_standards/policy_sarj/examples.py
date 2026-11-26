@@ -8,7 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 from repo_standards.core.models import (
     DEFAULT_MAXIMUM_ADDED_WORDS,
     DocumentationComparison,
+    DocumentationConfig,
     FixtureId,
+    GeneratedDocument,
     GitObjectId,
     InputProvenance,
     MakefileComparison,
@@ -29,6 +31,7 @@ from repo_standards.core.parser import parse_manifest_bytes
 
 from .documentation import (
     ADDED_MARKDOWN_RULE_ID,
+    GENERATED_DOCUMENTATION_RULE_ID,
     MARKDOWN_ONLY_RULE_ID,
     MARKDOWN_WORD_GROWTH_RULE_ID,
 )
@@ -109,6 +112,7 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
         MARKDOWN_ONLY_RULE_ID,
         ADDED_MARKDOWN_RULE_ID,
         MARKDOWN_WORD_GROWTH_RULE_ID,
+        GENERATED_DOCUMENTATION_RULE_ID,
     }:
         return _run_documentation_example(case.rule_id, source)
     if case.rule_id == MIGRATION_CONSOLIDATION_RULE_ID:
@@ -149,6 +153,22 @@ def _run_documentation_example(rule_id: RuleId, source: str) -> tuple[RuleId, ..
                 added_pages=(),
                 maximum_added_words=DEFAULT_MAXIMUM_ADDED_WORDS,
                 added_words=added_words,
+            ),
+        )
+    if rule_id == GENERATED_DOCUMENTATION_RULE_ID:
+        changed = _MarkdownOnlyExampleSource.model_validate_json(source).changed
+        return _run_snapshot(
+            ("docs/api.md", "openapi.json"),
+            comparison=DocumentationComparison(
+                maximum_added_pages=0, added_pages=(), changed_paths=changed
+            ),
+            manifest=Manifest(
+                repository_id=RepositoryId("example-repository"),
+                components=(),
+                documentation=DocumentationConfig(
+                    entrypoints=("README.md",),
+                    generated=(GeneratedDocument("docs/api.md", "openapi.json", "make api-docs"),),
+                ),
             ),
         )
     if rule_id == MARKDOWN_ONLY_RULE_ID:
