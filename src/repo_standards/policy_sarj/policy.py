@@ -541,14 +541,14 @@ RULES = (
     ),
     Rule(
         rule_id=LOCAL_RESIDUE_RULE_ID,
-        version=1,
+        version=2,
         default_severity="error",
-        title="Review tracked caches, bytecode, coverage data and OS metadata",
+        title="Review tracked caches, backups, logs, coverage data and OS metadata",
         description=(
-            "Tracked .pyc, .pyo and .tsbuildinfo filenames, and exact .DS_Store and "
-            "Thumbs.db, .eslintcache and .coverage basenames, case-insensitively, need review "
-            "as local residue. "
-            "Only the final filename is matched; directories grant no exemptions."
+            "Tracked .pyc, .pyo, .tsbuildinfo, .bak, .orig, .backup, .log and .err filenames, "
+            "exact .DS_Store, Thumbs.db, .eslintcache and .coverage basenames, and every path "
+            "under a _backups, _chats or .firecrawl directory, case-insensitively, need review "
+            "as local residue. Other directories grant no exemptions."
         ),
         why=(
             "Interpreter bytecode, incremental build or lint state, coverage data and desktop "
@@ -1161,7 +1161,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=49,
+    policy_version=50,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),

@@ -391,7 +391,7 @@ def test_mjs_extensions_do_not_trigger_other_artifact_rules(path: str) -> None:
         pytest.param("index.js", id="javascript"),
         pytest.param("index.cjs", id="commonjs"),
         pytest.param("index.mts", id="typescript-module"),
-        pytest.param("index.mjs.bak", id="suffix"),
+        pytest.param("index.mjs.txt", id="suffix"),
         pytest.param("legacy.mjs/index.ts", id="directory-segment"),
     ],
 )
@@ -438,8 +438,8 @@ def test_bespoke_iac_verifier_files_are_rejected(path: str) -> None:
     "path",
     [
         pytest.param("preverify.cjs", id="prefix-cjs"),
-        pytest.param("verify-plan.cjs.bak", id="cjs-suffix"),
-        pytest.param("verify-dev-apply-plan.jq.bak", id="suffix"),
+        pytest.param("verify-plan.cjs.txt", id="cjs-suffix"),
+        pytest.param("verify-dev-apply-plan.jq.txt", id="suffix"),
         pytest.param("prefix-verify-dev-apply-plan.jq", id="prefix"),
         pytest.param("verify/plan.cjs", id="different-basename"),
     ],
@@ -573,7 +573,7 @@ def test_artifact_scan_does_not_reenumerate_module_roots_for_each_file() -> None
             ".github/scripts-backup/release.test.mts", id="github-script-directory-suffix"
         ),
         pytest.param(".github/scripts/deploy.mts", id="github-script-without-test-name"),
-        pytest.param(".github/scripts/release.test.mts.bak", id="github-script-file-suffix"),
+        pytest.param(".github/scripts/release.test.mts.txt", id="github-script-file-suffix"),
         pytest.param("packages/api/src/.github/scripts/release.test.mts", id="package-source"),
         pytest.param("tests/fixtures/.github/scripts/release.test.mts", id="test-fixture"),
     ],
@@ -1433,7 +1433,7 @@ def test_terraform_test_files_are_rejected(path: str) -> None:
         pytest.param("routing.tf", id="terraform"),
         pytest.param("routing.hcl", id="hcl"),
         pytest.param("routing.tf.json", id="terraform-json"),
-        pytest.param("routing.tftest.hcl.bak", id="suffix"),
+        pytest.param("routing.tftest.hcl.txt", id="suffix"),
         pytest.param("routing.tf.test.hcl", id="separated-test"),
     ],
 )
