@@ -31,7 +31,10 @@ def repository(tmp_path: Path) -> Path:
     (tmp_path / ".repo-standards").mkdir()
     (tmp_path / ".repo-standards/repository.toml").write_text(_MANIFEST)
     (tmp_path / "docs").mkdir()
-    (tmp_path / "docs/my guide.md").write_text("[Home](../README.md)\n[Self](#top)\n")
+    (tmp_path / "docs/my guide.md").write_text(
+        "[Home](../README.md)\n[Self](#top)\n# Set `up` & [run](../README.md) #\n"
+        '## Set up\n## Set up\nCafé_Notes\n---\n```\n# Fenced\n```\n<a name="legacy"></a>\n'
+    )
     (tmp_path / "untracked.md").write_text("on disk only\n")
     return tmp_path
 
@@ -63,7 +66,7 @@ def _broken(repository: Path, readme: str) -> list[tuple[str, str, int | None]]:
     ("readme", "expected"),
     [
         (
-            "[a](docs/my%20guide.md#x) [b](<docs/my guide.md>) [c](docs/) [d](./) [e](?q)\n",
+            "[a](docs/my%20guide.md#set-up) [b](<docs/my guide.md>) [c](docs/) [d](./) [e](?q)\n",
             [],
         ),
         (
@@ -72,11 +75,28 @@ def _broken(repository: Path, readme: str) -> list[tuple[str, str, int | None]]:
         ),
         ("```md\n[a](gone.md)\n```\n`[b](gone.md)`\n~~~~\n```\n[c](gone.md)\n~~~~\n", []),
         ("[^1]: a footnote\n", []),
+        ("`[b.md](README.md)`\n", []),
         ("[a](gone.md)\n[b](gone.md)\n", [("README.md", "gone.md", 1)]),
         ('intro\n[ref]: old/page.md "Title"\n', [("README.md", "old/page.md", 2)]),
         ("![logo](logo.png)\n", [("README.md", "logo.png", 1)]),
         ("[a](untracked.md)\n", [("README.md", "untracked.md", 1)]),
         ("[a](../outside.md)\n", [("README.md", "../outside.md", 1)]),
+        (
+            (
+                "[a](docs/my%20guide.md#set-up--run) [b](<docs/my guide.md#Set-Up-1>) "
+                "[c](docs/my%20guide.md#café_notes) [d](docs/my%20guide.md#legacy) "
+                "[e](docs/my%20guide.md#L3) [f](docs/my%20guide.md?plain=1#x) [g](docs#x)\n"
+            ),
+            [],
+        ),
+        (
+            "[`ARCH.md`](docs/my%20guide.md#set-up) [README.md](./README.md)\n[y.md](gone.md)\n",
+            [("README.md", "docs/my%20guide.md", 1), ("README.md", "gone.md", 2)],
+        ),
+        (
+            "[a](docs/my%20guide.md#fenced)\n[b](README.md#gone)\n",
+            [("README.md", "README.md#gone", 2), ("README.md", "docs/my%20guide.md#fenced", 1)],
+        ),
     ],
 )
 def test_relative_links_resolve_against_the_tracked_tree(
