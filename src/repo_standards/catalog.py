@@ -92,6 +92,7 @@ _RULE_SLUGS = types.MappingProxyType(
         "repository/artifacts/undeclared-images": "undeclared-images",
         "repository/artifacts/terraform-examples": "terraform-examples",
         "repository/artifacts/schema-derived-config-examples": "schema-derived-config-examples",
+        "repository/artifacts/unmanaged-lint-baselines": "unmanaged-lint-baselines",
         "repository/artifacts/bespoke-iac-verifiers": "bespoke-iac-verifiers",
         "repository/artifacts/operational-script-tests": "operational-script-tests",
         "repository/artifacts/script-test-directories": "script-test-directories",
