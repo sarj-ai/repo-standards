@@ -82,6 +82,7 @@ _RULE_SLUGS = types.MappingProxyType(
         "repository/terraform/module-layout": "terraform-module-layout",
         "repository/documentation/added-markdown": "added-markdown",
         "repository/documentation/markdown-only-change": "markdown-only-change",
+        "repository/documentation/markdown-word-growth": "markdown-word-growth",
         "repository/artifacts/migration-consolidation": "migration-consolidation",
         "repository/artifacts/local-residue": "local-residue",
         "repository/artifacts/untyped-javascript": "untyped-javascript",

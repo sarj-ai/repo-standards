@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
 from repo_standards.core.models import (
+    DEFAULT_MAXIMUM_ADDED_WORDS,
     DocumentationComparison,
     FixtureId,
     GitObjectId,
@@ -26,7 +27,11 @@ from repo_standards.core.models import (
 )
 from repo_standards.core.parser import parse_manifest_bytes
 
-from .documentation import ADDED_MARKDOWN_RULE_ID, MARKDOWN_ONLY_RULE_ID
+from .documentation import (
+    ADDED_MARKDOWN_RULE_ID,
+    MARKDOWN_ONLY_RULE_ID,
+    MARKDOWN_WORD_GROWTH_RULE_ID,
+)
 from .images import UNDECLARED_IMAGES_RULE_ID
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID
 from .local_residue import LOCAL_RESIDUE_RULE_ID
@@ -55,6 +60,12 @@ class _MarkdownOnlyExampleSource(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", strict=True)
 
     changed: tuple[str, ...]
+
+
+class _WordGrowthExampleSource(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", strict=True)
+
+    added_words: NonNegativeInt
 
 
 class _PullRequestTemplateExampleSource(BaseModel):
@@ -94,7 +105,11 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
         raise ValueError(message)
     if case.rule_id == MAKEFILE_GROWTH_RULE_ID:
         return _run_makefile_comparison(source)
-    if case.rule_id in {MARKDOWN_ONLY_RULE_ID, ADDED_MARKDOWN_RULE_ID}:
+    if case.rule_id in {
+        MARKDOWN_ONLY_RULE_ID,
+        ADDED_MARKDOWN_RULE_ID,
+        MARKDOWN_WORD_GROWTH_RULE_ID,
+    }:
         return _run_documentation_example(case.rule_id, source)
     if case.rule_id == MIGRATION_CONSOLIDATION_RULE_ID:
         context = _PathComparisonExampleSource.model_validate_json(source)
@@ -125,6 +140,17 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
 
 
 def _run_documentation_example(rule_id: RuleId, source: str) -> tuple[RuleId, ...]:
+    if rule_id == MARKDOWN_WORD_GROWTH_RULE_ID:
+        added_words = _WordGrowthExampleSource.model_validate_json(source).added_words
+        return _run_snapshot(
+            ("README.md",),
+            comparison=DocumentationComparison(
+                maximum_added_pages=0,
+                added_pages=(),
+                maximum_added_words=DEFAULT_MAXIMUM_ADDED_WORDS,
+                added_words=added_words,
+            ),
+        )
     if rule_id == MARKDOWN_ONLY_RULE_ID:
         changed = _MarkdownOnlyExampleSource.model_validate_json(source).changed
         paths = (

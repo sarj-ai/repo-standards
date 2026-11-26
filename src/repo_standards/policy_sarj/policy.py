@@ -37,8 +37,10 @@ from repo_standards.core.taxonomy import (
 from .documentation import (
     ADDED_MARKDOWN_RULE_ID,
     MARKDOWN_ONLY_RULE_ID,
+    MARKDOWN_WORD_GROWTH_RULE_ID,
     added_markdown_diagnostics,
     markdown_only_diagnostics,
+    markdown_word_growth_diagnostics,
 )
 from .images import UNDECLARED_IMAGES_RULE_ID, image_diagnostics
 from .javascript import UNTYPED_JAVASCRIPT_RULE_ID, javascript_diagnostics
@@ -349,6 +351,41 @@ RULES = (
                 before='{"base":["README.md"],"head":["README.md","docs/notes.md"]}',
                 after='{"base":["README.md"],"head":["README.md"]}',
                 expected_severity="error",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=MARKDOWN_WORD_GROWTH_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Keep net tracked Markdown growth within the trusted word budget",
+        description=(
+            "Compare whitespace-separated words in every tracked .md and .mdx file, "
+            "case-insensitively, with the base tree or HEAD for staged checks. Deletions "
+            "offset additions and unchanged content is neutral wherever it moves. Warn once "
+            "when net growth exceeds documentation.maximum_added_words from the base manifest "
+            "(default 150); a candidate cannot raise its own budget."
+        ),
+        why=(
+            "Documentation that only grows accumulates stale and duplicated context that "
+            "readers and agents must load. A small net budget admits a short update with "
+            "ordinary changes while larger additions replace existing text."
+        ),
+        fix=(
+            "Trim or replace existing Markdown so net growth fits the budget: delete stale or "
+            "duplicated text, link the canonical page, or move checkable guidance into rules "
+            "or CLI help. Raise the base budget in a separate reviewed change when growth is "
+            "required. Use --base for branch-wide comparison. No autofix."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, DOCUMENTATION),
+        examples=(
+            _example(
+                example_id="sarj-documentation-markdown-word-growth",
+                title="Replace text instead of appending more",
+                language="json",
+                before='{"added_words":400}',
+                after='{"added_words":40}',
+                expected_severity="warning",
             ),
         ),
     ),
@@ -907,6 +944,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
     {
         ADDED_MARKDOWN_RULE_ID: RuleClassification.JUDGMENT,
         MARKDOWN_ONLY_RULE_ID: RuleClassification.JUDGMENT,
+        MARKDOWN_WORD_GROWTH_RULE_ID: RuleClassification.JUDGMENT,
         MIGRATION_CONSOLIDATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
         MODULE_CLUSTER_RULE_ID: RuleClassification.JUDGMENT,
@@ -928,6 +966,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
     {
         ADDED_MARKDOWN_RULE_ID: 56,
         MARKDOWN_ONLY_RULE_ID: 57,
+        MARKDOWN_WORD_GROWTH_RULE_ID: 60,
         MIGRATION_CONSOLIDATION_RULE_ID: 53,
         LOCAL_RESIDUE_RULE_ID: 51,
         MODULE_CLUSTER_RULE_ID: 58,
@@ -1006,7 +1045,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=41,
+    policy_version=42,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1712,6 +1751,10 @@ def _documentation_diagnostics(
     )
     if MARKDOWN_ONLY_RULE_ID in enabled and not diagnostics:
         diagnostics += markdown_only_diagnostics(snapshot, rule=_rule(MARKDOWN_ONLY_RULE_ID))
+    if MARKDOWN_WORD_GROWTH_RULE_ID in enabled:
+        diagnostics += markdown_word_growth_diagnostics(
+            snapshot, rule=_rule(MARKDOWN_WORD_GROWTH_RULE_ID)
+        )
     return diagnostics
 
 
@@ -1744,6 +1787,7 @@ class SarjPolicy:
         separate_rules = {
             ADDED_MARKDOWN_RULE_ID,
             MARKDOWN_ONLY_RULE_ID,
+            MARKDOWN_WORD_GROWTH_RULE_ID,
             MIGRATION_CONSOLIDATION_RULE_ID,
             PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
             UNTYPED_JAVASCRIPT_RULE_ID,

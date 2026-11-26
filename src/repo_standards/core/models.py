@@ -144,11 +144,15 @@ class ImageArtifact:
     reason: str
 
 
+DEFAULT_MAXIMUM_ADDED_WORDS = 150
+
+
 @dataclass(frozen=True, slots=True)
 class DocumentationConfig:
     entrypoints: tuple[str, ...]
     maximum_added_pages: int = 0
     addition_exemptions: tuple[str, ...] = ()
+    maximum_added_words: int = DEFAULT_MAXIMUM_ADDED_WORDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -504,6 +508,8 @@ class DocumentationComparison:
     maximum_added_pages: int
     added_pages: tuple[str, ...]
     markdown_only_paths: tuple[str, ...] = ()
+    maximum_added_words: int = 0
+    added_words: int = 0
 
 
 @dataclass(frozen=True, slots=True)

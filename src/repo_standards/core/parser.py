@@ -14,6 +14,7 @@ from .errors import ConfigurationError
 from .images import is_image_path
 from .javascript import is_javascript_path
 from .models import (
+    DEFAULT_MAXIMUM_ADDED_WORDS,
     DEFAULT_MAXIMUM_BODY_CHARACTERS,
     DEFAULT_MAXIMUM_PROSE_CHARACTERS,
     MAX_REPOSITORY_INPUT_BYTES,
@@ -250,7 +251,7 @@ def parse_documentation(value: ParsedValue) -> DocumentationConfig:
     data = _mapping(value, "documentation")
     _strict_keys(
         data,
-        {"entrypoints", "maximum_added_pages", "addition_exemptions"},
+        {"entrypoints", "maximum_added_pages", "addition_exemptions", "maximum_added_words"},
         {"entrypoints"},
         "documentation",
     )
@@ -275,10 +276,16 @@ def parse_documentation(value: ParsedValue) -> DocumentationConfig:
         ConfigurationError.fail("documentation.addition_exemptions must be unique")
     if any(not path.casefold().endswith((".md", ".mdx")) for path in addition_exemptions):
         ConfigurationError.fail("documentation.addition_exemptions must be Markdown paths")
+    maximum_added_words = _integer(
+        data, "maximum_added_words", "documentation", default=DEFAULT_MAXIMUM_ADDED_WORDS
+    )
+    if maximum_added_words < 0:
+        ConfigurationError.fail("documentation.maximum_added_words must be non-negative")
     return DocumentationConfig(
         entrypoints=entrypoints,
         maximum_added_pages=maximum_added_pages,
         addition_exemptions=addition_exemptions,
+        maximum_added_words=maximum_added_words,
     )
 
 
