@@ -556,6 +556,12 @@ class PullRequestTemplate:
 
 
 @dataclass(frozen=True, slots=True)
+class MarkdownPage:
+    path: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
 class RepositorySnapshot:
     manifest: Manifest
     baseline: Baseline | None
@@ -565,6 +571,7 @@ class RepositorySnapshot:
     pull_request_templates: tuple[PullRequestTemplate, ...] = ()
     migration_comparison: MigrationComparison | None = None
     documentation_comparison: DocumentationComparison | None = None
+    markdown_pages: tuple[MarkdownPage, ...] = ()
 
 
 @runtime_checkable

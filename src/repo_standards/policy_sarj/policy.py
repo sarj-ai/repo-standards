@@ -37,10 +37,12 @@ from repo_standards.core.taxonomy import (
 from .documentation import (
     ADDED_MARKDOWN_RULE_ID,
     GENERATED_DOCUMENTATION_RULE_ID,
+    LOCAL_LINKS_RULE_ID,
     MARKDOWN_ONLY_RULE_ID,
     MARKDOWN_WORD_GROWTH_RULE_ID,
     added_markdown_diagnostics,
     generated_documentation_diagnostics,
+    local_link_diagnostics,
     markdown_only_diagnostics,
     markdown_word_growth_diagnostics,
 )
@@ -421,6 +423,38 @@ RULES = (
                 language="json",
                 before='{"changed":["docs/api.md"]}',
                 after='{"changed":["docs/api.md","openapi.json"]}',
+                expected_severity="warning",
+            ),
+        ),
+    ),
+    Rule(
+        rule_id=LOCAL_LINKS_RULE_ID,
+        version=1,
+        default_severity="warning",
+        title="Point relative Markdown links at tracked paths",
+        description=(
+            "Read every tracked .md file and resolve each relative inline link and reference "
+            "definition, ignoring its #fragment and ?query, against the file's directory. Warn "
+            "once per file and target that is neither a tracked file nor a directory holding "
+            "one. Code blocks, code spans, URLs with a scheme, fragments and root-relative "
+            "/ links are skipped."
+        ),
+        why=(
+            "Deleting or moving a page leaves links elsewhere pointing nowhere, so readers and "
+            "agents lose the canonical copy the link promised."
+        ),
+        fix=(
+            "Point the link at the page's current tracked path, remove it when the target was "
+            "deleted, or use an absolute URL for content outside the repository. No autofix."
+        ),
+        taxonomy=taxonomy(CHANGE_SAFETY, DOCUMENTATION),
+        examples=(
+            _example(
+                example_id="sarj-documentation-local-links",
+                title="Link the page at its tracked path",
+                language="json",
+                before='{"tracked":["docs/guide.md"],"readme":"[Guide](docs/old.md)"}',
+                after='{"tracked":["docs/guide.md"],"readme":"[Guide](docs/guide.md)"}',
                 expected_severity="warning",
             ),
         ),
@@ -982,6 +1016,7 @@ _RULE_CLASSIFICATION: Mapping[RuleId, RuleClassification] = MappingProxyType(
         MARKDOWN_ONLY_RULE_ID: RuleClassification.JUDGMENT,
         MARKDOWN_WORD_GROWTH_RULE_ID: RuleClassification.JUDGMENT,
         GENERATED_DOCUMENTATION_RULE_ID: RuleClassification.JUDGMENT,
+        LOCAL_LINKS_RULE_ID: RuleClassification.OBJECTIVE,
         MIGRATION_CONSOLIDATION_RULE_ID: RuleClassification.JUDGMENT,
         LOCAL_RESIDUE_RULE_ID: RuleClassification.JUDGMENT,
         MODULE_CLUSTER_RULE_ID: RuleClassification.JUDGMENT,
@@ -1005,6 +1040,7 @@ _RULE_PRECEDENCE: Mapping[RuleId, int] = MappingProxyType(
         MARKDOWN_ONLY_RULE_ID: 57,
         MARKDOWN_WORD_GROWTH_RULE_ID: 60,
         GENERATED_DOCUMENTATION_RULE_ID: 61,
+        LOCAL_LINKS_RULE_ID: 62,
         MIGRATION_CONSOLIDATION_RULE_ID: 53,
         LOCAL_RESIDUE_RULE_ID: 51,
         MODULE_CLUSTER_RULE_ID: 58,
@@ -1083,7 +1119,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=43,
+    policy_version=44,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1797,6 +1833,8 @@ def _documentation_diagnostics(
         diagnostics += generated_documentation_diagnostics(
             snapshot, rule=_rule(GENERATED_DOCUMENTATION_RULE_ID)
         )
+    if LOCAL_LINKS_RULE_ID in enabled:
+        diagnostics += local_link_diagnostics(snapshot, rule=_rule(LOCAL_LINKS_RULE_ID))
     return diagnostics
 
 
@@ -1831,6 +1869,7 @@ class SarjPolicy:
             MARKDOWN_ONLY_RULE_ID,
             MARKDOWN_WORD_GROWTH_RULE_ID,
             GENERATED_DOCUMENTATION_RULE_ID,
+            LOCAL_LINKS_RULE_ID,
             MIGRATION_CONSOLIDATION_RULE_ID,
             PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID,
             UNTYPED_JAVASCRIPT_RULE_ID,

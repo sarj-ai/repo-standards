@@ -84,6 +84,7 @@ _RULE_SLUGS = types.MappingProxyType(
         "repository/documentation/markdown-only-change": "markdown-only-change",
         "repository/documentation/markdown-word-growth": "markdown-word-growth",
         "repository/documentation/generated-sources": "generated-sources",
+        "repository/documentation/local-links": "markdown-local-links",
         "repository/artifacts/migration-consolidation": "migration-consolidation",
         "repository/artifacts/local-residue": "local-residue",
         "repository/artifacts/untyped-javascript": "untyped-javascript",

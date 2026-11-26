@@ -39,6 +39,8 @@ const DESCRIPTIONS = {
   "repository/documentation/added-markdown": "Review new Markdown pages.",
   "repository/documentation/generated-sources":
     "Regenerate docs from their declared source.",
+  "repository/documentation/local-links":
+    "Point relative links at tracked paths.",
   "repository/documentation/markdown-only-change":
     "Review standalone documentation changes.",
   "repository/documentation/markdown-word-growth":

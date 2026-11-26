@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from functools import partial
+from pathlib import PurePosixPath
+import posixpath
+import re
 from typing import TYPE_CHECKING
+from urllib.parse import unquote
 
 from repo_standards.core.canonical import nearest_component
 from repo_standards.core.models import ComponentId, Diagnostic, Remediation, RuleId, SourceLocation
@@ -17,6 +21,11 @@ MARKDOWN_ONLY_RULE_ID = RuleId("repository/documentation/markdown-only-change")
 ADDED_MARKDOWN_RULE_ID = RuleId("repository/documentation/added-markdown")
 MARKDOWN_WORD_GROWTH_RULE_ID = RuleId("repository/documentation/markdown-word-growth")
 GENERATED_DOCUMENTATION_RULE_ID = RuleId("repository/documentation/generated-sources")
+LOCAL_LINKS_RULE_ID = RuleId("repository/documentation/local-links")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_CODE_SPAN = re.compile(r"(`+).+?\1")
+_LINK_TARGETS = re.compile(r"(?:\]\(|^ {0,3}\[[^\]^][^\]]*\]:)\s*(?:<([^>]+)>|([^)\s]+))")
+_NON_RELATIVE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.-]*:|[#/])")
 
 
 def added_markdown_diagnostics(
@@ -196,4 +205,69 @@ def _generated_diagnostic(
             validation=("Rerun the same Git comparison and require no active findings.",),
         ),
         baselineable=False,
+    )
+
+
+def local_link_diagnostics(
+    snapshot: RepositorySnapshot, *, rule: RuleDefinition
+) -> tuple[Diagnostic, ...]:
+    tracked = {item.path for item in snapshot.inspection.tracked_files}
+    targets = tracked | {str(parent) for path in tracked for parent in PurePosixPath(path).parents}
+    return tuple(
+        _local_link_diagnostic(rule, path=page.path, line=line, target=target)
+        for page in snapshot.markdown_pages
+        for target, line in _relative_links(page.content).items()
+        if _resolve(page.path, target) not in targets
+    )
+
+
+def _relative_links(content: str) -> dict[str, int]:
+    links: dict[str, int] = {}
+    fence = ""
+    for number, line in enumerate(content.splitlines(), start=1):
+        if marker := _FENCE.match(line):
+            opened = marker.group(1)
+            if not fence:
+                fence = opened
+            elif opened[0] == fence[0] and len(opened) >= len(fence):
+                fence = ""
+            continue
+        if fence:
+            continue
+        for match in _LINK_TARGETS.finditer(_CODE_SPAN.sub("", line)):
+            target = match.group(1) or match.group(2)
+            if not _NON_RELATIVE.match(target):
+                links.setdefault(target, number)
+    return links
+
+
+def _resolve(page: str, target: str) -> str:
+    path = unquote(target.split("#", 1)[0].split("?", 1)[0])
+    return posixpath.normpath(posixpath.join(posixpath.dirname(page), path)) if path else "."
+
+
+def _local_link_diagnostic(
+    rule: RuleDefinition, *, path: str, line: int, target: str
+) -> Diagnostic:
+    return Diagnostic(
+        rule_id=rule.rule_id,
+        rule_version=rule.version,
+        severity=rule.severity,
+        evidence_level="verified",
+        component_id=ComponentId("repository"),
+        subject_kind="documentation-link",
+        observed=target,
+        expected="a tracked file or directory",
+        message=f"Link {target} does not resolve to a tracked path.",
+        path=path,
+        manifest_anchor=f"tracked_files.{path}.links.{target}",
+        location=SourceLocation(path, line=line),
+        remediation=Remediation(
+            summary="Point the link at the tracked canonical page or remove it.",
+            steps=(
+                "Update the link when its target moved; remove it when the target was deleted.",
+                "Use an absolute URL for content outside this repository.",
+            ),
+            validation=("Rerun repo-standards and require no active findings.",),
+        ),
     )

@@ -19,6 +19,7 @@ from repo_standards.core.models import (
     DocumentationComparison,
     MakefileComparison,
     MakefileMetric,
+    MarkdownPage,
     MigrationComparison,
     TrackedFileEvidence,
 )
@@ -27,6 +28,7 @@ from repo_standards.core.pull_request_documentation import markdown_only_paths_f
 from repo_standards.policy_sarj.documentation import (
     ADDED_MARKDOWN_RULE_ID,
     GENERATED_DOCUMENTATION_RULE_ID,
+    LOCAL_LINKS_RULE_ID,
     MARKDOWN_ONLY_RULE_ID,
     MARKDOWN_WORD_GROWTH_RULE_ID,
 )
@@ -71,6 +73,28 @@ class _EmptyComparisonBase:
 
 
 type _ComparisonBase = _ExistingComparisonBase | _EmptyComparisonBase
+
+
+def with_markdown_pages(
+    root: Path, snapshot: RepositorySnapshot, *, enabled_rules: frozenset[RuleVersion]
+) -> RepositorySnapshot:
+    if not any(item.rule_id == LOCAL_LINKS_RULE_ID for item in enabled_rules):
+        return snapshot
+    provenance = snapshot.provenance
+    if provenance.mode == "worktree":
+        ConfigurationError.fail("Markdown link checks require an exact Git tree or index")
+    identity = GitIdentity(provenance.source_revision, provenance.tree_digest, provenance.mode)
+    paths = tuple(
+        item.path for item in snapshot.inspection.tracked_files if item.path.endswith(".md")
+    )
+    pages = tuple(
+        MarkdownPage(item.path, item.content.decode("utf-8", errors="replace"))
+        for start in range(0, len(paths), _BLOB_BATCH)
+        for item in read_tracked_blob_contents(
+            root, paths[start : start + _BLOB_BATCH], identity=identity
+        )
+    )
+    return replace(snapshot, markdown_pages=pages)
 
 
 def with_documentation_comparison(

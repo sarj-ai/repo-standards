@@ -24,6 +24,7 @@ from repo_standards.policy_sarj import SarjPolicy
 from .comparison import (
     with_documentation_comparison,
     with_makefile_comparison,
+    with_markdown_pages,
     with_migration_comparison,
 )
 
@@ -148,6 +149,7 @@ def complete_repository_analysis(
     snapshot = with_documentation_comparison(
         root, snapshot, enabled_rules=enabled_rules, base_revision=request.base_revision
     )
+    snapshot = with_markdown_pages(root, snapshot, enabled_rules=enabled_rules)
     repository_diagnostics = policy.evaluate_repository(
         snapshot, enabled_rule_ids=frozenset(item.rule_id for item in enabled_rules)
     )
