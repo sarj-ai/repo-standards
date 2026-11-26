@@ -286,9 +286,9 @@ def _classified_size(
     records: tuple[tuple[int, int, str, bool], ...],
     generated_attribute: str,
 ) -> PullRequestSize:
-    generated = _generated_paths(
+    generated = attribute_paths(
         root,
-        base=base,
+        source=f"--source={base}",
         paths=tuple(record[2] for record in records),
         attribute=generated_attribute,
     )
@@ -357,12 +357,13 @@ def _numstat(root: Path, *revisions: str) -> tuple[tuple[int, int, str, bool], .
     return tuple(records)
 
 
-def _generated_paths(
+def attribute_paths(
     root: Path,
     *,
-    base: str,
+    source: str,
     paths: tuple[str, ...],
     attribute: str,
+    values: frozenset[bytes] = frozenset({b"set"}),
 ) -> frozenset[str]:
     if not paths:
         return frozenset()
@@ -372,7 +373,7 @@ def _generated_paths(
         "check-attr",
         "-z",
         "--stdin",
-        f"--source={base}",
+        source,
         attribute,
         input_bytes=payload,
     )
@@ -382,7 +383,7 @@ def _generated_paths(
         path, observed_attribute, value = fields[index : index + _NUMSTAT_FIELDS]
         if observed_attribute.decode() != attribute:
             ConfigurationError.fail("Git returned an unexpected attribute response")
-        if value == b"set":
+        if value in values:
             generated.add(path.decode("utf-8", errors="surrogateescape"))
     return frozenset(generated)
 
