@@ -16,6 +16,7 @@ from repo_standards.core.models import (
     MakefileComparison,
     MakefileMetric,
     Manifest,
+    MarkdownPage,
     MigrationComparison,
     PullRequestCommitHistoryConfig,
     PullRequestConfig,
@@ -32,6 +33,7 @@ from repo_standards.core.parser import parse_manifest_bytes
 from .documentation import (
     ADDED_MARKDOWN_RULE_ID,
     GENERATED_DOCUMENTATION_RULE_ID,
+    LOCAL_LINKS_RULE_ID,
     MARKDOWN_ONLY_RULE_ID,
     MARKDOWN_WORD_GROWTH_RULE_ID,
 )
@@ -69,6 +71,13 @@ class _WordGrowthExampleSource(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", strict=True)
 
     added_words: NonNegativeInt
+
+
+class _LocalLinksExampleSource(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", strict=True)
+
+    tracked: tuple[str, ...]
+    readme: str
 
 
 class _PullRequestTemplateExampleSource(BaseModel):
@@ -113,6 +122,7 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
         ADDED_MARKDOWN_RULE_ID,
         MARKDOWN_WORD_GROWTH_RULE_ID,
         GENERATED_DOCUMENTATION_RULE_ID,
+        LOCAL_LINKS_RULE_ID,
     }:
         return _run_documentation_example(case.rule_id, source)
     if case.rule_id == MIGRATION_CONSOLIDATION_RULE_ID:
@@ -144,6 +154,11 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
 
 
 def _run_documentation_example(rule_id: RuleId, source: str) -> tuple[RuleId, ...]:
+    if rule_id == LOCAL_LINKS_RULE_ID:
+        context = _LocalLinksExampleSource.model_validate_json(source)
+        return _run_snapshot(
+            ("README.md", *context.tracked), pages=(MarkdownPage("README.md", context.readme),)
+        )
     if rule_id == MARKDOWN_WORD_GROWTH_RULE_ID:
         added_words = _WordGrowthExampleSource.model_validate_json(source).added_words
         return _run_snapshot(
@@ -252,6 +267,7 @@ def _run_snapshot(
     comparison: MakefileComparison | MigrationComparison | DocumentationComparison | None = None,
     manifest: Manifest | None = None,
     templates: tuple[PullRequestTemplate, ...] = (),
+    pages: tuple[MarkdownPage, ...] = (),
 ) -> tuple[RuleId, ...]:
     snapshot = RepositorySnapshot(
         manifest=manifest
@@ -284,6 +300,7 @@ def _run_snapshot(
         if isinstance(comparison, DocumentationComparison)
         else None,
         pull_request_templates=templates,
+        markdown_pages=pages,
         migration_comparison=comparison if isinstance(comparison, MigrationComparison) else None,
     )
     diagnostics = SarjPolicy.evaluate_repository(snapshot)
