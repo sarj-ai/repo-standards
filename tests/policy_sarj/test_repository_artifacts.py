@@ -36,6 +36,118 @@ _NPM_PACKAGE = ("npm", "@example/input-library")
 _SCRIPT_TEST_DIRECTORIES = RuleId("repository/artifacts/script-test-directories")
 
 
+def _with_shared_blob(
+    snapshot: RepositorySnapshot, paths: tuple[str, ...], object_id: str = "f" * 40
+) -> RepositorySnapshot:
+    files = tuple(
+        replace(item, object_id=object_id) if item.path in paths else item
+        for item in snapshot.inspection.tracked_files
+    )
+    return replace(snapshot, inspection=replace(snapshot.inspection, tracked_files=files))
+
+
+def test_cross_package_duplicates_emit_one_warning_per_blob() -> None:
+    manifests = tuple(f"apps/{name}/package.json" for name in "abc")
+    paths = (
+        *(f"apps/{name}/src/retry.ts" for name in "abc"),
+        "apps/a/src/retry-copy.ts",
+    )
+    snapshot = _with_shared_blob(
+        _snapshot(
+            *manifests,
+            *paths,
+            packages=tuple(
+                _root_package("npm", path, None, workspace_root=False) for path in manifests
+            ),
+        ),
+        paths,
+    )
+    findings = SarjPolicy.evaluate_repository(
+        snapshot,
+        enabled_rule_ids=frozenset({RuleId("repository/artifacts/cross-package-duplicates")}),
+    )
+    assert len(findings) == 1
+    assert findings[0].path == "apps/a/src/retry-copy.ts"
+    assert findings[0].severity == "warning"
+    assert findings[0].observed == (
+        "apps/a/src/retry-copy.ts, apps/b/src/retry.ts, apps/c/src/retry.ts"
+    )
+
+
+@pytest.mark.parametrize(
+    ("paths", "roots"),
+    [
+        pytest.param(("apps/a/src/x.ts", "apps/a/lib/x.ts"), ("apps/a",), id="same-package"),
+        pytest.param(
+            ("apps/a/__init__.py", "apps/b/__init__.py"),
+            ("apps/a", "apps/b"),
+            id="package-markers",
+        ),
+        pytest.param(
+            ("apps/a/vite.config.ts", "apps/b/vite.config.ts"),
+            ("apps/a", "apps/b"),
+            id="config",
+        ),
+        pytest.param(
+            ("apps/a/types.d.ts", "apps/b/types.d.ts"),
+            ("apps/a", "apps/b"),
+            id="declarations",
+        ),
+        pytest.param(
+            ("apps/a/data.json", "apps/b/data.json"), ("apps/a", "apps/b"), id="non-script"
+        ),
+        pytest.param(("apps/a/src/x.ts", "apps/b/src/x.ts"), ("apps/a",), id="unowned-copy"),
+    ],
+)
+def test_cross_package_duplicates_skip_excluded_or_single_package_copies(
+    paths: tuple[str, ...], roots: tuple[str, ...]
+) -> None:
+    manifests = tuple(f"{root}/package.json" for root in roots)
+    snapshot = _with_shared_blob(
+        _snapshot(
+            *manifests,
+            *paths,
+            packages=tuple(
+                _root_package("npm", path, None, workspace_root=False) for path in manifests
+            ),
+        ),
+        paths,
+    )
+    assert (
+        SarjPolicy.evaluate_repository(
+            snapshot,
+            enabled_rule_ids=frozenset({RuleId("repository/artifacts/cross-package-duplicates")}),
+        )
+        == ()
+    )
+
+
+def test_cross_package_duplicate_fingerprint_binds_content_not_additional_copies() -> None:
+    fingerprints: list[str] = []
+    for names, object_id in (("ab", "f" * 40), ("abc", "f" * 40), ("ab", "e" * 40)):
+        manifests = tuple(f"apps/{name}/package.json" for name in names)
+        paths = tuple(f"apps/{name}/src/retry.ts" for name in names)
+        snapshot = _with_shared_blob(
+            _snapshot(
+                *manifests,
+                *paths,
+                packages=tuple(
+                    _root_package("npm", path, None, workspace_root=False) for path in manifests
+                ),
+            ),
+            paths,
+            object_id,
+        )
+        findings = SarjPolicy.evaluate_repository(
+            snapshot,
+            enabled_rule_ids=frozenset({RuleId("repository/artifacts/cross-package-duplicates")}),
+        )
+        assert len(findings) == 1
+        fingerprints.append(semantic_fingerprint(findings[0]))
+    assert fingerprints[0] == fingerprints[1]
+    assert fingerprints[0] != fingerprints[2]
+
+
 @pytest.mark.parametrize(
     ("path", "flagged"),
     [

@@ -17,6 +17,7 @@ from repo_standards.core.models import (
     MakefileMetric,
     Manifest,
     MigrationComparison,
+    PackageEvidence,
     PullRequestCommitHistoryConfig,
     PullRequestConfig,
     PullRequestReviewPolicyConfig,
@@ -43,7 +44,7 @@ from .javascript import UNTYPED_JAVASCRIPT_RULE_ID
 from .local_residue import LOCAL_RESIDUE_RULE_ID
 from .makefiles import MAKEFILE_GROWTH_RULE_ID
 from .migrations import MIGRATION_CONSOLIDATION_RULE_ID, migration_roots
-from .policy import RULES, SarjPolicy
+from .policy import CROSS_PACKAGE_DUPLICATES_RULE_ID, RULES, SarjPolicy
 from .pull_request_templates import PULL_REQUEST_TEMPLATE_SECTIONS_RULE_ID
 from .terraform import MODULE_CLUSTER_RULE_ID, MODULE_LAYOUT_RULE_ID
 
@@ -150,6 +151,7 @@ def run_rule_example(fixture_id: FixtureId, source: str) -> tuple[RuleId, ...]:
         return _run_pull_request_template(source)
     if case.rule_id in {
         UNTYPED_JAVASCRIPT_RULE_ID,
+        CROSS_PACKAGE_DUPLICATES_RULE_ID,
         UNDECLARED_IMAGES_RULE_ID,
         LOCAL_RESIDUE_RULE_ID,
         MODULE_CLUSTER_RULE_ID,
@@ -290,7 +292,11 @@ def _run_snapshot(
             source_revision="b" * 40,
             tree_digest="c" * 40,
             tracked_file_count=len(paths),
-            packages=(),
+            packages=tuple(
+                PackageEvidence("npm", path, None, private=True, workspace_root=False)
+                for path in paths
+                if path.rpartition("/")[2] == "package.json"
+            ),
             workflow_paths=(),
             cloudbuild_paths=(),
             dockerfile_paths=(),
