@@ -105,6 +105,22 @@ def test_relative_links_resolve_against_the_tracked_tree(
     assert _broken(repository, readme) == expected
 
 
+def test_code_spans_naming_a_removed_path_are_reported_on_unchanged_pages(
+    repository: Path,
+) -> None:
+    for path in ("src/app/old.py", "src/app/twin.py", "lib/app/twin.py"):
+        (repository / path).parent.mkdir(parents=True, exist_ok=True)
+        (repository / path).write_text("")
+    _git(repository, "add", "src", "lib")
+    readme = (
+        "`old.py` `app/twin.py` `run app/old.py`\n```\napp/old.py\n```\n`app/old.py` `app/old.py`\n"
+    )
+    assert _broken(repository, readme) == []
+    _git(repository, "rm", "--quiet", "src/app/old.py", "src/app/twin.py")
+    (repository / "docs/my guide.md").write_text("`src/app/old.py` was removed\n")
+    assert _broken(repository, readme) == [("README.md", "app/old.py", 5)]
+
+
 def test_public_example_executes_the_link_contract() -> None:
     fixture = FixtureId("sarj-documentation-local-links")
     tracked = '{"tracked":["docs/guide.md"],"readme":"[Guide](docs/%s.md)"}'
