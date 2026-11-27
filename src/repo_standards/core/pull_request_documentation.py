@@ -294,12 +294,12 @@ def _adds_content(before: bytes, after: bytes) -> bool:
     if b"\0" in before or b"\0" in after:
         return True
     try:
-        old_tokens = iter(_content_tokens(before.decode("utf-8")))
+        old_tokens = _content_tokens(before.decode("utf-8"))
         new_tokens = _content_tokens(after.decode("utf-8"))
     except UnicodeDecodeError:
         return True
-    # Permit deletions and reflow while rejecting added, duplicated or reordered tokens.
-    return any(token not in old_tokens for token in new_tokens)
+    # Permit edits without net growth; growth budgets belong to markdown-word-growth.
+    return len(new_tokens) > len(old_tokens)
 
 
 def _content_tokens(content: str) -> list[str]:
