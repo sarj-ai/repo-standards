@@ -822,11 +822,12 @@ RULES = (
     ),
     Rule(
         rule_id=RuleId("repository/artifacts/unmanaged-lint-baselines"),
-        version=1,
+        version=2,
         default_severity="warning",
         title="Keep lint baselines in Standards-managed ledgers",
         description=(
-            "Tracked lint-exempt.json and *-baseline.json or *-baseline-bootstrap.json basenames, "
+            "Tracked lint-exempt.json and *-baseline.json, *-baseline-bootstrap.json or "
+            "*-baseline.txt basenames, "
             "case-insensitively, need review. diagnostic-baseline.json, suppression-baseline.json, "
             "dot-prefixed native analyzer baselines and coverage baselines are excluded."
         ),
@@ -1239,7 +1240,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=52,
+    policy_version=53,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),
@@ -1610,7 +1611,7 @@ def _unmanaged_lint_baseline_diagnostics(
     path: str, basename: str, component: Component | None
 ) -> list[Diagnostic]:
     if basename != "lint-exempt.json" and (
-        not basename.endswith(("-baseline.json", "-baseline-bootstrap.json"))
+        not basename.endswith(("-baseline.json", "-baseline-bootstrap.json", "-baseline.txt"))
         or basename.startswith(".")
         or "coverage" in basename
         or basename in _MANAGED_BASELINE_BASENAMES
