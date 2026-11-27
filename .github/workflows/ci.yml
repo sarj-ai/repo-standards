@@ -26,6 +26,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  credentials:
+    name: Public credential policy
+    permissions:
+      contents: read
+    uses: sarj-ai/code-standards/.github/workflows/public-credential-policy.yml@abdc970acf520061367a19f743525b4266a9ab07
+
   reuse:
     name: REUSE license compliance
     runs-on: ubuntu-24.04
@@ -284,7 +290,7 @@ jobs:
   gate:
     name: CI / gate
     if: always()
-    needs: [validate, compatibility, package, docs, reuse]
+    needs: [validate, compatibility, package, docs, reuse, credentials]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -295,9 +301,11 @@ jobs:
           PACKAGE_RESULT: ${{ needs.package.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
           REUSE_RESULT: ${{ needs.reuse.result }}
+          CREDENTIALS_RESULT: ${{ needs.credentials.result }}
         run: |
           test "$VALIDATE_RESULT" = success
           test "$COMPATIBILITY_RESULT" = success
           test "$PACKAGE_RESULT" = success
           test "$DOCS_RESULT" = success
           test "$REUSE_RESULT" = success
+          test "$CREDENTIALS_RESULT" = success
