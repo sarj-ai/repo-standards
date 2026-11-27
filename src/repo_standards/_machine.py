@@ -58,6 +58,7 @@ def capabilities_payload() -> CapabilitiesPayload:
             "explain",
             "inspect",
             "pull-request commits",
+            "pull-request documentation",
             "pull-request prepare",
             "pull-request push",
             "pull-request review-policy",

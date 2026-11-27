@@ -13,6 +13,7 @@ from pydantic import RootModel
 import pytest
 from typer.testing import CliRunner
 
+from repo_standards.catalog import build_catalog
 from repo_standards.cli import app
 from repo_standards.core.canonical import semantic_fingerprint
 from repo_standards.core.models import Diagnostic, RepositorySnapshot, RuleId
@@ -1975,12 +1976,9 @@ def test_capabilities_are_machine_discoverable() -> None:
     assert result.exit_code == 0
     capabilities = _json_object(result.stdout)
     assert capabilities["schema_version"] == 2
-    commands = capabilities["commands"]
-    assert isinstance(commands, list)
-    assert "catalog" in commands
-    assert "pull-request commits" in commands
-    assert "pull-request prepare" in commands
-    assert "pull-request push" in commands
+    assert capabilities["commands"] == [
+        " ".join(command.path) for command in build_catalog(app, package_version="0").commands
+    ]
     safety = _object(capabilities["safety"])
     assert safety["repository_code_execution"] is True
     assert safety["repository_code_execution_default"] is False
