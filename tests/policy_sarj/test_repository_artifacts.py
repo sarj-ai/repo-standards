@@ -152,6 +152,8 @@ def test_cross_package_duplicate_fingerprint_binds_content_not_additional_copies
     ("path", "flagged"),
     [
         pytest.param("pyright-baseline.json", True),
+        pytest.param(".ci/noise-file-baseline.txt", True),
+        pytest.param("tests/openapi_untyped_response_baseline.txt", False),
         pytest.param(".ci/standards-eslint-baseline-bootstrap.json", True),
         pytest.param(".ci/Lint-Exempt.json", True),
         pytest.param("diagnostic-baseline.json", False),
