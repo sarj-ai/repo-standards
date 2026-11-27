@@ -438,7 +438,7 @@ RULES = (
     ),
     Rule(
         rule_id=LOCAL_LINKS_RULE_ID,
-        version=2,
+        version=3,
         default_severity="warning",
         title="Point relative Markdown links at tracked paths",
         description=(
@@ -448,7 +448,9 @@ RULES = (
             "one, whose #fragment matches no GitHub heading slug or HTML id/name in its tracked "
             ".md target, or whose link text is a different .md filename than the target. Code "
             "blocks, code spans, URLs with a scheme, same-page #fragments and root-relative / "
-            "links are skipped, as are #L line fragments and ?query links for anchors."
+            "links are skipped, as are #L line fragments and ?query links for anchors. In a Git "
+            "comparison, also warn once per unchanged file and code span that is a path of two "
+            "or more components ending a removed file's path and no tracked path."
         ),
         why=(
             "Deleting or moving a page leaves links elsewhere pointing nowhere, so readers and "
@@ -1240,7 +1242,7 @@ RULE_GOVERNANCE = tuple(
 POLICY_SPEC = PolicySpec(
     schema_version=2,
     policy_id=PolicyId("sarj"),
-    policy_version=53,
+    policy_version=54,
     profile_id=PROFILE_ID,
     title="Sarj repository standard",
     component_kinds=tuple(kind.value for kind in ComponentKind),

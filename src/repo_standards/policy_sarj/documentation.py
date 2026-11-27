@@ -247,12 +247,15 @@ def local_link_diagnostics(
         text.path: text.content for text in snapshot.tracked_texts if text.path.endswith(".md")
     }
     anchors = cache(_anchors)
+    comparison = snapshot.documentation_comparison
+    changed = frozenset(comparison.changed_paths if comparison else ())
     return tuple(
         _local_link_diagnostic(rule, path=path, finding=finding)
         for path, content in pages.items()
         for finding in (
             *_broken_links(path, content, targets, pages, anchors),
             *_misnamed_links(path, content, targets),
+            *(() if path in changed else _removed_paths(content, changed - tracked, targets)),
         )
     )
 
@@ -297,6 +300,23 @@ def _misnamed_links(path: str, content: str, targets: set[str]) -> Iterator[_Lin
             ):
                 message = f"Link text {name} names a different file than {target}."
                 yield _LinkFinding(number, target, basename, message, f"{target}.text")
+
+
+def _removed_paths(
+    content: str, removed: frozenset[str], targets: set[str]
+) -> Iterator[_LinkFinding]:
+    spans: dict[str, int] = {}
+    for number, line in _prose_lines(content) if removed else ():
+        for match in _CODE_SPAN.finditer(line):
+            spans.setdefault(match.group(2), number)
+    for name, number in spans.items():
+        if "/" in name and _ends(removed, name) and not _ends(targets, name):
+            message = f"Code span {name} names a path this change removes."
+            yield _LinkFinding(number, name, "a tracked path", message, f"{name}.code")
+
+
+def _ends(paths: Iterable[str], name: str) -> bool:
+    return any(f"/{path}".endswith(f"/{name}") for path in paths)
 
 
 def _prose_lines(content: str) -> Iterator[tuple[int, str]]:

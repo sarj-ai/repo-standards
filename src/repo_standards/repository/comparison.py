@@ -116,6 +116,7 @@ def with_documentation_comparison(
     rule_ids = {
         ADDED_MARKDOWN_RULE_ID,
         GENERATED_DOCUMENTATION_RULE_ID,
+        LOCAL_LINKS_RULE_ID,
         MARKDOWN_ONLY_RULE_ID,
         MARKDOWN_WORD_GROWTH_RULE_ID,
     }
