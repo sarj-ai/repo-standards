@@ -1,0 +1,15 @@
+version = 1
+
+# The project license applies to Sarj-authored files. Explicit file notices
+# remain authoritative; imported material is attributed separately below.
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 sarj-ai"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ".agents/skills/merge-risk/**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Denver Technologies, Inc."
+SPDX-License-Identifier = "MIT"
