@@ -35,11 +35,6 @@ Automation should pin the package version or the GitHub Action's full commit SHA
 
 ## Development
 
-Send bug reports and feature requests through [GitHub issues](https://github.com/sarj-ai/repo-standards/issues).
-Propose changes through pull requests. Add automated tests for new functionality
-and regressions, and run the checks below before review. Follow [AGENTS.md](AGENTS.md)
-for repository and rule contribution requirements.
-
 ```bash
 uv sync --locked
 uv run pytest
@@ -56,12 +51,3 @@ uv build --no-sources
 Releases are reconcilable. The protected workflow independently repairs a missing PyPI
 publication or GitHub Release from the same verified source revision.
 
-## Security and licensing
-
-Use the [private reporting process](.github/SECURITY.md) for undisclosed vulnerabilities.
-The [MIT license](LICENSE) covers Sarj-authored code. [REUSE.toml](REUSE.toml)
-records file licensing and preserves imported material's original attribution;
-CI checks the metadata with REUSE.
-
-The [OpenSSF assessment](https://www.bestpractices.dev/en/projects/17198)
-publishes the project's current progress and supporting evidence.

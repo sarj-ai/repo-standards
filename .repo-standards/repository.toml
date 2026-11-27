@@ -12,5 +12,6 @@ addition_exemptions = [
   ".claude/skills/repo-rule-authoring/SKILL.md",
   ".agents/skills/create-pr/SKILL.md",
   ".agents/skills/merge-risk/SKILL.md",
+  ".github/SECURITY.md",
 ]
 entrypoints = ["README.md"]
