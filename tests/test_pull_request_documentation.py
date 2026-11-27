@@ -180,11 +180,11 @@ def test_content_additions_are_rejected_in_existing_scoped_files(tmp_path: Path,
         ("Existing words\nremain here.\n", "Existing words remain here.\n"),
         ("The drain. `test_render.py` keeps that order.\n", "The drain.\n"),
         ("Mirror `kamailio.cfg`); the retired test checks it.\n", "Mirror `kamailio.cfg`).\n"),
+        ("existing\n", "replacement\n"),
+        ("first second\n", "second first\n"),
     ],
 )
-def test_deletions_and_blank_additions_are_allowed(
-    tmp_path: Path, before: str, content: str
-) -> None:
+def test_edits_without_net_growth_are_allowed(tmp_path: Path, before: str, content: str) -> None:
     _repository(tmp_path)
     target = tmp_path / "README.md"
     target.write_text(before, encoding="utf-8")
@@ -216,17 +216,15 @@ def test_content_ban_is_independent_of_page_exemptions(tmp_path: Path, path: str
 @pytest.mark.parametrize(
     ("before", "content"),
     [
-        (b"existing\n", b"replacement\n"),
         (b"existing\n", b"existing\nexisting\n"),
         (b"existing\n", b"existing\x00hidden"),
         (b"existing\n", b"existing\n\xff"),
         (b"existing\n", b"existing\v"),
         (b"existing\n", b"exis ting\n"),
         (b"existing\n", b"`existing`\n"),
-        (b"first second\n", b"second first\n"),
     ],
 )
-def test_replacements_duplicates_and_binary_content_are_rejected(
+def test_net_growth_and_binary_content_are_rejected(
     tmp_path: Path, before: bytes, content: bytes
 ) -> None:
     _repository(tmp_path)
@@ -298,7 +296,7 @@ def test_content_ban_cannot_be_disabled_by_head_manifest(tmp_path: Path) -> None
     base = _repository(tmp_path)
     manifest = tmp_path / ".repo-standards/repository.toml"
     manifest.write_text('repository_id = "fixture"\ncomponents = []\n', encoding="utf-8")
-    (tmp_path / "README.md").write_text("new content\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Fixture\nnew content\n", encoding="utf-8")
     _commit(tmp_path)
 
     result = analyze_pull_request_documentation(tmp_path, base=base)
@@ -538,7 +536,7 @@ def test_overflowed_json_numbers_cannot_qualify_for_metadata_maintenance(
     )
     base = _commit(tmp_path)
     target.write_text(
-        target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1"), encoding="utf-8"
+        target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1-rc.1"), encoding="utf-8"
     )
     _commit(tmp_path)
 
@@ -568,9 +566,8 @@ def test_metadata_exception_does_not_allow_prose_config_or_ambiguous_json_change
 ) -> None:
     base = _docs_package(tmp_path)
     target = tmp_path / "apps/docs" / filename
-    target.write_text(
-        target.read_text(encoding="utf-8").replace(original, replacement), encoding="utf-8"
-    )
+    source = target.read_text(encoding="utf-8").replace(original, replacement)
+    target.write_text(source.replace("^1.0.0", "^1.0.1-rc.1"), encoding="utf-8")
     _commit(tmp_path)
 
     assert analyze_pull_request_documentation(tmp_path, base=base).added_content_paths == (
@@ -596,7 +593,7 @@ def test_metadata_exception_does_not_exempt_new_moved_or_changed_file_types(
             _git(tmp_path, "mv", "apps/docs/package.json", "apps/docs/nested/package.json")
             target = target.parent / "nested/package.json"
             target.write_text(
-                target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1"), encoding="utf-8"
+                target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1-rc.1"), encoding="utf-8"
             )
         case "symlink":
             target.unlink()
@@ -604,7 +601,7 @@ def test_metadata_exception_does_not_exempt_new_moved_or_changed_file_types(
         case _:
             target.chmod(0o755)
             target.write_text(
-                target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1"), encoding="utf-8"
+                target.read_text(encoding="utf-8").replace("1.0.0", "1.0.1-rc.1"), encoding="utf-8"
             )
     _commit(tmp_path)
 
@@ -618,9 +615,11 @@ def test_lockfile_exception_uses_exact_head_package_identity_not_worktree(tmp_pa
     base = _docs_package(tmp_path)
     package = tmp_path / "apps/docs/package.json"
     original = package.read_text(encoding="utf-8")
-    package.write_text(original.replace("docs-app", "renamed-app"), encoding="utf-8")
+    package.write_text(original.replace("docs-app", "renamed-docs-app"), encoding="utf-8")
     lock = package.with_name("package-lock.json")
-    lock.write_text(lock.read_text(encoding="utf-8").replace("1.0.0", "1.0.1"), encoding="utf-8")
+    lock.write_text(
+        lock.read_text(encoding="utf-8").replace("1.0.0", "1.0.1-rc.1"), encoding="utf-8"
+    )
     _commit(tmp_path)
     package.write_text(original, encoding="utf-8")
 

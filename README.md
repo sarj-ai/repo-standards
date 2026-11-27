@@ -1,13 +1,13 @@
 # repo-standards
 
-`repo-standards` measures pull-request review size without executing repository code.
+`repo-standards` checks repository and pull-request policy without executing code.
 
 ## Run it
 
 Sarj repositories should use the single Code Standards setup path:
 
 ```bash
-uvx --no-config --isolated --python 3.14 --from code-standards code-standards setup
+uvx --no-config --isolated --python 3.15 --from code-standards code-standards setup
 code-standards doctor
 ```
 
