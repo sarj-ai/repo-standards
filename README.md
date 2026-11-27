@@ -50,4 +50,3 @@ uv build --no-sources
 
 Releases are reconcilable. The protected workflow independently repairs a missing PyPI
 publication or GitHub Release from the same verified source revision.
-
