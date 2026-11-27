@@ -12,10 +12,12 @@ advisory identifiers when available.
 
 ## Open source assurance programme
 
-This programme covers new supplied releases of
+This programme covers reviewed source and package distributions of
 [Repo Standards](https://github.com/sarj-ai/repo-standards) and
-[Code Standards](https://github.com/sarj-ai/code-standards) after adoption of this
-policy, including their published packages and repository-owned GitHub Actions.
+[Code Standards](https://github.com/sarj-ai/code-standards), including their locked
+Python dependencies and bundled npm components. Each admitted version receives
+a recorded review from 2026-11-27 onward. Separately downloaded analysis engines,
+downstream consumer environments and other company products are outside this scope.
 Repository maintainers own the programme, release approval, security triage and
 the programme's evidence records.
 
@@ -70,3 +72,19 @@ assessment, resources, license findings, vulnerability dispositions, audit resul
 corrective actions and approval. Track inquiry response times, unresolved licensing
 questions, known-vulnerability age and release-check outcomes. Any conformance
 statement must identify its standard, scope, evidence and review date.
+
+### Initial security assurance review
+
+The 2026-11-27 review assigns programme ownership, component review, release
+approval, security triage and evidence retention to the maintainer `nmaswood`.
+The participant confirmed the stated competence, policy awareness and available
+maintainer time and CI resources. This is a programme role record, not a claim
+that the repositories have only one contributor.
+
+Maintainer-controlled records retain dependency archives, source revisions,
+lockfiles, artifact digests, scanner findings and dispositions. The initial
+inventory contains 94 Python component records backed by 61 unique verified
+archives, and 123 bundled npm source archives. Runtime dependency audits,
+required CI and the published security-reporting process support follow-up.
+Conformance review uses the OpenChain ISO/IEC 18974 checklist for this scope;
+it does not certify the entire company or every downstream installation.
