@@ -1181,6 +1181,26 @@ def test_comment_shows_total_limit_when_raw_budget_prevents_parsing() -> None:
     assert "prose characters" not in comment
 
 
+def test_comment_names_each_incomplete_body_section() -> None:
+    receipt = _receipt([])
+    receipt["summary"] = {
+        "missing_body_sections": ["Merge Risk"],
+        "reasons": ["body_sections_incomplete"],
+    }
+
+    comment = render_comment(
+        receipt,
+        final_passed=False,
+        lane_enabled=False,
+        operational_reason=None,
+        unavailable={},
+    )
+
+    assert (
+        "- Reasons: `body_sections_incomplete`\n- Incomplete body sections: `Merge Risk`\n\n"
+    ) in comment
+
+
 def test_comment_without_allowlisted_bot_approvals_keeps_the_human_count_line() -> None:
     comment = render_comment(
         _receipt([]),
