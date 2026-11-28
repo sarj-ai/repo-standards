@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import tomllib
 from zipfile import ZipFile
 
 import pytest
@@ -18,7 +19,7 @@ from ci_reviewed_validation import (
     record,
     reuse,
 )
-from tests.test_public_content import OBJECT_MAP
+from tests.test_public_content import OBJECT_MAP, STRING_MAP
 
 
 REPOSITORY = "owner/repo"
@@ -28,17 +29,16 @@ TREE = "c" * 40
 
 
 @pytest.mark.parametrize(
-    "module",
-    [
-        "ci_artifacts.py",
-        "ci_reviewed_validation.py",
-        "release_reconciliation.py",
-        "test_selection.py",
-    ],
+    ("module", "target"),
+    STRING_MAP.validate_python(
+        tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8"))[
+            "tool"
+        ]["ruff"]["per-file-target-version"]
+    ).items(),
 )
-def test_certificate_bootstrap_supports_runner_python_grammar(module: str) -> None:
+def test_system_python_modules_support_their_target_grammar(module: str, target: str) -> None:
     source = (Path(__file__).parents[1] / module).read_text(encoding="utf-8")
-    ast.parse(source, filename=module, feature_version=(3, 12))
+    ast.parse(source, filename=module, feature_version=(3, int(target.removeprefix("py3"))))
 
 
 def _git(root: Path, *argv: str) -> str:
