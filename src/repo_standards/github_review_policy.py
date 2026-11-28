@@ -1027,6 +1027,10 @@ def render_comment(
     if operational_reason is not None:
         reason_items.append(operational_reason)
     reason_text = ", ".join(reason_items)
+    missing = ", ".join(
+        str(item) for item in _optional_array(summary.get("missing_body_sections")) or ()
+    )
+    missing_line = f"- Incomplete body sections: `{missing}`\n" if missing else ""
     lane = "enabled" if lane_enabled else "disabled"
     earlier = receipt.get("earlier_approvals")
     earlier_lines = "".join(
@@ -1046,7 +1050,8 @@ def render_comment(
         f"- Domain: **{'yes' if summary.get('touches_domain') else 'no'}**\n"
         f"{_description_line(summary, receipt)}"
         f"- Review-optional lane: **{lane}**\n"
-        f"- Reasons: `{reason_text}`\n\n"
+        f"- Reasons: `{reason_text}`\n"
+        f"{missing_line}\n"
         f"Evaluated head `{_evaluated_head(receipt)}`.\n"
     )
 
