@@ -46,46 +46,9 @@ jobs:
         run: >-
           python ci_artifacts.py --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
           --kind site --destination apps/site/dist --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
-      - name: Install uv
+      - name: Build and verify site
         if: steps.reuse.outputs.reused != 'true'
-        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
-        with:
-          version: '0.13.10'
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Install Node.js
-        if: steps.reuse.outputs.reused != 'true'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: apps/site/package-lock.json
-      - name: Install locked toolchains
-        if: steps.reuse.outputs.reused != 'true'
-        run: bash .github/scripts/ci-workflow.sh dependencies
-      - name: Audit documentation dependency graph
-        if: steps.reuse.outputs.reused != 'true'
-        run: npm --prefix apps/site audit --audit-level=high
-      - name: Install the pinned native tool bootstrap
-        if: steps.reuse.outputs.reused != 'true'
-        env:
-          UV_PYTHON_DOWNLOADS_JSON_URL: https://raw.githubusercontent.com/astral-sh/uv/4ecd0eff2a81e3ffdcd7cfee10d08936e4747c17/crates/uv-python-managed/download-metadata.json
-        run: uv run --no-config --no-project --python 3.15.0 --with code-standards==9.76.1 python -m sarj_standards.libs.adoption.native_bootstrap
-      - name: Install and attest applicable native tools
-        if: steps.reuse.outputs.reused != 'true'
-        run: uvx --no-config --isolated --python 3.14 --from sarj-standards-bootstrap code-standards setup --tools-only
-      - name: Verify native TypeScript compiler
-        if: steps.reuse.outputs.reused != 'true'
-        run: bash .github/scripts/ci-workflow.sh compiler
-      - name: Lint and build generated reference
-        if: steps.reuse.outputs.reused != 'true'
-        env:
-          WORKERS_CI_COMMIT_SHA: ${{ github.sha }}
-        run: |
-          bash .github/scripts/verify-reference.sh
-      - name: Verify public site artifacts
-        if: steps.reuse.outputs.reused != 'true'
-        run: uv run --frozen --no-dev --group artifacts python -m repo_standards.verify_release_artifacts --site apps/site/dist
+        uses: ./.github/actions/site
       - name: Upload immutable site
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

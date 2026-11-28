@@ -39,15 +39,15 @@ def test_parallel_build_preserves_the_immutable_anchor_publication_barrier() -> 
 def test_documentation_installs_overlap_and_either_failure_blocks_build(
     tmp_path: Path, failed_tool: str
 ) -> None:
-    workflow = OBJECT_MAP.validate_python(
+    action = OBJECT_MAP.validate_python(
         yaml.load(
-            (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader
+            (REPOSITORY_ROOT / ".github/actions/site/action.yml").read_text(),
+            Loader=yaml.BaseLoader,
         ),
         strict=True,
     )
-    jobs = OBJECT_MAP.validate_python(workflow["jobs"], strict=True)
-    docs = OBJECT_MAP.validate_python(jobs["docs"], strict=True)
-    steps = OBJECT_LIST.validate_python(docs["steps"], strict=True)
+    runs = OBJECT_MAP.validate_python(action["runs"], strict=True)
+    steps = OBJECT_LIST.validate_python(runs["steps"], strict=True)
     script = next(step["run"] for step in steps if step.get("name") == "Install locked toolchains")
     assert isinstance(script, str)
     shell = shutil.which("bash")
