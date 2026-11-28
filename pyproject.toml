@@ -25,10 +25,10 @@ dependencies = [
 readme = "README.md"
 
 [project.urls]
-Homepage = "https://engineering.sarj.ai/projects/repo-standards/"
+Homepage = "https://sarj.ai/engineering/projects/repo-standards/"
 Repository = "https://github.com/sarj-ai/repo-standards"
 Issues = "https://github.com/sarj-ai/repo-standards/issues"
-Documentation = "https://engineering.sarj.ai/projects/repo-standards/"
+Documentation = "https://sarj.ai/engineering/projects/repo-standards/"
 
 [project.scripts]
 repo-standards = "repo_standards._entrypoint:main"

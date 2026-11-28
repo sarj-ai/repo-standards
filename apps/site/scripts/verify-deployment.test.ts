@@ -28,12 +28,12 @@ await test("accepts matching deployment identity and catalog digest", async () =
   assert.equal(health.commit, COMMIT);
   assert.deepEqual(requests, [
     [
-      "/projects/repo-standards/health.json",
+      "/engineering/projects/repo-standards/health.json",
       `?commit=${COMMIT}&attempt=1`,
       "no-store",
     ],
     [
-      "/projects/repo-standards/api/catalog.json",
+      "/engineering/projects/repo-standards/api/catalog.json",
       `?commit=${COMMIT}&attempt=1`,
       "no-store",
     ],

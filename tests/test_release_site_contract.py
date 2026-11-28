@@ -152,7 +152,7 @@ def test_release_site_csp_handles_case_insensitive_script_tags(
 
 
 def test_mounted_site_validates_catalog_and_prefixed_policy_links(tmp_path: Path) -> None:
-    project = tmp_path / "projects/repo-standards"
+    project = tmp_path / "engineering/projects/repo-standards"
     _site(project)
     page = project / "git-policies/index.html"
     page.parent.mkdir()
@@ -161,9 +161,9 @@ def test_mounted_site_validates_catalog_and_prefixed_policy_links(tmp_path: Path
         <body><main><h1>Git policies</h1>
         <p>They are commands and hooks, so they do not appear in the rule count.</p>
         <code>[(i/N) ][TICKET] type(scope)!: description</code>
-        <a href="/projects/repo-standards/cli/#commit-message">Commit messages</a>
-        <a href="/projects/repo-standards/cli/#pull-request.commits">Commit history</a>
-        <a href="/projects/repo-standards/git-policies/">Git policies</a>
+        <a href="/engineering/projects/repo-standards/cli/#commit-message">Commit messages</a>
+        <a href="/engineering/projects/repo-standards/cli/#pull-request.commits">Commit history</a>
+        <a href="/engineering/projects/repo-standards/git-policies/">Git policies</a>
         </main></body></html>""",
         encoding="utf-8",
     )
@@ -176,7 +176,7 @@ def test_mounted_site_validates_catalog_and_prefixed_policy_links(tmp_path: Path
 
 
 def test_mounted_site_rejects_a_global_project_fallback(tmp_path: Path) -> None:
-    _site(tmp_path / "projects/repo-standards")
+    _site(tmp_path / "engineering/projects/repo-standards")
     (tmp_path / "404.html").write_text("<html>Unowned global project fallback</html>")
 
     violations = verify_site(tmp_path)
@@ -187,15 +187,15 @@ def test_mounted_site_rejects_a_global_project_fallback(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("relative", "privacy_violation"),
     [
-        ("projects/repo-standards/_astro/vendor.js", False),
-        ("projects/repo-standards/api/extra.json", True),
+        ("engineering/projects/repo-standards/_astro/vendor.js", False),
+        ("engineering/projects/repo-standards/api/extra.json", True),
         ("_astro/vendor.js", True),
     ],
 )
 def test_mounted_site_limits_the_vendor_email_exemption_to_project_assets(
     tmp_path: Path, relative: str, *, privacy_violation: bool
 ) -> None:
-    _site(tmp_path / "projects/repo-standards")
+    _site(tmp_path / "engineering/projects/repo-standards")
     artifact = tmp_path / relative
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("fixture" + "@" + "email.invalid")
@@ -206,7 +206,7 @@ def test_mounted_site_limits_the_vendor_email_exemption_to_project_assets(
 
 
 def test_mounted_site_checks_outside_html_csp_without_project_semantics(tmp_path: Path) -> None:
-    _site(tmp_path / "projects/repo-standards")
+    _site(tmp_path / "engineering/projects/repo-standards")
     (tmp_path / "_headers").write_text("/*\n  Content-Security-Policy: default-src 'self'\n")
     (tmp_path / "404.html").write_text("<html><script>alert('unsafe')</script></html>")
 

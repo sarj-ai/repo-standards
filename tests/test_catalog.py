@@ -313,4 +313,4 @@ def test_catalog_uses_the_canonical_engineering_reference() -> None:
     catalog = _catalog_payload()
     product = catalog["product"]
     assert isinstance(product, dict)
-    assert product["website_url"] == "https://engineering.sarj.ai/projects/repo-standards/"
+    assert product["website_url"] == "https://sarj.ai/engineering/projects/repo-standards/"

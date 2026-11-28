@@ -13,6 +13,14 @@
   },
   "routes": [
     {
+      "pattern": "sarj.ai/engineering/projects/repo-standards",
+      "zone_name": "sarj.ai",
+    },
+    {
+      "pattern": "sarj.ai/engineering/projects/repo-standards/*",
+      "zone_name": "sarj.ai",
+    },
+    {
       "pattern": "repo-standards.sarj.ai",
       "custom_domain": true,
     },
