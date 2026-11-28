@@ -424,3 +424,27 @@ def _metrics(
     return tuple(
         MakefileMetric(blob.path, blob.object_id, line_counts[blob.object_id]) for blob in blobs
     )
+
+
+def with_rule_inputs(
+    root: Path,
+    snapshot: RepositorySnapshot,
+    *,
+    enabled_rules: frozenset[RuleVersion],
+    base_revision: str | None,
+    as_of: date | None,
+) -> RepositorySnapshot:
+    snapshot = with_makefile_comparison(
+        root,
+        snapshot,
+        enabled_rules=enabled_rules,
+        base_revision=base_revision,
+        as_of=as_of,
+    )
+    snapshot = with_migration_comparison(
+        root, snapshot, enabled_rules=enabled_rules, base_revision=base_revision
+    )
+    snapshot = with_documentation_comparison(
+        root, snapshot, enabled_rules=enabled_rules, base_revision=base_revision
+    )
+    return with_tracked_texts(root, snapshot, enabled_rules=enabled_rules)

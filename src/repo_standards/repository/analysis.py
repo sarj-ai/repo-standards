@@ -21,12 +21,7 @@ from repo_standards.core.outcome import ExecutionIssue
 from repo_standards.core.rule_reviews import RuleVersion, activated_rule_ids
 from repo_standards.policy_sarj import SarjPolicy
 
-from .comparison import (
-    with_documentation_comparison,
-    with_makefile_comparison,
-    with_migration_comparison,
-    with_tracked_texts,
-)
+from .comparison import with_rule_inputs
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,20 +131,13 @@ def complete_repository_analysis(
         snapshot.manifest.enabled_rules or request.enabled_rule_ids or policy.default_rule_ids,
         current_rules=frozenset(RuleVersion(rule.rule_id, rule.version) for rule in policy.rules()),
     )
-    snapshot = with_makefile_comparison(
+    snapshot = with_rule_inputs(
         root,
         snapshot,
         enabled_rules=enabled_rules,
         base_revision=request.base_revision,
         as_of=request.as_of,
     )
-    snapshot = with_migration_comparison(
-        root, snapshot, enabled_rules=enabled_rules, base_revision=request.base_revision
-    )
-    snapshot = with_documentation_comparison(
-        root, snapshot, enabled_rules=enabled_rules, base_revision=request.base_revision
-    )
-    snapshot = with_tracked_texts(root, snapshot, enabled_rules=enabled_rules)
     repository_diagnostics = policy.evaluate_repository(
         snapshot, enabled_rule_ids=frozenset(item.rule_id for item in enabled_rules)
     )
