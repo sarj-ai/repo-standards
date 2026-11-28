@@ -18,13 +18,24 @@ export function siteUrl(path: string): string {
 
 export function legacyRedirect(requestUrl: string): string | undefined {
   const url = new globalThis.URL(requestUrl);
-  if (url.hostname !== LEGACY_HOSTNAME) return undefined;
+  const oldBase = "/projects/repo-standards/";
+  const oldEngineering =
+    url.hostname === "engineering.sarj.ai" &&
+    (url.pathname === oldBase.slice(0, -1) || url.pathname.startsWith(oldBase));
+  if (url.hostname !== LEGACY_HOSTNAME && !oldEngineering) return undefined;
   const destination = new globalThis.URL(SITE_URL);
-  destination.pathname = url.pathname.startsWith(SITE_BASE_PATH)
-    ? url.pathname
-    : `${SITE_BASE_PATH}${url.pathname.slice(1)}`;
-  if (url.pathname === SITE_BASE_PATH.slice(0, -1))
+  if (
+    url.pathname === SITE_BASE_PATH.slice(0, -1) ||
+    url.pathname === oldBase.slice(0, -1)
+  ) {
     destination.pathname = SITE_BASE_PATH;
+  } else if (url.pathname.startsWith(SITE_BASE_PATH)) {
+    destination.pathname = url.pathname;
+  } else if (url.pathname.startsWith(oldBase)) {
+    destination.pathname = `${SITE_BASE_PATH}${url.pathname.slice(oldBase.length)}`;
+  } else {
+    destination.pathname = `${SITE_BASE_PATH}${url.pathname.slice(1)}`;
+  }
   destination.search = url.search;
   return destination.href;
 }

@@ -74,3 +74,33 @@ await test("the legacy hostname redirects before accessing assets", async () => 
     `${SITE_ORIGIN}${SITE_BASE_PATH}cli/?keep=two`,
   );
 });
+
+for (const path of ["", "/", "/api/catalog.json?keep=one&keep=two"]) {
+  await test(`old engineering project ${path} redirects directly to the new prefix`, () => {
+    assert.equal(
+      legacyRedirect(
+        `https://engineering.sarj.ai/projects/repo-standards${path}`,
+      ),
+      `${SITE_ORIGIN}${SITE_BASE_PATH}${path.replace(/^\//u, "")}`,
+    );
+  });
+}
+
+for (const url of [
+  "https://sarj.ai/engineering/projects/repo-standards-other/",
+  "https://sarj.ai/engineering/internal/architecture",
+  "https://sarj.ai/blog/",
+  "https://unrelated.example/engineering/projects/repo-standards/",
+  "https://engineering.sarj.ai/projects/repo-standards-other/",
+]) {
+  await test(`rejects unrelated project host or path ${url}`, async () => {
+    const response = await worker.fetch(new Request(url), {
+      ASSETS: {
+        fetch: async () => {
+          throw new Error("Must not fetch unrelated assets");
+        },
+      },
+    });
+    assert.equal(response.status, 404);
+  });
+}

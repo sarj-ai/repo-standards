@@ -105,7 +105,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: repo-standards-production
-      url: https://engineering.sarj.ai/projects/repo-standards/
+      url: https://sarj.ai/engineering/projects/repo-standards/
     defaults:
       run:
         working-directory: apps/site
